@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clips } from '../src/db/schema.js';
 import { createUser, makeFixtureVideo, makeTestApp, sessionFor, type TestApp } from './helpers.js';
@@ -169,5 +170,24 @@ describe('media serving', () => {
       expect(res.statusCode, u).toBe(404);
       expect(res.headers['cache-control'] ?? '').not.toContain('immutable');
     }
+  });
+});
+
+describe('cursor precision', () => {
+  it('pages with limit=1 through clips created within the same millisecond', async () => {
+    for (const us of ['123900', '123500', '123100']) {
+      await addClip(a.id, {}, false);
+      await t.db.execute(sql`update clips set created_at = ${`2026-03-01 00:00:00.${us}+00`}::timestamptz where id = ${`clip${String(seq).padStart(8, '0')}`}`);
+    }
+    await t.db.execute(sql`insert into clips (id, user_id, title, duration_ms, width, height, size_bytes) values ('rawnow000001', ${a.id}, 'n1', 1, 1, 1, 1), ('rawnow000002', ${a.id}, 'n2', 1, 1, 1, 1)`);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const res: { items: { id: string }[]; nextCursor: string | null } = (await get(`/api/clips?scope=feed&limit=1${cursor ? `&cursor=${cursor}` : ''}`, b.h)).json();
+      seen.push(...res.items.map((c: { id: string }) => c.id));
+      cursor = res.nextCursor;
+    } while (cursor && seen.length < 20);
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
   });
 });

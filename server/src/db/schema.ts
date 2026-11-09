@@ -54,7 +54,7 @@ export const clips = pgTable(
     width: integer('width').notNull(),
     height: integer('height').notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
-    createdAt: ts('created_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
   },
   (t) => [
     index('clips_created_idx').on(t.createdAt.desc(), t.id.desc()),

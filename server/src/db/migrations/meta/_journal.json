@@ -15,6 +15,13 @@
       "when": 1794255963195,
       "tag": "0001_giant_black_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794256347739,
+      "tag": "0002_clips_created_at_ms",
+      "breakpoints": true
     }
   ]
 }

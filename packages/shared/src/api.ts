@@ -84,3 +84,21 @@ export interface Clip {
   videoUrl: string;
   thumbnailUrl: string;
 }
+
+export interface ClipList {
+  items: Clip[];
+  nextCursor: string | null;
+}
+
+export interface GameCount {
+  gameName: string;
+  steamAppId: number | null;
+  count: number;
+}
+
+export interface UpdateClipRequest {
+  title?: string;
+  visibility?: Visibility;
+  gameName?: string | null;
+  steamAppId?: number | null;
+}

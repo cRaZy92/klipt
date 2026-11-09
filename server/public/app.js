@@ -43,7 +43,7 @@
   }
 
   function safeNext(n) {
-    return typeof n === 'string' && /^\/(?![\/\\])[^\\\u0000-\u001f]*$/.test(n) ? n : '/';
+    return typeof n === 'string' && /^\/(?![\/\\])[\u0020-\u005b\u005d-\u007e]*$/.test(n) ? n : '/';
   }
 
   async function copy(text) {

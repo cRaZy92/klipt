@@ -20,12 +20,12 @@ export function AdminPage(props: { user: AuthUser; stats: AdminStats; invites: I
       <button type="button" class="btn primary" data-action="create-invite">Create invite</button>
       <ul class="rows plain" id="invites">
         {props.invites.map((i) => (
-          <li class="row" data-code={i.code}>
+          <li class="row" data-code={e(i.code)}>
             <div class="row-main">
               <code class="url">{e(i.url)}</code>
               <div class="meta"><span>Expires {e(new Date(i.expiresAt).toISOString().slice(0, 10))}</span></div>
             </div>
-            <button type="button" class="btn small" data-action="copy" data-url={i.url}>Copy</button>
+            <button type="button" class="btn small" data-action="copy" data-url={e(i.url)}>Copy</button>
             <button type="button" class="btn small danger" data-action="revoke-invite">Revoke</button>
           </li>
         ))}

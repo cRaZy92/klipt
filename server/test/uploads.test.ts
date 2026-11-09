@@ -129,6 +129,26 @@ describe('uploads and finalize', () => {
     expect(head.status).toBe(404);
   });
 
+  it('answers 404 to tus requests for ids without an owned upload row (no store fall-through)', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture, { chunkSize: 1000, stopAfterChunks: 1 });
+    const bob = await createUser(t.db, { username: 'bob' });
+    const b = await sessionFor(t.db, bob.id, 'desktop');
+    const origin = await listenOrigin(t.app);
+    const sidecar = join(t.dataDir, 'tus', `${uploadId}.json`);
+    const del = await fetch(`${origin}/api/uploads/${uploadId}.json`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${b.token}`, 'tus-resumable': '1.0.0' },
+    });
+    expect(del.status).toBe(404);
+    expect(existsSync(sidecar)).toBe(true);
+    const own = await fetch(`${origin}/api/uploads/${uploadId}.json`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}`, 'tus-resumable': '1.0.0' },
+    });
+    expect(own.status).toBe(404);
+    expect(existsSync(sidecar)).toBe(true);
+  });
+
   it('rejects a non-video with 422 and cleans up', async () => {
     const { uploadId } = await tusUpload(t.app, token, Buffer.from('hello, I am not a video '.repeat(50)));
     const res = await finalize(uploadId);

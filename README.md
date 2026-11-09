@@ -1,6 +1,6 @@
 # Klipt
 
-Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, upload game clips from the desktop app or the website, browse a shared feed, and paste share links into Discord, where they show up as playable embeds. Everything runs as one Docker Compose stack (Postgres plus the Klipt server) that you host yourself.
+Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, upload game clips from the desktop app, browse a shared feed, and paste share links into Discord, where they show up as playable embeds. Everything runs as one Docker Compose stack (Postgres plus the Klipt server) that you host yourself.
 
 ## Deploy on Dokploy
 

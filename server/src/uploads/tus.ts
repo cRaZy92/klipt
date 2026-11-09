@@ -80,10 +80,12 @@ export async function mountTus(
     async onIncomingRequest(req, uploadId) {
       const user = userOf(req);
       if (!user) throw { status_code: 401, body: 'Unauthorized\n' };
-      if (uploadId) {
-        const [row] = await db.select().from(uploads).where(eq(uploads.id, uploadId));
-        // Unknown ids fall through to tus (404); other users' uploads look nonexistent.
-        if (row && row.userId !== user.id) throw { status_code: 404, body: 'Not found\n' };
+      // POST creates a new upload (its fresh id has no row yet). Every other method must target an
+      // unfinished upload the caller owns; anything else (unknown ids, other users' uploads,
+      // finalized tombstones, sidecar names like `<id>.json`) never reaches the file store.
+      if (req.method !== 'POST') {
+        const [row] = uploadId ? await db.select().from(uploads).where(eq(uploads.id, uploadId)) : [];
+        if (!row || row.userId !== user.id || row.clipId) throw { status_code: 404, body: 'Not found\n' };
       }
     },
     async onUploadCreate(req, upload) {

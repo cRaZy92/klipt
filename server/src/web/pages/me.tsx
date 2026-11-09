@@ -21,8 +21,8 @@ function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element
           <span>{relativeDate(clip.createdAt)}</span>
         </div>
         <div class="actions">
-          <button type="button" class="btn small" data-action="copy" data-url={`${props.baseUrl}/c/${clip.id}`}>Copy link</button>
-          <button type="button" class="btn small" data-action="rename" data-title={clip.title}>Rename</button>
+          <button type="button" class="btn small" data-action="copy" data-url={e(`${props.baseUrl}/c/${clip.id}`)}>Copy link</button>
+          <button type="button" class="btn small" data-action="rename" data-title={e(clip.title)}>Rename</button>
           <button type="button" class="btn small" data-action="visibility" data-visibility={clip.visibility}>
             {clip.visibility === 'feed' ? 'In feed' : 'Link only'}
           </button>

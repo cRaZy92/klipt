@@ -18,10 +18,13 @@ import { MePage } from './pages/me.js';
 import { NotFoundPage } from './pages/notFound.js';
 import { UserPage } from './pages/user.js';
 
-/** Only same-site absolute paths: one leading slash, no `//`, no backslashes, no control chars. */
+/**
+ * Only same-site absolute paths: one leading slash, no `//`, no backslashes, and printable ASCII
+ * only (a non-ASCII or control character would make the Location header invalid).
+ */
 export function safeNext(next: unknown): string {
   if (typeof next !== 'string') return '/';
-  if (!/^\/(?![/\\])[^\\\x00-\x1f]*$/.test(next)) return '/';
+  if (!/^\/(?![/\\])[\x20-\x5b\x5d-\x7e]*$/.test(next)) return '/';
   return next;
 }
 

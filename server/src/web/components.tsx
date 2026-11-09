@@ -72,11 +72,11 @@ export function GameFilter(props: { games: GameCount[]; active?: string; basePat
       {props.games.map((g) => (
         <a
           class={`chip${props.active === g.gameName ? ' active' : ''}`}
-          href={href(props.basePath, { game: g.gameName })}
-          title={g.gameName}
+          href={e(href(props.basePath, { game: g.gameName }))}
+          title={e(g.gameName)}
         >
           {g.steamAppId ? (
-            <img src={steamHeader(g.steamAppId)} alt={g.gameName} loading="lazy" height="28" />
+            <img src={steamHeader(g.steamAppId)} alt={e(g.gameName)} loading="lazy" height="28" />
           ) : (
             e(g.gameName)
           )}
@@ -90,7 +90,7 @@ export function Pager(props: { nextCursor: string | null; basePath: string; game
   if (!props.nextCursor) return '';
   return (
     <div class="pager">
-      <a class="btn" href={href(props.basePath, { game: props.game, cursor: props.nextCursor })}>
+      <a class="btn" href={e(href(props.basePath, { game: props.game, cursor: props.nextCursor }))}>
         Older clips
       </a>
     </div>

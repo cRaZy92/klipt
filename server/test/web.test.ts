@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { clips, invites } from '../src/db/schema.js';
 import { createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
+import { safeNext } from '../src/web/routes.js';
 
 let t: TestApp;
 let seq = 0;
@@ -61,6 +62,27 @@ describe('web pages', () => {
       const res = await get(`/login?next=${encodeURIComponent(bad)}`);
       expect(res.body).toContain('data-next="/"');
     }
+  });
+
+  it('drops non-ASCII and non-printable next paths instead of failing the redirect', async () => {
+    expect(safeNext('/u/alice?game=CS2&x=1')).toBe('/u/alice?game=CS2&x=1');
+    for (const bad of ['/€', '/caf\u00e9', '/a\x7fb', '/a\u2028b']) expect(safeNext(bad), JSON.stringify(bad)).toBe('/');
+    const a = await mk('alice');
+    const res = await get('/login?next=%2F%E2%82%AC', a.cookie);
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('/');
+  });
+
+  it('escapes & in attributes so user strings round-trip', async () => {
+    const a = await mk('alice');
+    await addClip(a.u.id, { title: 'R&amp;D', gameName: 'A&amp;B', steamAppId: 730 });
+    const body = (await get('/me', a.cookie)).body;
+    expect(body).toContain('data-title="R&amp;amp;D"');
+    expect(body).toContain('title="A&amp;amp;B"');
+    expect(body).toContain('alt="A&amp;amp;B"');
+    const adm = await mk('boss', true);
+    await t.db.insert(invites).values({ code: 'x&amp;y', createdBy: adm.u.id, expiresAt: new Date(Date.now() + 1e6) });
+    expect((await get(`/invite/${encodeURIComponent('x&amp;y')}`)).body).toContain('value="x&amp;amp;y"');
   });
 
   it('shows feed clips but not link-only clips', async () => {

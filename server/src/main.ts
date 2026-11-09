@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   const db = await createDb(config.databaseUrl);
   await runMigrations(db);
   await ensureAdmin(db, config);
-  const app = await buildApp({ config, db });
+  const app = await buildApp({ config, db, logger: true });
 
   const cleanup = async () => {
     try {

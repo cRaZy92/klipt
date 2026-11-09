@@ -11,7 +11,7 @@ export interface AppDeps {
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ trustProxy: deps.config.trustProxyHops });
+  const app = Fastify({ trustProxy: (_addr: string, hop: number) => hop < deps.config.trustProxyHops });
   app.decorate('config', deps.config);
   app.decorate('db', deps.db);
   await registerAuth(app);

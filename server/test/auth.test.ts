@@ -43,6 +43,21 @@ describe('auth', () => {
     expect((await login('adam', 'wrong')).statusCode).toBe(429);
   });
 
+  it('cannot bypass the login rate limit by forging the leftmost X-Forwarded-For entry', async () => {
+    const codes: number[] = [];
+    for (let i = 1; i <= 11; i++) {
+      const res = await t.app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers: { 'x-forwarded-for': `1.2.3.${i}, 203.0.113.7` },
+        payload: { username: 'adam', password: 'wrong', client: 'web' },
+      });
+      codes.push(res.statusCode);
+    }
+    expect(codes.slice(0, 10).every((c) => c === 401)).toBe(true);
+    expect(codes[10]).toBe(429);
+  });
+
   it('does not rate limit other routes', async () => {
     for (let i = 0; i < 15; i++) {
       expect((await t.app.inject({ method: 'GET', url: '/api/health' })).statusCode).toBe(200);

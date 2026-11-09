@@ -9,6 +9,7 @@ describe('loadConfig', () => {
     expect(c.dataDir).toBe('/data');
     expect(c.maxUploadBytes).toBe(2048 * 1024 * 1024);
     expect(c.secureCookies).toBe(true);
+    expect(c.trustProxyHops).toBe(1);
   });
 
   it('uses insecure cookies for http BASE_URL and reads overrides', () => {
@@ -16,6 +17,7 @@ describe('loadConfig', () => {
       BASE_URL: 'http://localhost:3000',
       DATABASE_URL: 'postgres://x',
       PORT: '8080',
+      TRUST_PROXY_HOPS: '2',
       MAX_UPLOAD_MB: '10',
       DATA_DIR: '/tmp/d',
       ADMIN_USERNAME: 'root',
@@ -23,6 +25,7 @@ describe('loadConfig', () => {
     });
     expect(c.secureCookies).toBe(false);
     expect(c.port).toBe(8080);
+    expect(c.trustProxyHops).toBe(2);
     expect(c.maxUploadBytes).toBe(10 * 1024 * 1024);
     expect(c.dataDir).toBe('/tmp/d');
     expect(c.adminUsername).toBe('root');

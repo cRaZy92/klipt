@@ -57,3 +57,30 @@ export interface AdminStats {
   clips: number;
   storageBytes: number;
 }
+
+export type Visibility = 'feed' | 'link';
+
+export interface FinalizeRequest {
+  uploadId: string;
+  title: string;
+  gameName?: string | null;
+  steamAppId?: number | null;
+  visibility?: Visibility;
+}
+
+export interface Clip {
+  id: string;
+  title: string;
+  gameName: string | null;
+  steamAppId: number | null;
+  visibility: Visibility;
+  durationMs: number;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  createdAt: string;
+  owner: { username: string };
+  shareUrl: string;
+  videoUrl: string;
+  thumbnailUrl: string;
+}

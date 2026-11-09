@@ -104,3 +104,46 @@ export async function makeFixtureVideo(
   });
   return out;
 }
+
+/**
+ * Starts the app on an ephemeral loopback port (once) and returns its origin.
+ * @tus/server speaks raw node req/res; app.inject hangs on streamed PATCH bodies, so tus tests use real HTTP.
+ */
+export async function listenOrigin(app: FastifyInstance): Promise<string> {
+  if (!app.server.listening) await app.listen({ port: 0, host: '127.0.0.1' });
+  const addr = app.server.address();
+  if (!addr || typeof addr === 'string') throw new Error('app is not listening on a TCP port');
+  return `http://127.0.0.1:${addr.port}`;
+}
+
+/** Uploads `bytes` over the tus 1.0 protocol (POST create, then PATCH chunks) against a real listening server. */
+export async function tusUpload(
+  app: FastifyInstance,
+  token: string,
+  bytes: Buffer,
+  opts: { chunkSize?: number; stopAfterChunks?: number } = {},
+): Promise<{ uploadId: string; location: string }> {
+  const { chunkSize = 256 * 1024, stopAfterChunks = Infinity } = opts;
+  const origin = await listenOrigin(app);
+  const auth = { authorization: `Bearer ${token}`, 'tus-resumable': '1.0.0' };
+  const created = await fetch(`${origin}/api/uploads`, {
+    method: 'POST',
+    headers: { ...auth, 'upload-length': String(bytes.length) },
+  });
+  if (created.status !== 201) throw new Error(`tus create failed: ${created.status} ${await created.text()}`);
+  const location = created.headers.get('location')!;
+  const url = `${origin}${new URL(location).pathname}`;
+  const uploadId = url.split('/').pop()!;
+  let offset = 0;
+  for (let i = 0; i < stopAfterChunks && offset < bytes.length; i++) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { ...auth, 'content-type': 'application/offset+octet-stream', 'upload-offset': String(offset) },
+      body: new Uint8Array(chunk),
+    });
+    if (res.status !== 204) throw new Error(`tus patch failed: ${res.status} ${await res.text()}`);
+    offset += chunk.length;
+  }
+  return { uploadId, location };
+}

@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DesktopLoginResponse, Me, SessionInfo } from '@klipt/shared';
 import { invites, sessions, users } from '../db/schema.js';
-import { authRateLimit, requireUser, SESSION_COOKIE } from './plugin.js';
+import { authRateLimit, requireUser, SESSION_COOKIE, setSessionCookie } from './plugin.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { createSession, revokeSession } from './sessions.js';
 
@@ -49,13 +49,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const body: DesktopLoginResponse = { token, me };
       return body;
     }
-    reply.setCookie(SESSION_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      path: '/',
-      secure: config.secureCookies,
-      maxAge: 30 * 24 * 60 * 60,
-    });
+    setSessionCookie(reply, token, config);
     return me;
   });
 
@@ -100,13 +94,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const { token } = await createSession(db, user.id, 'web', 'Web');
-    reply.setCookie(SESSION_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      path: '/',
-      secure: config.secureCookies,
-      maxAge: 30 * 24 * 60 * 60,
-    });
+    setSessionCookie(reply, token, config);
     return toMe(user);
   });
 

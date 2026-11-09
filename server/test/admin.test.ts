@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { ensureAdmin } from '../src/admin/bootstrap.js';
 import { createTestDb } from '../src/db/client.js';
-import { clips, invites, users } from '../src/db/schema.js';
+import { clips, invites, sessions, users } from '../src/db/schema.js';
 import { createUser, loginAs, makeTestApp, sessionFor, type TestApp } from './helpers.js';
 
 describe('ensureAdmin', () => {
@@ -158,5 +158,15 @@ describe('admin + registration', () => {
     expect((await t.app.inject({ url: '/api/me', headers: web.headers })).statusCode).toBe(401);
     expect((await t.app.inject({ url: '/api/me', headers: desk.headers })).statusCode).toBe(401);
     await expect(loginAs(t.app, 'victim', 'password123')).rejects.toThrow('401');
+    expect(await t.db.select().from(sessions).where(eq(sessions.userId, u.id))).toHaveLength(0);
+    const re = await t.app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${u.id}`,
+      headers: adminHeaders,
+      payload: { disabled: false },
+    });
+    expect(re.statusCode).toBe(204);
+    expect((await t.app.inject({ url: '/api/me', headers: web.headers })).statusCode).toBe(401);
+    expect((await t.app.inject({ url: '/api/me', headers: desk.headers })).statusCode).toBe(401);
   });
 });

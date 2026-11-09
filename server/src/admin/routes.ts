@@ -76,13 +76,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const parsed = patchBody.safeParse(req.body);
     if (!parsed.success || !z.uuid().safeParse(id).success) return reply.code(400).send({ error: 'invalid_request' });
     if (id === req.user!.id) return reply.code(400).send({ error: 'cannot_disable_self' });
-    const updated = await db
-      .update(users)
-      .set({ disabledAt: parsed.data.disabled ? new Date() : null })
-      .where(eq(users.id, id))
-      .returning({ id: users.id });
-    if (updated.length === 0) return reply.code(404).send({ error: 'not_found' });
-    if (parsed.data.disabled) await revokeAllForUser(db, id);
+    const found = await db.transaction(async (tx) => {
+      const updated = await tx
+        .update(users)
+        .set({ disabledAt: parsed.data.disabled ? new Date() : null })
+        .where(eq(users.id, id))
+        .returning({ id: users.id });
+      if (updated.length === 0) return false;
+      if (parsed.data.disabled) await revokeAllForUser(tx, id);
+      return true;
+    });
+    if (!found) return reply.code(404).send({ error: 'not_found' });
     return reply.code(204).send();
   });
 

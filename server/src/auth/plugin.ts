@@ -5,6 +5,16 @@ import { resolveToken, type AuthUser } from './sessions.js';
 
 export const SESSION_COOKIE = 'klipt_session';
 
+export function setSessionCookie(reply: FastifyReply, token: string, config: { secureCookies: boolean }): void {
+  reply.setCookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: config.secureCookies,
+    maxAge: 30 * 24 * 60 * 60,
+  });
+}
+
 /** Per-route rate limit config: `{ config: { rateLimit: authRateLimit } }` (login, register). */
 export const authRateLimit = { max: 10, timeWindow: '1 minute' } as const;
 

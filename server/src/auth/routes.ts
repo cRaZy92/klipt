@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DesktopLoginResponse, Me, SessionInfo } from '@klipt/shared';
 import { invites, sessions, users } from '../db/schema.js';
 import { authRateLimit, requireUser, SESSION_COOKIE, setSessionCookie } from './plugin.js';
 import { hashPassword, verifyPassword } from './passwords.js';
-import { createSession, revokeSession } from './sessions.js';
+import { activeInvite } from '../admin/queries.js';
+import { createSession, listSessions, revokeSession } from './sessions.js';
 
 const registerBody = z.object({
   inviteCode: z.string().min(1).max(100),
@@ -75,7 +76,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           .update(invites)
           .set({ usedAt: now })
           .where(
-            and(eq(invites.code, inviteCode), isNull(invites.usedBy), isNull(invites.revokedAt), gt(invites.expiresAt, now)),
+            and(eq(invites.code, inviteCode), activeInvite(now)),
           )
           .returning({ code: invites.code });
         if (claimed.length === 0) throw new Fail(400, 'invalid_invite');
@@ -106,17 +107,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/me', { preHandler: requireUser }, async (req): Promise<Me> => toMe(req.user!));
 
-  app.get('/api/auth/sessions', { preHandler: requireUser }, async (req): Promise<SessionInfo[]> => {
-    const rows = await db.select().from(sessions).where(eq(sessions.userId, req.user!.id)).orderBy(sessions.createdAt);
-    return rows.map((s) => ({
-      id: s.id,
-      kind: s.kind,
-      label: s.label,
-      createdAt: s.createdAt.toISOString(),
-      lastUsedAt: s.lastUsedAt.toISOString(),
-      current: s.id === req.user!.sessionId,
-    }));
-  });
+  app.get('/api/auth/sessions', { preHandler: requireUser }, async (req): Promise<SessionInfo[]> =>
+    listSessions(db, req.user!),
+  );
 
   app.delete('/api/auth/sessions/:id', { preHandler: requireUser }, async (req, reply) => {
     const { id } = req.params as { id: string };

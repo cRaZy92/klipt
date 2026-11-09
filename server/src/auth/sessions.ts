@@ -1,3 +1,4 @@
+import type { SessionInfo } from '@klipt/shared';
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
@@ -73,4 +74,16 @@ export async function revokeSession(db: Db, sessionId: string): Promise<void> {
 
 export async function revokeAllForUser(db: Db, userId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.userId, userId));
+}
+
+export async function listSessions(db: Db, user: AuthUser): Promise<SessionInfo[]> {
+  const rows = await db.select().from(sessions).where(eq(sessions.userId, user.id)).orderBy(sessions.createdAt);
+  return rows.map((s) => ({
+    id: s.id,
+    kind: s.kind,
+    label: s.label,
+    createdAt: s.createdAt.toISOString(),
+    lastUsedAt: s.lastUsedAt.toISOString(),
+    current: s.id === user.sessionId,
+  }));
 }

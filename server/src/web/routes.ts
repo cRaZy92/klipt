@@ -2,10 +2,11 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { AdminUser, Invite, SessionInfo } from '@klipt/shared';
-import { clips, invites, sessions, users } from '../db/schema.js';
+import { getAdminStats, isInviteActive, listActiveInvites, listAdminUsers } from '../admin/queries.js';
+import { listSessions } from '../auth/sessions.js';
+import { users } from '../db/schema.js';
 import { listClips, listGames, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
@@ -79,11 +80,8 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/invite/:code', async (req, reply) => {
     const { code } = req.params as { code: string };
-    const [row] = await db
-      .select({ code: invites.code })
-      .from(invites)
-      .where(and(eq(invites.code, code.slice(0, 100)), isNull(invites.usedBy), isNull(invites.revokedAt), gt(invites.expiresAt, new Date())));
-    return html(reply, InvitePage({ code, valid: !!row }) as string);
+    const valid = await isInviteActive(db, code.slice(0, 100));
+    return html(reply, InvitePage({ code, valid }) as string);
   });
 
   app.get('/', async (req, reply) => {
@@ -108,59 +106,17 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     if (!guard(req, reply)) return reply;
     const user = req.user!;
     const data = await load(req, 'mine');
-    const rows = await db.select().from(sessions).where(eq(sessions.userId, user.id)).orderBy(sessions.createdAt);
-    const sessionInfos: SessionInfo[] = rows.map((s) => ({
-      id: s.id,
-      kind: s.kind,
-      label: s.label,
-      createdAt: s.createdAt.toISOString(),
-      lastUsedAt: s.lastUsedAt.toISOString(),
-      current: s.id === user.sessionId,
-    }));
+    const sessionInfos = await listSessions(db, user);
     return html(reply, MePage({ user, ...data, sessions: sessionInfos, baseUrl: config.baseUrl }) as string);
   });
 
   app.get('/admin', async (req, reply) => {
     if (!guard(req, reply)) return reply;
     if (!req.user!.isAdmin) return notFound(req, reply);
-    const [u] = await db.select({ n: sql<number>`count(*)::int` }).from(users);
-    const [c] = await db
-      .select({ n: sql<number>`count(*)::int`, bytes: sql<number>`coalesce(sum(${clips.sizeBytes}), 0)::float8` })
-      .from(clips);
-    const inviteRows = await db
-      .select()
-      .from(invites)
-      .where(and(isNull(invites.usedBy), isNull(invites.revokedAt), gt(invites.expiresAt, new Date())))
-      .orderBy(invites.createdAt);
-    const userRows = await db
-      .select({
-        id: users.id,
-        username: users.username,
-        isAdmin: users.isAdmin,
-        disabledAt: users.disabledAt,
-        createdAt: users.createdAt,
-        clipCount: sql<number>`count(${clips.id})::int`,
-      })
-      .from(users)
-      .leftJoin(clips, eq(clips.userId, users.id))
-      .groupBy(users.id)
-      .orderBy(users.createdAt);
-    const inviteList: Invite[] = inviteRows.map((i) => ({
-      code: i.code,
-      url: `${config.baseUrl}/invite/${i.code}`,
-      expiresAt: i.expiresAt.toISOString(),
-    }));
-    const userList: AdminUser[] = userRows.map((r) => ({
-      id: r.id,
-      username: r.username,
-      isAdmin: r.isAdmin,
-      disabled: r.disabledAt !== null,
-      clipCount: r.clipCount,
-      createdAt: r.createdAt.toISOString(),
-    }));
+    const [stats, inviteList, userList] = await Promise.all([getAdminStats(db), listActiveInvites(db, config.baseUrl), listAdminUsers(db)]);
     return html(
       reply,
-      AdminPage({ user: req.user!, stats: { users: u!.n, clips: c!.n, storageBytes: Number(c!.bytes) }, invites: inviteList, users: userList }) as string,
+      AdminPage({ user: req.user!, stats, invites: inviteList, users: userList }) as string,
     );
   });
 

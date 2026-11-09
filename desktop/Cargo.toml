@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["recorder-obs"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

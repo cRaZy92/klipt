@@ -1,0 +1,23 @@
+[package]
+name = "klipt-recorder"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Klipt's libobs recording helper: replay buffer over a JSON-lines protocol"
+publish = false
+
+[[bin]]
+name = "klipt-recorder"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+libloading = "0.9.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[build-dependencies]
+bindgen = "0.73.2"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_LibraryLoader", "Win32_UI_HiDpi"] }

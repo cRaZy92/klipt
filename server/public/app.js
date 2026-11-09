@@ -112,6 +112,7 @@
       } else if (action === 'delete') {
         if (!confirm('Delete this clip? This cannot be undone.')) return;
         await api('DELETE', '/api/clips/' + clipRow.dataset.clipId);
+        if (btn.dataset.redirect) { location.assign(safeNext(btn.dataset.redirect)); return; }
         clipRow.remove();
         toast('Deleted');
       } else if (action === 'revoke-session') {

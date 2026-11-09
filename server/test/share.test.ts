@@ -60,4 +60,18 @@ describe('share page', () => {
       expect(res.body).toContain("doesn't exist or was deleted");
     }
   });
+
+  it('shows Delete to the owner and admins only', async () => {
+    const owner = await createUser(t.db, { username: 'erin' });
+    const admin = await createUser(t.db, { username: 'root', isAdmin: true });
+    const other = await createUser(t.db, { username: 'frank' });
+    await addClip(owner.id, 'shareclip005');
+    const view = async (userId?: string) =>
+      (await t.app.inject({ method: 'GET', url: '/c/shareclip005', headers: userId ? { cookie: (await sessionFor(t.db, userId)).cookie } : {} })).body;
+    const deleteButton = /<div[^>]*data-clip-id="shareclip005"[^>]*>[\s\S]*data-action="delete"[^>]*data-redirect="\/"/;
+    expect(await view(owner.id)).toMatch(deleteButton);
+    expect(await view(admin.id)).toMatch(deleteButton);
+    expect(await view(other.id)).not.toContain('data-action="delete"');
+    expect(await view()).not.toContain('data-action="delete"');
+  });
 });

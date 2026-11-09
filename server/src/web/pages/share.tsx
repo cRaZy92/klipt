@@ -27,7 +27,7 @@ export function shareHead(clip: Clip): string {
   ].join('\n');
 }
 
-export function SharePage(props: { user: AuthUser | null; clip: Clip }): JSX.Element {
+export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete: boolean }): JSX.Element {
   const { clip } = props;
   return (
     <Layout title={clip.title} user={props.user} head={shareHead(clip)}>
@@ -45,7 +45,14 @@ export function SharePage(props: { user: AuthUser | null; clip: Clip }): JSX.Ele
           {clip.gameName ? <span> · {e(clip.gameName)}</span> : ''}
           <span> · {clip.createdAt.slice(0, 10)}</span>
         </p>
-        <button type="button" class="btn" data-action="copy" data-url={e(clip.shareUrl)}>Copy link</button>
+        <div class="actions" data-clip-id={e(clip.id)}>
+          <button type="button" class="btn" data-action="copy" data-url={e(clip.shareUrl)}>Copy link</button>
+          {props.canDelete ? (
+            <button type="button" class="btn danger" data-action="delete" data-redirect="/">Delete</button>
+          ) : (
+            ''
+          )}
+        </div>
       </div>
     </Layout>
   );

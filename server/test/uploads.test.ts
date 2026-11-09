@@ -41,7 +41,36 @@ describe('uploads and finalize', () => {
     expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.mp4`))).toBe(true);
     expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.jpg`))).toBe(true);
     expect(await tusFiles()).toEqual([]);
+    expect(await t.db.select({ id: uploads.id, clipId: uploads.clipId }).from(uploads)).toEqual([{ id: uploadId, clipId: clip.id }]);
+  });
+
+  it('a repeated finalize after success returns the same clip with 200 (lost-response retry)', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    const first = await finalize(uploadId, { gameName: 'Doom' });
+    expect(first.statusCode).toBe(201);
+    const again = await finalize(uploadId, { title: 'Different title' });
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toEqual(first.json());
+    const [{ n }] = await t.db.select({ n: count() }).from(clips);
+    expect(n).toBe(1);
+    const bob = await createUser(t.db, { username: 'bob' });
+    const b = await sessionFor(t.db, bob.id, 'desktop');
+    expect((await finalize(uploadId, {}, b.headers)).statusCode).toBe(404);
+    const del = await t.app.inject({ method: 'DELETE', url: `/api/clips/${first.json().id}`, headers });
+    expect(del.statusCode).toBe(204);
     expect(await t.db.select().from(uploads)).toHaveLength(0);
+    expect((await finalize(uploadId)).statusCode).toBe(404);
+  });
+
+  it('removes finalized tombstones after the max age', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    expect((await finalize(uploadId)).statusCode).toBe(201);
+    const now = Date.now();
+    expect(await cleanupStaleUploads(t.db, t.dataDir, new Date(now + 3600_000))).toBe(0);
+    expect(await t.db.select().from(uploads)).toHaveLength(1);
+    expect(await cleanupStaleUploads(t.db, t.dataDir, new Date(now + 25 * 3600_000))).toBe(1);
+    expect(await t.db.select().from(uploads)).toHaveLength(0);
+    expect((await finalize(uploadId)).statusCode).toBe(404);
   });
 
   it('rejects unauthenticated uploads with 401', async () => {
@@ -175,11 +204,18 @@ describe('uploads and finalize', () => {
   it('is race-safe: concurrent finalizes of one upload yield one clip, never a 422', async () => {
     const { uploadId } = await tusUpload(t.app, token, fixture);
     const results = await Promise.all([finalize(uploadId), finalize(uploadId), finalize(uploadId)]);
-    const codes = results.map((r) => r.statusCode).sort();
-    expect(codes.filter((c) => c === 201)).toHaveLength(1);
-    for (const c of codes.filter((c) => c !== 201)) expect([404, 409]).toContain(c);
+    const created = results.filter((r) => r.statusCode === 201);
+    expect(created).toHaveLength(1);
+    const clipId = created[0]!.json().id;
+    for (const r of results.filter((r) => r.statusCode !== 201)) {
+      expect([200, 409]).toContain(r.statusCode);
+      if (r.statusCode === 200) expect(r.json().id).toBe(clipId);
+      else expect(r.json().error).toBe('upload_finalizing');
+    }
     const [{ n }] = await t.db.select({ n: count() }).from(clips);
     expect(n).toBe(1);
-    expect((await finalize(uploadId)).statusCode).toBe(404);
+    const retry = await finalize(uploadId);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().id).toBe(clipId);
   });
 });

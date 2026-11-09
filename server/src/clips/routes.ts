@@ -7,7 +7,7 @@ import type { Clip } from '@klipt/shared';
 import { clips, uploads } from '../db/schema.js';
 import fastifyStatic from '@fastify/static';
 import { requireUser } from '../auth/plugin.js';
-import { isUploadComplete, removeUpload, tusFilePath } from '../uploads/tus.js';
+import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
 import { assertPlayable, makeThumbnail, MediaError, probeVideo, remuxFaststart } from './media.js';
 import { newClipId } from './ids.js';
 import { getClip, InvalidCursorError, listClips, listGames } from './repo.js';
@@ -35,6 +35,8 @@ export function toClip(row: ClipRow, owner: { username: string }, baseUrl: strin
 }
 
 const CLAIM_TTL_MS = 30 * 60 * 1000;
+
+class AlreadyFinalizedError extends Error {}
 
 const finalizeBody = z.object({
   uploadId: z.string().min(1).max(128),
@@ -141,11 +143,23 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const body = parsed.data;
     const user = req.user!;
 
-    const [owned] = await db
-      .select({ id: uploads.id })
-      .from(uploads)
-      .where(and(eq(uploads.id, body.uploadId), eq(uploads.userId, user.id)));
+    const ownedUpload = async () => {
+      const [row] = await db
+        .select({ id: uploads.id, clipId: uploads.clipId })
+        .from(uploads)
+        .where(and(eq(uploads.id, body.uploadId), eq(uploads.userId, user.id)));
+      return row;
+    };
+    // A finalized upload is kept as a tombstone, so a client that lost the 201 can retry and learn its clip.
+    const sendFinalized = async (clipId: string) => {
+      const found = await getClip(db, clipId);
+      if (!found) return reply.code(404).send({ error: 'not_found' });
+      return reply.code(200).send(toClip(found.clip, found.owner, config.baseUrl));
+    };
+
+    const owned = await ownedUpload();
     if (!owned) return reply.code(404).send({ error: 'not_found' });
+    if (owned.clipId) return sendFinalized(owned.clipId);
 
     // Atomically claim the upload so concurrent/retried finalizes can't both process it.
     const [upload] = await db
@@ -154,11 +168,17 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       .where(
         and(
           eq(uploads.id, owned.id),
+          isNull(uploads.clipId),
           or(isNull(uploads.finalizingAt), lt(uploads.finalizingAt, new Date(Date.now() - CLAIM_TTL_MS))),
         ),
       )
       .returning();
-    if (!upload) return reply.code(409).send({ error: 'upload_finalizing' });
+    if (!upload) {
+      const now = await ownedUpload();
+      if (now?.clipId) return sendFinalized(now.clipId);
+      if (!now) return reply.code(404).send({ error: 'not_found' });
+      return reply.code(409).send({ error: 'upload_finalizing' });
+    }
     const release = () =>
       db.update(uploads).set({ finalizingAt: null }).where(eq(uploads.id, upload.id)).catch(() => {});
 
@@ -187,24 +207,40 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       const { size } = await stat(tmpVideo);
       await rename(tmpVideo, videoPath);
       await rename(tmpThumb, thumbPath);
-      [row] = await db
-        .insert(clips)
-        .values({
-          id,
-          userId: user.id,
-          title: body.title,
-          gameName: body.gameName ?? null,
-          steamAppId: body.steamAppId ?? null,
-          visibility: body.visibility ?? 'feed',
-          durationMs: info.durationMs,
-          width: info.width,
-          height: info.height,
-          sizeBytes: size,
-        })
-        .returning() as [ClipRow];
+      // Insert the clip and turn the upload into its tombstone in one step; if another finalize
+      // (one that took over a stale claim) got there first, roll back and answer with its clip.
+      row = await db.transaction(async (tx) => {
+        const [inserted] = (await tx
+          .insert(clips)
+          .values({
+            id,
+            userId: user.id,
+            title: body.title,
+            gameName: body.gameName ?? null,
+            steamAppId: body.steamAppId ?? null,
+            visibility: body.visibility ?? 'feed',
+            durationMs: info.durationMs,
+            width: info.width,
+            height: info.height,
+            sizeBytes: size,
+          })
+          .returning()) as [ClipRow];
+        const tomb = await tx
+          .update(uploads)
+          .set({ clipId: id, finalizingAt: new Date() })
+          .where(and(eq(uploads.id, upload.id), isNull(uploads.clipId)))
+          .returning({ id: uploads.id });
+        if (tomb.length === 0) throw new AlreadyFinalizedError();
+        return inserted;
+      });
     } catch (err) {
-      // Only failures before the insert reach here, so outputs are never committed media.
+      // The insert is transactional, so outputs here are never committed media.
       await cleanOutputs();
+      if (err instanceof AlreadyFinalizedError) {
+        const now = await ownedUpload();
+        if (now?.clipId) return sendFinalized(now.clipId);
+        return reply.code(404).send({ error: 'not_found' });
+      }
       if (err instanceof MediaError) {
         await removeUpload(db, config.dataDir, upload.id).catch((e) => req.log.error(e, 'upload cleanup failed'));
         return reply.code(422).send({ error: err.code, message: mediaMessages[err.code] ?? err.message });
@@ -212,8 +248,8 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       await release();
       throw err;
     }
-    // The clip is committed; upload removal is best-effort (stale cleanup will catch leftovers).
-    await removeUpload(db, config.dataDir, upload.id).catch((e) => req.log.error(e, 'upload cleanup failed'));
+    // The clip is committed; tus file removal is best-effort (stale cleanup will catch leftovers).
+    await removeTusFiles(config.dataDir, upload.id).catch((e) => req.log.error(e, 'upload cleanup failed'));
     return reply.code(201).send(toClip(row, user, config.baseUrl));
   });
 }

@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FileStore } from '@tus/file-store';
 import { Server } from '@tus/server';
-import { eq, lt } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
@@ -47,10 +47,17 @@ export async function cleanupStaleUploads(
   now: Date,
   maxAgeMs = DAY_MS,
 ): Promise<number> {
+  const cutoff = new Date(now.getTime() - maxAgeMs);
+  // Unfinished uploads age from creation; finalized tombstones age from when they were finalized.
   const stale = await db
     .select({ id: uploads.id })
     .from(uploads)
-    .where(lt(uploads.createdAt, new Date(now.getTime() - maxAgeMs)));
+    .where(
+      or(
+        and(isNull(uploads.clipId), lt(uploads.createdAt, cutoff)),
+        and(isNotNull(uploads.clipId), lt(uploads.finalizingAt, cutoff)),
+      ),
+    );
   for (const { id } of stale) await removeUpload(db, dataDir, id);
   return stale.length;
 }

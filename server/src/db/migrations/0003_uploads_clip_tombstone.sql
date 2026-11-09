@@ -1,0 +1,2 @@
+ALTER TABLE "uploads" ADD COLUMN "clip_id" text;--> statement-breakpoint
+ALTER TABLE "uploads" ADD CONSTRAINT "uploads_clip_id_clips_id_fk" FOREIGN KEY ("clip_id") REFERENCES "public"."clips"("id") ON DELETE cascade ON UPDATE no action;

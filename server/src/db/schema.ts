@@ -37,8 +37,13 @@ export const uploads = pgTable('uploads', {
   id: text('id').primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: ts('created_at').notNull().defaultNow(),
-  /** Set while a finalize is processing this upload (claim marker; stale after a timeout). */
+  /**
+   * Set while a finalize is processing this upload (claim marker; stale after a timeout).
+   * On a tombstone (clipId set) it records when the finalize completed.
+   */
   finalizingAt: ts('finalizing_at'),
+  /** Set once finalized: the row stays as a tombstone so a retried finalize can return the clip. */
+  clipId: text('clip_id').references(() => clips.id, { onDelete: 'cascade' }),
 });
 
 export const clips = pgTable(

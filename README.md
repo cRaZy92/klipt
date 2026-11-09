@@ -1,0 +1,37 @@
+# Klipt
+
+Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, upload game clips from the desktop app or the website, browse a shared feed, and paste share links into Discord, where they show up as playable embeds. Everything runs as one Docker Compose stack (Postgres plus the Klipt server) that you host yourself.
+
+## Deploy on Dokploy
+
+1. In Dokploy, create a new **Compose** service and pick **GitHub** as the source: repository `cRaZy92/klipt`, branch `main`, compose file `docker-compose.yml`.
+2. Open the **Environment** tab and set:
+
+   | Variable | Meaning |
+   |---|---|
+   | `BASE_URL` | The public address, e.g. `https://clips.example.com`. Must be the public **https** URL, because share links and secure cookies are built from it. |
+   | `ADMIN_USERNAME` | Name of the first (admin) account. |
+   | `ADMIN_PASSWORD` | Password of the admin account (at least 8 characters). |
+   | `POSTGRES_PASSWORD` | Any long random password for the database. |
+   | `MAX_UPLOAD_MB` | Optional. Largest clip allowed, default `2048`. |
+   | `TRUST_PROXY_HOPS` | Optional. How many reverse proxies sit in front of Klipt, default `1`. Use `1` behind Dokploy/Traefik, `0` if Klipt is exposed directly with no proxy, `2` if Cloudflare is in front of Traefik. |
+
+3. Open the **Domains** tab, add your domain, and set service name `server`, port `3000`, and enable **HTTPS** (Let's Encrypt). Point the domain's DNS at your Dokploy server first.
+4. Press **Deploy**. The first build takes a few minutes.
+
+## First login
+
+Open your `BASE_URL`, sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`. The admin account is only created the first time, when there are no users yet. Changing these variables later does not change the password.
+
+## Inviting friends
+
+Klipt is invite-only. As admin, open the admin page, create an invite, and send the invite link to your friend. They pick a username and password and are in. Invites can be revoked from the same page.
+
+## Where your data lives
+
+Two Docker volumes hold everything:
+
+- `pgdata`: the database (accounts, clip info).
+- `klipt-data`: the clip files and thumbnails.
+
+Backup hint: back up both volumes together, for example with Dokploy's volume backups or `docker run --rm -v <project>_klipt-data:/d -v $PWD:/b alpine tar czf /b/klipt-data.tgz -C /d .` (and a `pg_dump` for the database).

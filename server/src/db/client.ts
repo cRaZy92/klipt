@@ -1,9 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
-import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
-import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 import * as schema from './schema.js';
 
@@ -31,6 +29,9 @@ export async function createDb(databaseUrl: string): Promise<Db> {
 }
 
 export async function createTestDb(): Promise<Db> {
+  // Dynamic imports: PGlite is a devDependency and must not load in the production image.
+  const { drizzle: drizzlePglite } = await import('drizzle-orm/pglite');
+  const { PGlite } = await import('@electric-sql/pglite');
   const db: Db = drizzlePglite(new PGlite(), { schema });
   await runMigrations(db);
   return db;

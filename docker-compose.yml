@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: klipt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: klipt
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U klipt -d klipt"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "3000"
+    volumes:
+      - klipt-data:/data
+    environment:
+      BASE_URL: ${BASE_URL:?set BASE_URL}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-2048}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      DATABASE_URL: postgres://klipt:${POSTGRES_PASSWORD}@db:5432/klipt
+
+volumes:
+  pgdata:
+  klipt-data:

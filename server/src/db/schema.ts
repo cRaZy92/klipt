@@ -37,6 +37,8 @@ export const uploads = pgTable('uploads', {
   id: text('id').primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: ts('created_at').notNull().defaultNow(),
+  /** Set while a finalize is processing this upload (claim marker; stale after a timeout). */
+  finalizingAt: ts('finalizing_at'),
 });
 
 export const clips = pgTable(

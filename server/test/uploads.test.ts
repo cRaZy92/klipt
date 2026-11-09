@@ -141,4 +141,15 @@ describe('uploads and finalize', () => {
     expect((await finalize(uploadId, { title: '   ' })).statusCode).toBe(400);
     expect((await finalize(uploadId, { title: 'x'.repeat(101) })).statusCode).toBe(400);
   });
+
+  it('is race-safe: concurrent finalizes of one upload yield one clip, never a 422', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    const results = await Promise.all([finalize(uploadId), finalize(uploadId), finalize(uploadId)]);
+    const codes = results.map((r) => r.statusCode).sort();
+    expect(codes.filter((c) => c === 201)).toHaveLength(1);
+    for (const c of codes.filter((c) => c !== 201)) expect([404, 409]).toContain(c);
+    const [{ n }] = await t.db.select({ n: count() }).from(clips);
+    expect(n).toBe(1);
+    expect((await finalize(uploadId)).statusCode).toBe(404);
+  });
 });

@@ -1,6 +1,6 @@
 import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Clip } from '@klipt/shared';
@@ -32,6 +32,8 @@ export function toClip(row: ClipRow, owner: { username: string }, baseUrl: strin
   };
 }
 
+const CLAIM_TTL_MS = 30 * 60 * 1000;
+
 const finalizeBody = z.object({
   uploadId: z.string().min(1).max(128),
   title: z.string().trim().min(1).max(100),
@@ -54,12 +56,29 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const body = parsed.data;
     const user = req.user!;
 
-    const [upload] = await db
-      .select()
+    const [owned] = await db
+      .select({ id: uploads.id })
       .from(uploads)
       .where(and(eq(uploads.id, body.uploadId), eq(uploads.userId, user.id)));
-    if (!upload) return reply.code(404).send({ error: 'not_found' });
+    if (!owned) return reply.code(404).send({ error: 'not_found' });
+
+    // Atomically claim the upload so concurrent/retried finalizes can't both process it.
+    const [upload] = await db
+      .update(uploads)
+      .set({ finalizingAt: new Date() })
+      .where(
+        and(
+          eq(uploads.id, owned.id),
+          or(isNull(uploads.finalizingAt), lt(uploads.finalizingAt, new Date(Date.now() - CLAIM_TTL_MS))),
+        ),
+      )
+      .returning();
+    if (!upload) return reply.code(409).send({ error: 'upload_finalizing' });
+    const release = () =>
+      db.update(uploads).set({ finalizingAt: null }).where(eq(uploads.id, upload.id)).catch(() => {});
+
     if (!(await isUploadComplete(config.dataDir, upload.id))) {
+      await release();
       return reply.code(409).send({ error: 'upload_incomplete' });
     }
 
@@ -73,6 +92,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const cleanOutputs = () =>
       Promise.all([videoPath, thumbPath, tmpVideo, tmpThumb].map((p) => rm(p, { force: true })));
 
+    let row: ClipRow;
     try {
       const source = tusFilePath(config.dataDir, upload.id);
       const info = await probeVideo(source);
@@ -82,7 +102,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       const { size } = await stat(tmpVideo);
       await rename(tmpVideo, videoPath);
       await rename(tmpThumb, thumbPath);
-      const [row] = await db
+      [row] = await db
         .insert(clips)
         .values({
           id,
@@ -96,16 +116,19 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
           height: info.height,
           sizeBytes: size,
         })
-        .returning();
-      await removeUpload(db, config.dataDir, upload.id);
-      return reply.code(201).send(toClip(row!, user, config.baseUrl));
+        .returning() as [ClipRow];
     } catch (err) {
+      // Only failures before the insert reach here, so outputs are never committed media.
       await cleanOutputs();
       if (err instanceof MediaError) {
-        await removeUpload(db, config.dataDir, upload.id);
+        await removeUpload(db, config.dataDir, upload.id).catch((e) => req.log.error(e, 'upload cleanup failed'));
         return reply.code(422).send({ error: err.code, message: mediaMessages[err.code] ?? err.message });
       }
+      await release();
       throw err;
     }
+    // The clip is committed; upload removal is best-effort (stale cleanup will catch leftovers).
+    await removeUpload(db, config.dataDir, upload.id).catch((e) => req.log.error(e, 'upload cleanup failed'));
+    return reply.code(201).send(toClip(row, user, config.baseUrl));
   });
 }

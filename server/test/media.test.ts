@@ -9,7 +9,7 @@ import {
   probeVideo,
   remuxFaststart,
 } from '../src/clips/media.js';
-import { makeFixtureVideo } from './helpers.js';
+import { makeCorruptVideo, makeFixtureVideo } from './helpers.js';
 
 let dir: string;
 beforeEach(async () => {
@@ -63,5 +63,36 @@ describe('media', () => {
     await makeThumbnail(src, out, 2000);
     const buf = await readFile(out);
     expect([buf[0], buf[1]]).toEqual([0xff, 0xd8]);
+  });
+
+  it('maps a non-zero ffmpeg exit on a damaged file to corrupt_video', async () => {
+    const src = await makeCorruptVideo(dir);
+    const info = await probeVideo(src);
+    expect(() => assertPlayable(info)).not.toThrow();
+    const remuxed = join(dir, 'remuxed.mp4');
+    await remuxFaststart(src, remuxed);
+    const err = await makeThumbnail(remuxed, join(dir, 't.jpg'), info.durationMs).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MediaError);
+    expect(err).toMatchObject({ code: 'corrupt_video' });
+  });
+
+  it('reports a missing binary as a non-media error', async () => {
+    const src = await makeFixtureVideo(dir);
+    const saved = { probe: process.env.FFPROBE_PATH, mpeg: process.env.FFMPEG_PATH };
+    try {
+      process.env.FFPROBE_PATH = '/nonexistent/ffprobe';
+      process.env.FFMPEG_PATH = '/nonexistent/ffmpeg';
+      const probeErr = await probeVideo(src).catch((e: unknown) => e);
+      expect(probeErr).toBeInstanceOf(Error);
+      expect(probeErr).not.toBeInstanceOf(MediaError);
+      const remuxErr = await remuxFaststart(src, join(dir, 'o.mp4')).catch((e: unknown) => e);
+      expect(remuxErr).toBeInstanceOf(Error);
+      expect(remuxErr).not.toBeInstanceOf(MediaError);
+    } finally {
+      for (const [k, v] of [['FFPROBE_PATH', saved.probe], ['FFMPEG_PATH', saved.mpeg]] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 });

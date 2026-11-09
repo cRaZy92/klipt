@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { count, eq } from 'drizzle-orm';
 import { clips, uploads } from '../src/db/schema.js';
 import { cleanupStaleUploads } from '../src/uploads/tus.js';
-import { createUser, makeFixtureVideo, listenOrigin, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
+import { createUser, makeCorruptVideo, makeFixtureVideo, listenOrigin, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
 
 let t: TestApp;
 let token: string;
@@ -110,6 +110,36 @@ describe('uploads and finalize', () => {
     expect(n).toBe(0);
     expect(await t.db.select().from(uploads)).toHaveLength(0);
     expect(await readdir(join(t.dataDir, 'clips'))).toEqual([]);
+  });
+
+  it('rejects a damaged (truncated) video with 422 corrupt_video and cleans up', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'klipt-fx-'));
+    const { uploadId } = await tusUpload(t.app, token, await readFile(await makeCorruptVideo(dir)));
+    const res = await finalize(uploadId);
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({ error: 'corrupt_video', message: "That video file is damaged and can't be played." });
+    const [{ n }] = await t.db.select({ n: count() }).from(clips);
+    expect(n).toBe(0);
+    expect(await t.db.select().from(uploads)).toHaveLength(0);
+    expect(await tusFiles()).toEqual([]);
+    expect(await readdir(join(t.dataDir, 'clips'))).toEqual([]);
+  });
+
+  it('answers 500 and keeps the upload when ffprobe is missing', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    const saved = process.env.FFPROBE_PATH;
+    process.env.FFPROBE_PATH = '/nonexistent';
+    try {
+      const res = await finalize(uploadId);
+      expect(res.statusCode).toBe(500);
+    } finally {
+      if (saved === undefined) delete process.env.FFPROBE_PATH;
+      else process.env.FFPROBE_PATH = saved;
+    }
+    const [row] = await t.db.select().from(uploads).where(eq(uploads.id, uploadId));
+    expect(row).toMatchObject({ id: uploadId, finalizingAt: null });
+    expect(existsSync(join(t.dataDir, 'tus', uploadId))).toBe(true);
+    expect((await finalize(uploadId)).statusCode).toBe(201);
   });
 
   it('rejects uploads larger than the max size with 413', async () => {

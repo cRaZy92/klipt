@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 
-export type MediaErrorCode = 'not_a_video' | 'unsupported_codec';
+export type MediaErrorCode = 'not_a_video' | 'unsupported_codec' | 'corrupt_video';
 
 export class MediaError extends Error {
   constructor(
@@ -23,12 +23,26 @@ export interface VideoInfo {
 const ffmpegBin = () => process.env.FFMPEG_PATH || 'ffmpeg';
 const ffprobeBin = () => process.env.FFPROBE_PATH || 'ffprobe';
 
+const RUN_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Runs ffmpeg/ffprobe. A non-zero exit means the tool rejected the input, so it becomes a
+ * MediaError('corrupt_video'). Anything else (spawn failure such as ENOENT/ENOSPC, a timeout
+ * kill, an output overflow) is an operational problem and stays a plain Error.
+ */
 function run(bin: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`${bin} failed: ${stderr || err.message}`));
-      else resolve(stdout);
-    });
+    execFile(
+      bin,
+      args,
+      { maxBuffer: 16 * 1024 * 1024, timeout: RUN_TIMEOUT_MS },
+      (err, stdout, stderr) => {
+        if (!err) return resolve(stdout);
+        const detail = `${bin} failed: ${stderr || err.message}`;
+        if (typeof err.code === 'number' && err.code !== 0) reject(new MediaError('corrupt_video', detail));
+        else reject(new Error(detail, { cause: err }));
+      },
+    );
   });
 }
 
@@ -41,15 +55,22 @@ interface ProbeStream {
 }
 
 export async function probeVideo(path: string): Promise<VideoInfo> {
-  let parsed: { streams?: ProbeStream[]; format?: { duration?: string } };
+  let out: string;
   try {
-    const out = await run(ffprobeBin(), [
+    out = await run(ffprobeBin(), [
       '-v', 'error',
       '-print_format', 'json',
       '-show_format',
       '-show_streams',
       path,
     ]);
+  } catch (err) {
+    // ffprobe refusing the file means it isn't a video; spawn/timeout errors propagate.
+    if (err instanceof MediaError) throw new MediaError('not_a_video', err.message);
+    throw err;
+  }
+  let parsed: { streams?: ProbeStream[]; format?: { duration?: string } };
+  try {
     parsed = JSON.parse(out);
   } catch {
     throw new MediaError('not_a_video');

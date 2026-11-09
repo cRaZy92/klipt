@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -9,6 +9,7 @@ import { createTestDb, type Db } from '../src/db/client.js';
 import { users } from '../src/db/schema.js';
 import { hashPassword } from '../src/auth/passwords.js';
 import { createSession } from '../src/auth/sessions.js';
+import { remuxFaststart } from '../src/clips/media.js';
 
 export interface TestApp {
   app: FastifyInstance;
@@ -102,6 +103,19 @@ export async function makeFixtureVideo(
       err ? reject(new Error(`ffmpeg failed: ${stderr || err.message}`)) : resolve(),
     );
   });
+  return out;
+}
+
+/**
+ * A faststart MP4 truncated to 6 KB: ffprobe still reads the header (moov is first), remux "succeeds"
+ * with an empty-ish file, but thumbnailing fails with a non-zero ffmpeg exit.
+ */
+export async function makeCorruptVideo(dir: string): Promise<string> {
+  const src = await makeFixtureVideo(dir);
+  const faststart = join(dir, 'corrupt-src-faststart.mp4');
+  await remuxFaststart(src, faststart);
+  const out = join(dir, 'corrupt-truncated.mp4');
+  await writeFile(out, (await readFile(faststart)).subarray(0, 6 * 1024));
   return out;
 }
 

@@ -47,6 +47,7 @@ const finalizeBody = z.object({
 const mediaMessages: Record<string, string> = {
   not_a_video: "That file isn't a video Klipt can play.",
   unsupported_codec: 'Klipt can only play H.264 video with AAC audio (or no audio).',
+  corrupt_video: "That video file is damaged and can't be played.",
 };
 
 export async function clipRoutes(app: FastifyInstance): Promise<void> {

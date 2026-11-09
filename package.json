@@ -1,0 +1,10 @@
+{
+  "name": "klipt",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "pnpm --filter @klipt/server test",
+    "build": "pnpm --filter @klipt/server build",
+    "dev": "pnpm --filter @klipt/server dev"
+  }
+}

@@ -32,7 +32,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-2048}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
-      DATABASE_URL: postgres://klipt:${POSTGRES_PASSWORD}@db:5432/klipt
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_URL: postgres://klipt@db:5432/klipt
 
 volumes:
   pgdata:

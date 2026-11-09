@@ -12,7 +12,7 @@ Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, up
    | `BASE_URL` | The public address, e.g. `https://clips.example.com`. Must be the public **https** URL, because share links and secure cookies are built from it. |
    | `ADMIN_USERNAME` | Name of the first (admin) account. |
    | `ADMIN_PASSWORD` | Password of the admin account (at least 8 characters). |
-   | `POSTGRES_PASSWORD` | Any long random password for the database. |
+   | `POSTGRES_PASSWORD` | Any long random password for the database. Set it once: changing it after the first deploy has no effect, because the `pgdata` volume is already initialised with the old password. |
    | `MAX_UPLOAD_MB` | Optional. Largest clip allowed, default `2048`. |
    | `TRUST_PROXY_HOPS` | Optional. How many reverse proxies sit in front of Klipt, default `1`. Use `1` behind Dokploy/Traefik, `0` if Klipt is exposed directly with no proxy, `2` if Cloudflare is in front of Traefik. |
 

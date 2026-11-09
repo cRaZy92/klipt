@@ -30,3 +30,30 @@ export interface SessionInfo {
   lastUsedAt: string;
   current: boolean;
 }
+
+export interface Invite {
+  code: string;
+  url: string;
+  expiresAt: string;
+}
+
+export interface RegisterRequest {
+  inviteCode: string;
+  username: string;
+  password: string;
+}
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  isAdmin: boolean;
+  disabled: boolean;
+  clipCount: number;
+  createdAt: string;
+}
+
+export interface AdminStats {
+  users: number;
+  clips: number;
+  storageBytes: number;
+}

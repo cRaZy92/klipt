@@ -4,6 +4,7 @@ import type { Config } from './config.js';
 import type { Db } from './db/client.js';
 import { registerAuth } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
+import { adminRoutes } from './admin/routes.js';
 
 export interface AppDeps {
   config: Config;
@@ -19,6 +20,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.get('/api/health', async (): Promise<HealthResponse> => ({ ok: true }));
 
   await authRoutes(app);
+  await adminRoutes(app);
 
   return app;
 }

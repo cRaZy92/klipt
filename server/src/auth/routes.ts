@@ -1,12 +1,19 @@
 import { randomBytes } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { DesktopLoginResponse, Me, SessionInfo } from '@klipt/shared';
-import { sessions, users } from '../db/schema.js';
+import { invites, sessions, users } from '../db/schema.js';
 import { authRateLimit, requireUser, SESSION_COOKIE } from './plugin.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { createSession, revokeSession } from './sessions.js';
+
+const registerBody = z.object({
+  inviteCode: z.string().min(1).max(100),
+  username: z.string(),
+  password: z.string().max(1024),
+});
+const USERNAME_RE = /^[A-Za-z0-9_]{3,24}$/;
 
 const loginBody = z.object({
   username: z.string().min(1).max(100),
@@ -50,6 +57,57 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       maxAge: 30 * 24 * 60 * 60,
     });
     return me;
+  });
+
+  app.post('/api/register', { config: { rateLimit: authRateLimit } }, async (req, reply) => {
+    const parsed = registerBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+    const { inviteCode, username, password } = parsed.data;
+    if (!USERNAME_RE.test(username)) return reply.code(400).send({ error: 'invalid_username' });
+    if (password.length < 8) return reply.code(400).send({ error: 'weak_password' });
+    const passwordHash = await hashPassword(password);
+
+    // Rolling back the transaction (via throw) keeps a failed registration from consuming the invite.
+    class Fail extends Error {
+      constructor(readonly status: number, readonly code: string) {
+        super(code);
+      }
+    }
+    let user: typeof users.$inferSelect;
+    try {
+      user = await db.transaction(async (tx) => {
+        const now = new Date();
+        const claimed = await tx
+          .update(invites)
+          .set({ usedAt: now })
+          .where(
+            and(eq(invites.code, inviteCode), isNull(invites.usedBy), isNull(invites.revokedAt), gt(invites.expiresAt, now)),
+          )
+          .returning({ code: invites.code });
+        if (claimed.length === 0) throw new Fail(400, 'invalid_invite');
+        const inserted = await tx
+          .insert(users)
+          .values({ username, usernameKey: username.toLowerCase(), passwordHash })
+          .onConflictDoNothing({ target: users.usernameKey })
+          .returning();
+        if (inserted.length === 0) throw new Fail(409, 'username_taken');
+        await tx.update(invites).set({ usedBy: inserted[0]!.id }).where(eq(invites.code, inviteCode));
+        return inserted[0]!;
+      });
+    } catch (e) {
+      if (e instanceof Fail) return reply.code(e.status).send({ error: e.code });
+      throw e;
+    }
+
+    const { token } = await createSession(db, user.id, 'web', 'Web');
+    reply.setCookie(SESSION_COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      secure: config.secureCookies,
+      maxAge: 30 * 24 * 60 * 60,
+    });
+    return toMe(user);
   });
 
   app.post('/api/auth/logout', async (req, reply) => {

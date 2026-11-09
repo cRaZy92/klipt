@@ -106,3 +106,10 @@ Task 10: fix round 1/5 (2 addressed, 0 open; commits 702c007..b911b81)
 Task 10: complete (commits 3d7cb7d..b911b81, review clean)
 FINAL: dispatching whole-branch review (opus), MERGE_BASE a29fe7f
 FINAL: review (opus) → 4 Important (corrupt video 500; finalize retry tombstone; admin delete on share page; .env gitignore) + 6 hardening one-liners → single fix wave dispatched, FIX_BASE b911b81
+FINAL: fix wave done (b911b81..4db02fc), 83/83; concerns: logger:true in prod; signal-killed ffmpeg → 500 retained; share-page redirect untested in browser; lost-422 retry → 404
+FINAL: scoped re-review (opus) of fix wave b911b81..4db02fc → all 10 addressed, no new Critical/Important. Verified uploads.test 15/15 at 4db02fc.
+Final: minor (deferred): release() not guarded by clip_id IS NULL (tombstone could lose finalizing_at after stale takeover + DB error)
+Final: minor (deferred): numeric ffmpeg exit from server-side fault (disk full) classed corrupt_video → upload deleted
+Final: minor (deferred): logger:true logs URLs incl. link-only share ids/invite codes (server logs only)
+Final: minor (deferred): signal-killed ffmpeg → 500 retained; lost 422 response → retry 404
+SERVER BRANCH COMPLETE at 4db02fc — PR feat/server → main pending (owner), manual browser check pending

@@ -33,7 +33,7 @@ A self-hosted alternative to Medal.tv for a small friend group. You press a hotk
   - finalize is retryable and returns the existing clip with 200
   - admin and owner can delete from the share page
   - `.env` is in `.gitignore`
-- A hardening batch from `docs/superpowers/ledgers/server-final-review-findings.md` (items 5–10) was being applied when the Linux session ended. **Check `git log feat/server`.** If items 5–10 aren't all committed, finish them TDD-style, then run one scoped re-review of the fix commits.
+- The hardening batch (items 5–10 in `docs/superpowers/ledgers/server-final-review-findings.md`) is also done. **`feat/server` is complete at `4db02fc`**: 83/83 tests pass and the scoped re-review is clean. The remaining low-priority minors are at the end of `docs/superpowers/ledgers/server-sdd-ledger.md`.
 - Still to do: open a PR `feat/server` → `main` (no `gh` CLI was available on Linux), and run the manual browser check of the website (plan Task 8, Step 5), which was never done.
 - API facts the desktop app depends on:
   - `POST /api/auth/login {username,password,client:'desktop',deviceName}` → `{token, me}`, then Bearer auth.

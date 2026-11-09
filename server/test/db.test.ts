@@ -7,6 +7,13 @@ describe('schema', () => {
     const db = await createTestDb();
     const row = { username: 'Adam', usernameKey: 'adam', passwordHash: 'x' };
     await db.insert(users).values(row);
-    await expect(db.insert(users).values({ ...row, username: 'ADAM' })).rejects.toThrow();
+    const err = await db.insert(users).values({ ...row, username: 'ADAM' }).then(
+      () => null,
+      (e: unknown) => e as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } },
+    );
+    expect(err).not.toBeNull();
+    const pgErr = err?.cause ?? err;
+    expect(pgErr?.code).toBe('23505');
+    expect(pgErr?.constraint).toBe('users_username_key_unique');
   });
 });

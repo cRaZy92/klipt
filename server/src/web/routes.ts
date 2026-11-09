@@ -5,13 +5,15 @@ import fastifyStatic from '@fastify/static';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getAdminStats, isInviteActive, listActiveInvites, listAdminUsers } from '../admin/queries.js';
+import { toClip } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
 import { users } from '../db/schema.js';
-import { listClips, listGames, InvalidCursorError, type Scope } from '../clips/repo.js';
+import { getClip, listClips, listGames, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
 import { InvitePage } from './pages/invite.js';
 import { LoginPage } from './pages/login.js';
+import { SharePage } from './pages/share.js';
 import { MePage } from './pages/me.js';
 import { NotFoundPage } from './pages/notFound.js';
 import { UserPage } from './pages/user.js';
@@ -100,6 +102,14 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     if (!owner) return notFound(req, reply);
     const data = await load(req, 'user', owner.username);
     return html(reply, UserPage({ user: req.user!, username: owner.username, ...data }) as string);
+  });
+
+  // Public: the id is the secret (link-only clips are shareable too).
+  app.get('/c/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const found = /^[A-Za-z0-9_-]{12}$/.test(id) ? await getClip(db, id) : null;
+    if (!found) return html(reply, NotFoundPage({ user: req.user, message: "This clip doesn't exist or was deleted." }) as string, 404);
+    return html(reply, SharePage({ user: req.user, clip: toClip(found.clip, found.owner, config.baseUrl) }) as string);
   });
 
   app.get('/me', async (req, reply) => {

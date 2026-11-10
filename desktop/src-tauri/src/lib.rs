@@ -1,6 +1,7 @@
 //! Klipt desktop app core. All logic lives here; the Svelte UI talks to it through Tauri commands.
 
 pub mod commands;
+pub mod editor;
 pub mod errors;
 pub mod export;
 pub mod feedback;
@@ -28,6 +29,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])));
     #[cfg(windows)]
     let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
@@ -85,6 +87,9 @@ pub fn run() {
             commands::show_in_folder,
             commands::copy_share_link,
             commands::upload_clip,
+            commands::open_editor,
+            commands::save_edit,
+            commands::export_copy,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Klipt")

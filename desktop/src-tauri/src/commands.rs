@@ -14,6 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::editor;
 use crate::errors::{AppError, Result};
 use crate::export::{self, Edit};
 use crate::ffmpeg::Tools;
@@ -36,6 +37,8 @@ pub mod events {
     /// Payload: `{ id, code, message }`. `unauthorized` means the user must log in again;
     /// the upload resumes from where it stopped when `upload_clip` is called again.
     pub const UPLOAD_FAILED: &str = "upload-failed";
+    /// Payload: `{ id, progress }`, progress 0..=1 of an "Export copy…".
+    pub const EXPORT_PROGRESS: &str = "export-progress";
 }
 
 /// Server titles are 1–100 characters.
@@ -136,12 +139,12 @@ pub fn device_name() -> String {
 // ---------------------------------------------------------------------------------------------
 // One upload per clip at a time
 
-/// Clips with an upload running. Exports of one clip share a temp file, so a clip must never be
-/// exported twice at once.
+/// Clips with an upload or an "Export copy…" running. Exports of one clip share a temp file, so
+/// a clip must never be exported twice at once, and its edit can't change mid-upload.
 #[derive(Default, Clone)]
 pub struct Uploads(Arc<Mutex<HashSet<String>>>);
 
-/// Removes the clip from [`Uploads`] when dropped, however the upload ends.
+/// Removes the clip from [`Uploads`] when dropped, however the upload (or export) ends.
 pub struct UploadGuard {
     uploads: Uploads,
     id: String,
@@ -311,6 +314,7 @@ pub fn set_clip_game(state: State<'_, AppState>, id: String, name: Option<String
 
 #[tauri::command]
 pub fn delete_clip(
+    app: AppHandle,
     state: State<'_, AppState>,
     uploads: State<'_, Uploads>,
     id: String,
@@ -319,7 +323,11 @@ pub fn delete_clip(
     if uploads.is_active(&id) {
         return Err(AppError::AlreadyUploading);
     }
-    lock(&state.library).remove(&id, delete_file)
+    lock(&state.library).remove(&id, delete_file)?;
+    if let Ok(cache) = cache_dir(&app) {
+        editor::remove_edit_cache(&cache, &id);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -384,7 +392,7 @@ pub fn upload_clip(
     }
     let tools = state.tools.clone().ok_or(AppError::ToolsMissing)?;
     let auth = auth::load(&state.data_dir).ok_or(AppError::Unauthorized)?;
-    let cache_dir = app.path().app_cache_dir().map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))?;
+    let cache_dir = cache_dir(&app)?;
     let guard = uploads.try_begin(&id)?;
     let job = Job { clip, title, visibility, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
     tauri::async_runtime::spawn(async move {
@@ -443,6 +451,11 @@ pub fn clear_auth_if_current(data_dir: &Path, token: &str) -> Result<bool> {
     }
 }
 
+/// `<app cache>`: upload exports and the editor's audio.
+fn cache_dir(app: &AppHandle) -> Result<PathBuf> {
+    app.path().app_cache_dir().map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+}
+
 fn emit(app: &AppHandle, event: &str, payload: impl Serialize + Clone) {
     if let Err(e) = app.emit(event, payload) {
         eprintln!("klipt: can't send {event} to the window: {e}");
@@ -458,7 +471,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
     let id = clip.id.as_str();
     let server = job.auth.server_url.as_str();
     let client = ApiClient::new(server)?;
-    let exported = job.cache_dir.join("exports").join(format!("{id}.mp4"));
+    let exported = editor::upload_export_path(&job.cache_dir, id);
 
     // Resume only an upload of this very export on this very server; anything else starts over.
     let resume = resume_point(clip.upload_id.as_deref(), clip.upload_offset, server).filter(|_| exported.is_file());
@@ -528,6 +541,137 @@ fn set_upload_progress(app: &AppHandle, id: &str, progress: Option<(&str, u64)>)
     if let Err(e) = result {
         eprintln!("klipt: can't remember the upload progress of clip {id}: {e}");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Editor
+
+/// What the editor needs to play a clip: the muted video plus its game and mic audio as separate
+/// files, so each has its own volume.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorData {
+    pub clip: ClipView,
+    pub video_path: PathBuf,
+    pub game_audio_path: PathBuf,
+    /// None when the clip has no mic track: the editor hides the Mic slider.
+    pub mic_audio_path: Option<PathBuf>,
+    pub duration_ms: u64,
+}
+
+/// Opens a clip in the editor: demuxes its audio tracks (reusing earlier copies) and lets the
+/// webview load the clip and those files. A clip whose file is missing doesn't open.
+#[tauri::command]
+pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
+    let (clip, thumb, tools) = {
+        let state = app.state::<AppState>();
+        let library = lock(&state.library);
+        (library.get(&id)?, library.thumb_path(&id), state.tools.clone())
+    };
+    if !clip.path.is_file() {
+        return Err(AppError::FileMissing);
+    }
+    let tools = tools.ok_or(AppError::ToolsMissing)?;
+    let cache_dir = cache_dir(&app)?;
+    let (input, has_mic, stored_ms) = (clip.path.clone(), clip.has_mic, clip.duration_ms);
+    let (game, mic, duration_ms) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
+        let (game, mic) = editor::prepare_audio(&tools, &input, has_mic, &cache_dir, &id)?;
+        let duration_ms = if stored_ms > 0 { stored_ms } else { crate::ffmpeg::probe(&tools, &input)?.duration_ms };
+        Ok((game, mic, duration_ms))
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("editor setup failed: {e}")))??;
+
+    // Only these files, not their folders: the clip may be outside the current clips folder (it
+    // was saved before the folder changed), and the cache folder holds other clips' files.
+    let scope = app.asset_protocol_scope();
+    for file in [&clip.path, &game].into_iter().chain(mic.as_ref()) {
+        if let Err(e) = scope.allow_file(file) {
+            eprintln!("klipt: can't allow {} in the asset scope: {e}", file.display());
+        }
+    }
+    Ok(EditorData {
+        video_path: clip.path.clone(),
+        clip: ClipView { clip, file_missing: false, thumb_path: thumb.is_file().then_some(thumb) },
+        game_audio_path: game,
+        mic_audio_path: mic,
+        duration_ms,
+    })
+}
+
+fn edit_from(trim_start_ms: Option<u64>, trim_end_ms: Option<u64>, game_volume: f32, mic_volume: f32) -> Edit {
+    Edit { trim_start_ms, trim_end_ms, game_volume, mic_volume }
+}
+
+/// Saves the trim and volumes (the clip file is untouched). No trim is `null` start/end. Refused
+/// while the clip uploads; a changed edit makes an interrupted upload start over with the new cut.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn save_edit(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    uploads: State<'_, Uploads>,
+    id: String,
+    trim_start_ms: Option<u64>,
+    trim_end_ms: Option<u64>,
+    game_volume: f32,
+    mic_volume: f32,
+) -> Result<()> {
+    let cache_dir = cache_dir(&app)?;
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume);
+    editor::save_edit(&lock(&state.library), &uploads, &cache_dir, &id, edit).map(|_| ())
+}
+
+#[derive(Clone, Serialize)]
+struct ExportProgressEvent<'a> {
+    id: &'a str,
+    progress: f32,
+}
+
+/// Exports the clip with the editor's current (possibly unsaved) edit and writes it to
+/// `dest_path`. Reports `export-progress`; returns when the file is written. Refused while the
+/// clip uploads.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn export_copy(
+    app: AppHandle,
+    id: String,
+    dest_path: PathBuf,
+    trim_start_ms: Option<u64>,
+    trim_end_ms: Option<u64>,
+    game_volume: f32,
+    mic_volume: f32,
+) -> Result<()> {
+    let (clip, tools) = {
+        let state = app.state::<AppState>();
+        let clip = lock(&state.library).get(&id)?;
+        (clip, state.tools.clone())
+    };
+    if !clip.path.is_file() {
+        return Err(AppError::FileMissing);
+    }
+    if editor::same_file(&dest_path, &clip.path) {
+        return Err(AppError::OverwriteOriginal);
+    }
+    let tools = tools.ok_or(AppError::ToolsMissing)?;
+    let cache_dir = cache_dir(&app)?;
+    let guard = app.state::<Uploads>().try_begin(&id).map_err(|_| AppError::ClipBusy)?;
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume);
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, clip.has_mic, |p| {
+            emit(&worker_app, events::EXPORT_PROGRESS, ExportProgressEvent { id: &id, progress: p });
+        })?;
+        editor::move_file(&staged, &dest_path)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("export task failed: {e}")))
+    .and_then(|r| r);
+    drop(guard);
+    if let Err(e) = &result {
+        eprintln!("klipt: export copy failed: {e}");
+    }
+    result
 }
 
 #[cfg(test)]

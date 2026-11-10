@@ -48,6 +48,10 @@ pub enum AppError {
     AlreadyUploading,
     #[error("the clip's video file is missing")]
     FileMissing,
+    #[error("the clip is busy uploading or exporting")]
+    ClipBusy,
+    #[error("the export would overwrite the original clip")]
+    OverwriteOriginal,
     #[error("internal error: {0}")]
     Internal(String),
     #[error("can't reach the server: {0}")]
@@ -104,6 +108,8 @@ impl AppError {
             AppError::InvalidTitle => "invalid_title",
             AppError::AlreadyUploading => "already_uploading",
             AppError::FileMissing => "file_missing",
+            AppError::ClipBusy => "clip_busy",
+            AppError::OverwriteOriginal => "overwrite_original",
             AppError::Internal(_) => "internal",
             AppError::Network(_) => "network",
             AppError::ServerError(_) => "server_error",
@@ -148,6 +154,12 @@ impl AppError {
             AppError::InvalidTitle => "Give the clip a title (up to 100 characters).".into(),
             AppError::AlreadyUploading => "This clip is already uploading.".into(),
             AppError::FileMissing => "This clip's video file is missing. It may have been moved or deleted.".into(),
+            AppError::ClipBusy => {
+                "This clip is uploading or exporting right now. Try again when that's done.".into()
+            }
+            AppError::OverwriteOriginal => {
+                "That's the original clip. Choose a different name so it isn't overwritten.".into()
+            }
             AppError::Internal(_) => "Something went wrong. Please try again.".into(),
             AppError::Network(_) => "Can't reach the Klipt server. Check your connection and try again.".into(),
             AppError::ServerError(_) => "The server had a problem. Try again in a moment.".into(),

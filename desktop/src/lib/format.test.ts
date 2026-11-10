@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bufferLabel, defaultTitle, formatDuration, hotkeyLabel, relativeDate, uploadTitle } from "./format";
+import { bufferLabel, defaultTitle, exportFileName, formatDuration, hotkeyLabel, relativeDate, uploadTitle } from "./format";
 
 describe("formatDuration", () => {
   it("shows minutes and zero-padded seconds", () => {
@@ -110,5 +110,20 @@ describe("bufferLabel", () => {
     expect(bufferLabel(60)).toBe("1 minute");
     expect(bufferLabel(120)).toBe("2 minutes");
     expect(bufferLabel(90)).toBe("90 seconds");
+  });
+});
+
+describe("exportFileName", () => {
+  it("names the file after the title", () => {
+    expect(exportFileName("Active Matter — 9 Nov 2026")).toBe("Active Matter — 9 Nov 2026.mp4");
+  });
+
+  it("drops characters Windows and Linux file names can't have", () => {
+    expect(exportFileName('a/b\\c: "d"?*<e>|')).toBe("a b c d e.mp4");
+    expect(exportFileName("ends with dots...")).toBe("ends with dots.mp4");
+  });
+
+  it("falls back to Clip", () => {
+    expect(exportFileName("  ///  ")).toBe("Clip.mp4");
   });
 });

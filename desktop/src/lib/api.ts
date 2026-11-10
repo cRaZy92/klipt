@@ -90,6 +90,32 @@ export interface UploadFailed {
   stale?: boolean;
 }
 
+/** What `open_editor` returns: the clip plus the files the editor plays. */
+export interface EditorData {
+  clip: ClipView;
+  videoPath: string;
+  gameAudioPath: string;
+  /** Null when the clip has no mic track. */
+  micAudioPath: string | null;
+  durationMs: number;
+}
+
+/** A clip's edit. A null trim end means "to the end"; a null start, "from the start". */
+export interface EditInput {
+  trimStartMs: number | null;
+  trimEndMs: number | null;
+  /** 0.0–1.0 */
+  gameVolume: number;
+  /** 0.0–1.0 */
+  micVolume: number;
+}
+
+export interface ExportProgress {
+  id: string;
+  /** 0..1 */
+  progress: number;
+}
+
 const FALLBACK_MESSAGE = "Something went wrong. Please try again.";
 
 function isAppError(e: unknown): e is AppError {
@@ -129,6 +155,11 @@ export const api = {
   copyShareLink: (id: string) => invoke<string>("copy_share_link", { id }),
   uploadClip: (id: string, title: string, visibility: Visibility) =>
     invoke<void>("upload_clip", { id, title, visibility }),
+  openEditor: (id: string) => invoke<EditorData>("open_editor", { id }),
+  saveEdit: (id: string, edit: EditInput) => invoke<void>("save_edit", { id, ...edit }),
+  /** Resolves once the copy is written; progress arrives as `export-progress`. */
+  exportCopy: (id: string, destPath: string, edit: EditInput) =>
+    invoke<void>("export_copy", { id, destPath, ...edit }),
 };
 
 export interface Events {
@@ -140,6 +171,7 @@ export interface Events {
   "upload-progress": UploadProgress;
   "upload-done": UploadDone;
   "upload-failed": UploadFailed;
+  "export-progress": ExportProgress;
 }
 
 /**

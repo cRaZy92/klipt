@@ -6,10 +6,12 @@
   import { resumeAfterLogin, watchUploads } from "./lib/uploads.svelte";
   import Icon from "./components/Icon.svelte";
   import Toast from "./components/Toast.svelte";
+  import Modal from "./components/Modal.svelte";
+  import Editor from "./views/Editor.svelte";
   import Library from "./views/Library.svelte";
   import Login from "./views/Login.svelte";
 
-  // The screens. Library is home; the editor (Task 11) and settings (Task 12) plug in here.
+  // The screens. Library is home; settings (Task 12) plugs in here.
   type View = { name: "library" } | { name: "editor"; clip: ClipView } | { name: "settings" };
 
   let account = $state<Account | null>(null);
@@ -20,6 +22,10 @@
   let view = $state<View>({ name: "library" });
   let hotkeyDisplay = $state<string | null>(null);
   let accountMenu = $state(false);
+  /** The editor has unsaved changes. */
+  let editorDirty = $state(false);
+  /** Where the user asked to go while the editor had unsaved changes. */
+  let leaving = $state<View | null>(null);
 
   const hotkey = $derived(hotkeyDisplay ?? (settings ? hotkeyLabel(settings.hotkey) : ""));
 
@@ -77,6 +83,25 @@
     account = null;
   }
 
+  /** Switches screens, asking first when that would throw away the editor's unsaved changes. */
+  function go(next: View) {
+    if (view.name === "editor" && editorDirty && next !== view) {
+      leaving = next;
+      return;
+    }
+    editorDirty = false;
+    view = next;
+  }
+
+  function discardAndLeave() {
+    const next = leaving;
+    leaving = null;
+    if (next) {
+      editorDirty = false;
+      view = next;
+    }
+  }
+
   function hostOf(url: string): string {
     try {
       return new URL(url).host;
@@ -106,7 +131,7 @@
 {:else}
   <div class="shell">
     <header class="topbar">
-      <button class="brand" onclick={() => (view = { name: "library" })}>
+      <button class="brand" onclick={() => go({ name: "library" })}>
         <span class="logo"><Icon name="record" size={16} /></span>
         Klipt
       </button>
@@ -116,7 +141,7 @@
           class="btn btn-ghost btn-icon"
           aria-label="Settings"
           title="Settings"
-          onclick={() => (view = { name: "settings" })}
+          onclick={() => go({ name: "settings" })}
         >
           <Icon name="settings" />
         </button>
@@ -137,7 +162,15 @@
 
     <main>
       {#if view.name === "library"}
-        <Library {hotkey} bufferSeconds={settings?.bufferSeconds ?? 30} />
+        <Library
+          {hotkey}
+          bufferSeconds={settings?.bufferSeconds ?? 30}
+          onedit={(clip) => go({ name: "editor", clip })}
+        />
+      {:else if view.name === "editor"}
+        {#key view.clip.id}
+          <Editor clip={view.clip} bind:dirty={editorDirty} onclose={() => go({ name: "library" })} />
+        {/key}
       {:else}
         <div class="center">
           <p class="muted">This screen is coming soon.</p>
@@ -146,6 +179,16 @@
       {/if}
     </main>
   </div>
+{/if}
+
+{#if leaving}
+  <Modal title="Discard changes?" onclose={() => (leaving = null)}>
+    <p>Your trim and volume changes to this clip haven't been saved.</p>
+    {#snippet footer()}
+      <button class="btn" onclick={() => (leaving = null)}>Keep editing</button>
+      <button class="btn btn-danger" onclick={discardAndLeave}>Discard</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 <Toast />

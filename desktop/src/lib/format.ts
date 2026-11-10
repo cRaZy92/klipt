@@ -102,3 +102,13 @@ export function bufferLabel(seconds: number): string {
   }
   return `${seconds} seconds`;
 }
+
+/** The suggested file name for "Export copy…": the title without characters files can't have. */
+export function exportFileName(title: string): string {
+  const name = title
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/, "");
+  return `${name || "Clip"}.mp4`;
+}

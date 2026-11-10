@@ -187,7 +187,7 @@ packaging/aur/PKGBUILD
 - Create `desktop/src-tauri/src/{settings.rs, library/mod.rs, library/db.rs, ffmpeg.rs, errors.rs, state.rs}`.
 
 **Interfaces:**
-- **Settings** (serde camelCase, defaults from Global Constraints): `recordingMode: Always|WhileGameRunning`, `bufferLocation: Ram|Disk`, `displayId: Option<String>`, `resolution: P720|P1080|P1440|Native`, `fps: u32`, `quality: Low|Medium|High|Custom`, `customBitrateKbps: u32`, `bufferSeconds: u32`, `micEnabled: bool`, `micDeviceId: Option<String>`, `hotkey: String` (default `"Alt+F9"`), `outputDir: PathBuf`, `startWithOs: bool` (default true), `saveSound: bool`, `saveNotification: bool`, `serverUrl: Option<String>`.
+- **Settings** (serde camelCase, defaults from Global Constraints): `recordingMode: Always|WhileGameRunning`, `bufferLocation: Ram|Disk`, `displayId: Option<String>`, `resolution: P720|P1080|P1440|Native`, `fps: u32`, `quality: Low|Medium|High|Custom`, `customBitrateKbps: u32`, `bufferSeconds: u32`, `micEnabled: bool`, `micDeviceId: Option<String>`, `hotkey: String` (default `"Alt+Backquote"`, the key under Esc; NVIDIA App holds Alt+F9 — owner decision 2026-11-10), `outputDir: PathBuf`, `startWithOs: bool` (default true), `saveSound: bool`, `saveNotification: bool`, `serverUrl: Option<String>`.
   - Quality presets map to kbps: Low 8000, Medium 14000, High 20000.
   - Functions: `Settings::load(dir) -> Settings` (a missing or corrupt file gives defaults, and the corrupt file is backed up as `.bak`), `save(&self, dir) -> Result<()>` (writes atomically via temp + rename), `validate(&self) -> Vec<FieldError>` (buffer 10–600, fps ∈ {30, 60}, bitrate 2000–80000).
 - **Library DB** (SQLite at `<app data>/library.db`):

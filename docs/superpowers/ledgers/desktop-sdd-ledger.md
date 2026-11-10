@@ -53,3 +53,20 @@ Still unverified: the Linux paths compile only by reading; Step 5 on CachyOS nee
 - The owner's first C9 run got `RegisterHotKey` error 1409 for ALT+F9. A probe showed exactly NVIDIA App's default set taken: Alt+F9, Alt+F10, Alt+Shift+F10, Alt+F1, Alt+Z, Alt+R. Alt+F8, Alt+F11, Alt+F12, F8, F9, Ctrl+Alt+F9, Alt+Shift+F9 and Ctrl+Shift+F9 were free. NVIDIA's registry (`HKCU\Software\NVIDIA Corporation\Global\ShadowPlay\NVSPCAPS`) shows ShadowPlay enabled with a 300 s buffer at 60 fps.
 - The C9 test now uses `--hotkey ALT+F8`, and TEST-ON-WINDOWS.md says to turn off other background recorders during the FPS test.
 - For Task 4: the app's default hotkey is Alt+Backquote, the key under Esc, not Alt+F9 as the plan says. The owner chose it on 2026-11-10. It types ` on US and ; on Slovak, but it is VK_OEM_3 on both and free on the owner's PC; on KDE it showed as Alt+;. Store it by key position (W3C code `Backquote`, as Tauri does), and show the label the OS gives (GetKeyNameText; on Slovak it is ";"). Task 4/6 must also handle a taken shortcut: show "already used by another app" and offer Change, not just fail.
+
+## Task 4 (2026-11-10): scaffold, settings, library db, ffmpeg tools
+- The C9 game test is still open. The owner postponed it ("not doing fps tests now"). Tasks 4 and 5 don't depend on its result, so they went ahead; Task 6 (recorder backends) should wait for C9.
+- `main` (with the server) was merged into `feat/desktop` first (be7d6c6), because Task 4 adds `desktop` to the existing pnpm workspace.
+- Commit 0e5d592. The tests were written first and ran against `todo!()` stubs (24 of 26 failed; the two errors.rs tests passed because that module was complete). After implementing: 26/26 pass, including ffmpeg tests on a generated 2-audio-track H.264 clip. clippy and svelte-check are clean. `pnpm tauri build --debug --no-bundle` builds; the exe opens a window titled "Klipt", creates `%APPDATA%\app.klipt.desktop\library.db`, and closes with exit code 0.
+- Rulings:
+  - The hotkey default is `Alt+Backquote` (owner).
+  - `games()` returns `GameCount {name, steamAppId, count}` instead of a tuple, which serializes better.
+  - Volumes are limited to 0–2.0 (editor range 0–200 %).
+  - Enums serialize camelCase (`"always"`, `"p1080"`, `"ram"`).
+  - Thumbnails live at `<app data>/thumbs/<id>.jpg`. `ClipView.thumbPath` is set only when the file exists.
+  - `remove()` deletes the video first, and keeps the row if that fails. The thumbnail is always cleaned up.
+- Tooling notes:
+  - rusqlite 0.41 needs the `fallible_uint` feature for u64/usize.
+  - svelte-check 4.7 doesn't support TS 7, so desktop/ uses TS 6.
+  - A `.svelte` file without `<script lang="ts">` needs `allowJs` + `checkJs` (as in the official template).
+  - The Tauri test binary starts fine on Windows; the comctl32 manifest problem didn't occur.

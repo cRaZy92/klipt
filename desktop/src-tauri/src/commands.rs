@@ -187,9 +187,10 @@ pub fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: Settin
     Ok(settings)
 }
 
-/// Lets the UI load files from the clips folder through the asset protocol.
+/// Lets the UI load files from the clips folder through the asset protocol. Not recursive: clips
+/// are written flat, and a folder like `~` must not expose everything under it.
 pub fn allow_clip_folder(app: &AppHandle, dir: &Path) {
-    if let Err(e) = app.asset_protocol_scope().allow_directory(dir, true) {
+    if let Err(e) = app.asset_protocol_scope().allow_directory(dir, false) {
         eprintln!("klipt: can't allow {} in the asset scope: {e}", dir.display());
     }
 }
@@ -388,7 +389,14 @@ pub fn upload_clip(
     let job = Job { clip, title, visibility, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
     tauri::async_runtime::spawn(async move {
         let id = job.clip.id.clone();
-        let result = run_upload(&app, &job).await;
+        let (data_dir, token) = (job.data_dir.clone(), job.auth.token.clone());
+        // The work runs in its own task so a panic anywhere in it still ends in `upload-failed`
+        // instead of a card stuck on "Uploading…".
+        let worker_app = app.clone();
+        let result = match tauri::async_runtime::spawn(async move { run_upload(&worker_app, &job).await }).await {
+            Ok(result) => result,
+            Err(e) => Err(AppError::Internal(format!("upload task failed: {e}"))),
+        };
         // Free the clip before telling the UI, so a "Try again" right away isn't refused.
         drop(guard);
         match result {
@@ -404,21 +412,35 @@ pub fn upload_clip(
             }
             Err(e) => {
                 eprintln!("klipt: upload of clip {id} failed: {e}");
+                // `stale`: the login this upload used was already replaced (another upload hit
+                // 401 first and the user logged in again, or they logged out): the UI just
+                // retries with the current login instead of asking for it again.
+                let mut stale = false;
                 if matches!(e, AppError::Unauthorized) {
                     // The token is dead. The clip, its edit and the upload progress stay.
-                    if let Err(e) = auth::clear(&job.data_dir) {
-                        eprintln!("klipt: can't forget the expired login: {e}");
+                    match clear_auth_if_current(&data_dir, &token) {
+                        Ok(cleared) => stale = !cleared,
+                        Err(e) => eprintln!("klipt: can't forget the expired login: {e}"),
                     }
                 }
                 emit(
                     &app,
                     events::UPLOAD_FAILED,
-                    serde_json::json!({ "id": id, "code": e.code(), "message": e.user_message() }),
+                    serde_json::json!({ "id": id, "code": e.code(), "message": e.user_message(), "stale": stale }),
                 );
             }
         }
     });
     Ok(())
+}
+
+/// Forgets the saved login only if it is still the one with `token`; returns whether it did. An
+/// upload that started with an older login must not log the user out of a newer one.
+pub fn clear_auth_if_current(data_dir: &Path, token: &str) -> Result<bool> {
+    match auth::load(data_dir) {
+        Some(saved) if saved.token == token => auth::clear(data_dir).map(|()| true),
+        _ => Ok(false),
+    }
 }
 
 fn emit(app: &AppHandle, event: &str, payload: impl Serialize + Clone) {
@@ -630,6 +652,22 @@ mod tests {
     #[test]
     fn device_name_is_never_empty() {
         assert!(!device_name().trim().is_empty());
+    }
+
+    #[test]
+    fn a_dead_token_clears_only_its_own_login() {
+        let dir = tempfile::tempdir().unwrap();
+        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into() };
+        assert!(!clear_auth_if_current(dir.path(), "old").unwrap(), "nothing saved: nothing to clear");
+
+        // The user already logged in again: an old upload's 401 leaves the new login alone.
+        auth::save(dir.path(), &login("new")).unwrap();
+        assert!(!clear_auth_if_current(dir.path(), "old").unwrap());
+        assert_eq!(auth::load(dir.path()).unwrap().token, "new");
+
+        // The current login's 401 forgets it.
+        assert!(clear_auth_if_current(dir.path(), "new").unwrap());
+        assert!(auth::load(dir.path()).is_none());
     }
 
     #[tokio::test]

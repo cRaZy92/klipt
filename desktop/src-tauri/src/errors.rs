@@ -48,6 +48,8 @@ pub enum AppError {
     AlreadyUploading,
     #[error("the clip's video file is missing")]
     FileMissing,
+    #[error("internal error: {0}")]
+    Internal(String),
     #[error("can't reach the server: {0}")]
     Network(String),
     #[error("server error: {0}")]
@@ -102,6 +104,7 @@ impl AppError {
             AppError::InvalidTitle => "invalid_title",
             AppError::AlreadyUploading => "already_uploading",
             AppError::FileMissing => "file_missing",
+            AppError::Internal(_) => "internal",
             AppError::Network(_) => "network",
             AppError::ServerError(_) => "server_error",
             AppError::InvalidVideo(_) => "invalid_video",
@@ -145,6 +148,7 @@ impl AppError {
             AppError::InvalidTitle => "Give the clip a title (up to 100 characters).".into(),
             AppError::AlreadyUploading => "This clip is already uploading.".into(),
             AppError::FileMissing => "This clip's video file is missing. It may have been moved or deleted.".into(),
+            AppError::Internal(_) => "Something went wrong. Please try again.".into(),
             AppError::Network(_) => "Can't reach the Klipt server. Check your connection and try again.".into(),
             AppError::ServerError(_) => "The server had a problem. Try again in a moment.".into(),
             AppError::InvalidVideo(_) => "The server couldn't read this video. It may be damaged.".into(),

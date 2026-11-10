@@ -53,24 +53,38 @@ export function statusLabel(job: UploadJob): string {
   }
 }
 
+/** What each clip was last asked to upload as, so events for it can always be shown. */
+const requested: Record<string, { title: string; visibility: Visibility }> = {};
+
 /** Starts (or retries, resuming where it stopped) an upload. */
 export async function startUpload(id: string, title: string, visibility: Visibility) {
-  uploads[id] = { id, title, visibility, status: "starting", sent: 0, total: 0 };
+  requested[id] = { title, visibility };
+  const previous = uploads[id];
   try {
     await api.uploadClip(id, title, visibility);
   } catch (e) {
-    // "Already uploading" means the core is still on it: keep showing its progress.
+    // "Already uploading" means the core is still on it: leave what's shown alone; its
+    // progress events keep updating the card.
     if (errorCode(e) === "already_uploading") {
       toast(errorMessage(e));
       return;
     }
     if (errorCode(e) === "unauthorized") {
-      uploads[id] = { ...uploads[id], status: "needsLogin" };
+      uploads[id] = { id, title, visibility, status: "needsLogin", sent: 0, total: 0 };
       onUnauthorized?.();
       return;
     }
-    uploads[id] = { ...uploads[id], status: "failed", message: errorMessage(e) };
+    uploads[id] = { id, title, visibility, status: "failed", sent: 0, total: 0, message: errorMessage(e) };
+    return;
   }
+  // Started. Unless a progress event already arrived, show "Starting…" until one does.
+  if (uploads[id] === previous) uploads[id] = { id, title, visibility, status: "starting", sent: 0, total: 0 };
+}
+
+/** The job for an event, created if this window didn't start it (e.g. it was reloaded). */
+function jobFor(id: string): UploadJob {
+  const known = requested[id] ?? { title: "", visibility: "feed" as Visibility };
+  return uploads[id] ?? { id, ...known, status: "starting", sent: 0, total: 0 };
 }
 
 export function retryUpload(id: string) {
@@ -99,18 +113,21 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
   onUnauthorized = handlers.unauthorized;
   const stops = [
     on("upload-progress", ({ id, sent, total, phase }) => {
-      const job = uploads[id];
-      if (job) uploads[id] = { ...job, status: phase, sent, total };
+      uploads[id] = { ...jobFor(id), status: phase, sent, total };
     }),
     on("upload-done", ({ id, shareUrl, copied }) => {
       const job = uploads[id];
       if (job) uploads[id] = { ...job, status: "done", shareUrl, copied };
       handlers.done(shareUrl, copied);
     }),
-    on("upload-failed", ({ id, code, message }) => {
+    on("upload-failed", ({ id, code, message, stale }) => {
       const job = uploads[id];
       if (!job) return;
-      if (code === "unauthorized") {
+      if (code === "unauthorized" && stale) {
+        // This upload used a login that was already replaced: retry with the current one.
+        // With no current login, `upload_clip` refuses and that sends the user to log in.
+        void startUpload(id, job.title, job.visibility);
+      } else if (code === "unauthorized") {
         uploads[id] = { ...job, status: "needsLogin" };
         handlers.unauthorized();
       } else {

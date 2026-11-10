@@ -94,6 +94,9 @@
 
   <div class="actions">
     {#if clip.fileMissing}
+      {#if uploaded}
+        <button class="btn btn-sm grow" onclick={oncopy}><Icon name="link" size={15} /> Copy link</button>
+      {/if}
       <button class="btn btn-sm grow" onclick={onremove}><Icon name="trash" size={15} /> Remove from library</button>
     {:else}
       {#if uploaded}
@@ -282,6 +285,7 @@
 
   .actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.4rem;
     padding: 0.35rem 0.85rem 0.85rem;
     margin-top: auto;

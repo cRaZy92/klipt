@@ -86,6 +86,8 @@ export interface UploadFailed {
   id: string;
   code: string;
   message: string;
+  /** For `unauthorized`: the upload used an older login than the one saved now. */
+  stale?: boolean;
 }
 
 const FALLBACK_MESSAGE = "Something went wrong. Please try again.";

@@ -31,6 +31,7 @@
       account = a;
       // Events fired before this window listened are lost; the core keeps the latest state.
       if (status.display) hotkeyDisplay = status.display;
+      if (status.error) toast(status.error, "error");
       ready = true;
     } catch (e) {
       startupError = errorMessage(e);

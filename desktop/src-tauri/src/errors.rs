@@ -6,6 +6,7 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 use crate::settings::FieldError;
+use crate::upload::{ApiError, UploadError};
 
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
 
@@ -33,12 +34,40 @@ pub enum AppError {
     HotkeyUnavailable(String),
     #[error("the global shortcut stopped working")]
     HotkeyLost,
+    #[error("not logged in to the server")]
+    Unauthorized,
+    #[error("can't reach the server: {0}")]
+    Network(String),
+    #[error("server error: {0}")]
+    ServerError(String),
+    #[error("the server rejected the video: {0}")]
+    InvalidVideo(String),
     #[error("i/o: {0}")]
     Io(#[from] std::io::Error),
     #[error("database: {0}")]
     Db(#[from] rusqlite::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+impl From<ApiError> for AppError {
+    fn from(e: ApiError) -> Self {
+        match e {
+            ApiError::Unauthorized => AppError::Unauthorized,
+            ApiError::Network(d) => AppError::Network(d),
+            ApiError::Server { status, code } => AppError::ServerError(format!("{status} {code}")),
+            ApiError::InvalidVideo(d) => AppError::InvalidVideo(d),
+        }
+    }
+}
+
+impl From<UploadError> for AppError {
+    fn from(e: UploadError) -> Self {
+        match e {
+            UploadError::Api(e) => e.into(),
+            UploadError::Io(e) => AppError::Io(e),
+        }
+    }
 }
 
 impl AppError {
@@ -54,6 +83,10 @@ impl AppError {
             AppError::NotRecording => "not_recording",
             AppError::HotkeyTaken => "hotkey_taken",
             AppError::HotkeyUnavailable(_) | AppError::HotkeyLost => "hotkey_unavailable",
+            AppError::Unauthorized => "unauthorized",
+            AppError::Network(_) => "network",
+            AppError::ServerError(_) => "server_error",
+            AppError::InvalidVideo(_) => "invalid_video",
             AppError::Io(_) => "io",
             AppError::Db(_) => "database",
             AppError::Json(_) => "json",
@@ -83,6 +116,10 @@ impl AppError {
                 "Klipt couldn't set up the save-clip shortcut. You can still save clips from the tray icon.".into()
             }
             AppError::HotkeyLost => "The save shortcut stopped working. Use the tray menu to save, or restart Klipt.".into(),
+            AppError::Unauthorized => "Your session has expired. Please log in again.".into(),
+            AppError::Network(_) => "Can't reach the Klipt server. Check your connection and try again.".into(),
+            AppError::ServerError(_) => "The server had a problem. Try again in a moment.".into(),
+            AppError::InvalidVideo(_) => "The server couldn't read this video. It may be damaged.".into(),
             AppError::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                 "Klipt doesn't have permission to use that file or folder.".into()
             }

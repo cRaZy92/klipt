@@ -185,6 +185,16 @@ impl Library {
         self.update(id, "UPDATE clips SET title = ?2 WHERE id = ?1", params![id, title])
     }
 
+    /// Remembers (or with `None`, forgets) how far a tus upload got, so a restart can resume it.
+    pub fn set_upload_progress(&self, id: &str, progress: Option<(&str, u64)>) -> Result<()> {
+        let (upload_id, offset) = progress.unzip();
+        self.update(
+            id,
+            "UPDATE clips SET upload_id = ?2, upload_offset = ?3 WHERE id = ?1",
+            params![id, upload_id, offset],
+        )
+    }
+
     pub fn mark_uploaded(&self, id: &str, server_clip_id: &str, share_url: &str, visibility: &str) -> Result<()> {
         self.update(
             id,
@@ -380,6 +390,10 @@ mod tests {
             .unwrap();
         f.lib.set_game(&c.id, Some("Active Matter"), Some(2_887_580)).unwrap();
         f.lib.rename(&c.id, "Nice shot").unwrap();
+        f.lib.set_upload_progress(&c.id, Some(("https://s/api/uploads/u1", 8_388_608))).unwrap();
+        let got = f.lib.get(&c.id).unwrap();
+        assert_eq!(got.upload_id.as_deref(), Some("https://s/api/uploads/u1"));
+        assert_eq!(got.upload_offset, Some(8_388_608));
         f.lib.mark_uploaded(&c.id, "srv-1", "https://clips.example.com/c/abc", "feed").unwrap();
 
         let got = f.lib.get(&c.id).unwrap();
@@ -390,6 +404,7 @@ mod tests {
         assert_eq!(got.server_clip_id.as_deref(), Some("srv-1"));
         assert_eq!(got.share_url.as_deref(), Some("https://clips.example.com/c/abc"));
         assert_eq!(got.visibility.as_deref(), Some("feed"));
+        assert_eq!((got.upload_id, got.upload_offset), (None, None));
 
         f.lib.set_game(&c.id, None, None).unwrap();
         assert_eq!(f.lib.get(&c.id).unwrap().game_name, None);

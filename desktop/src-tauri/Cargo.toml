@@ -10,9 +10,12 @@ name = "klipt_desktop_lib"
 crate-type = ["rlib"]
 
 [dependencies]
+base64 = "0.23.1"
 dirs = "7.0.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json"] }
 rodio = { version = "0.23.0", default-features = false, features = ["wav", "playback"] }
 rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tauri = { version = "2.12.5", features = ["image-png", "tray-icon"] }
@@ -20,6 +23,7 @@ tauri-plugin-autostart = "2.7.0"
 tauri-plugin-notification = "2.8.1"
 tauri-plugin-single-instance = "2.5.5"
 thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["fs", "io-util", "time", "rt", "macros"] }
 uuid = { version = "1.29.2", features = ["v4"] }
 
 [build-dependencies]
@@ -27,6 +31,7 @@ tauri-build = { version = "2.7.4", features = [] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+wiremock = "0.6.5"
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-global-shortcut = "2.4.1"

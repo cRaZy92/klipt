@@ -11,6 +11,7 @@ pub mod settings;
 pub mod sound;
 pub mod state;
 pub mod tray;
+pub mod upload;
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};

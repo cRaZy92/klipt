@@ -2,6 +2,7 @@
 
 pub mod errors;
 pub mod ffmpeg;
+pub mod games;
 pub mod library;
 pub mod settings;
 pub mod state;

@@ -43,6 +43,12 @@ jobs:
           # The real-OBS CLI tests need a GPU and run locally (KLIPT_TEST_OBS_ROOT); here they skip.
           cargo test -p klipt-recorder --release --locked
 
+      # Compiles and tests the Windows-only game detection code (Win32 foreground/process/registry).
+      - name: Test klipt-desktop game detection
+        shell: pwsh
+        working-directory: desktop
+        run: cargo test -p klipt-desktop --locked games
+
       - name: Package
         shell: pwsh
         run: scripts/package-recorder-windows.ps1 -ObsDir "$env:DEPS\obs" -RecorderExe desktop\target\release\klipt-recorder.exe -Out dist\klipt-recorder-windows

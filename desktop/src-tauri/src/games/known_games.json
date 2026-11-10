@@ -1,0 +1,12 @@
+{
+  "valorant-win64-shipping.exe": { "name": "Valorant" },
+  "overwatch.exe": { "name": "Overwatch 2" },
+  "league of legends.exe": { "name": "League of Legends" },
+  "wow.exe": { "name": "World of Warcraft" },
+  "diablo iv.exe": { "name": "Diablo IV" },
+  "cod.exe": { "name": "Call of Duty" },
+  "hearthstone.exe": { "name": "Hearthstone" },
+  "r5apex.exe": { "name": "Apex Legends", "steamAppId": 1172470 },
+  "cs2.exe": { "name": "Counter-Strike 2", "steamAppId": 730 },
+  "fortnitepc-win64-shipping.exe": { "name": "Fortnite" }
+}

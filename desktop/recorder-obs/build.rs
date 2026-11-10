@@ -35,6 +35,10 @@ fn main() {
         .clang_arg(format!("-I{simde_include}"))
         // Last, so a real obsconfig.h next to installed headers wins over the stub.
         .clang_arg(format!("-I{}", manifest_dir.join("include-stub").display()))
+        // util/util_uint64.h calls the MSVC intrinsic _udiv128 in an inline helper. Older clang
+        // (e.g. the GitHub runner's) doesn't declare it, and since clang 16 an undeclared call is an
+        // error. We never bind that helper, so the diagnostic doesn't matter here.
+        .clang_arg("-Wno-implicit-function-declaration")
         .dynamic_library_name("Obs")
         // Missing symbols become an Err stored in the struct instead of failing the whole load;
         // calling one panics, which only happens for functions we never use.

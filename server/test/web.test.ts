@@ -79,7 +79,7 @@ describe('web pages', () => {
     const body = (await get('/me', a.cookie)).body;
     expect(body).toContain('data-title="R&amp;amp;D"');
     expect(body).toContain('title="A&amp;amp;B"');
-    expect(body).toContain('alt="A&amp;amp;B"');
+    expect(body).toContain('<span class="chip-name">A&amp;amp;B</span>');
     const adm = await mk('boss', true);
     await t.db.insert(invites).values({ code: 'x&amp;y', createdBy: adm.u.id, expiresAt: new Date(Date.now() + 1e6) });
     expect((await get(`/invite/${encodeURIComponent('x&amp;y')}`)).body).toContain('value="x&amp;amp;y"');

@@ -75,11 +75,9 @@ export function GameFilter(props: { games: GameCount[]; active?: string; basePat
           href={e(href(props.basePath, { game: g.gameName }))}
           title={e(g.gameName)}
         >
-          {g.steamAppId ? (
-            <img src={steamHeader(g.steamAppId)} alt={e(g.gameName)} loading="lazy" height="28" />
-          ) : (
-            e(g.gameName)
-          )}
+          {g.steamAppId ? <img class="chip-art" src={steamHeader(g.steamAppId)} alt="" loading="lazy" /> : ''}
+          <span class="chip-name">{e(g.gameName)}</span>
+          <span class="chip-count">{String(g.count)}</span>
         </a>
       ))}
     </div>

@@ -14,9 +14,10 @@ Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, up
    | `ADMIN_PASSWORD` | Password of the admin account (at least 8 characters). |
    | `POSTGRES_PASSWORD` | Any long random password for the database. Set it once: changing it after the first deploy has no effect, because the `pgdata` volume is already initialised with the old password. |
    | `MAX_UPLOAD_MB` | Optional. Largest clip allowed, default `2048`. |
+   | `KLIPT_PORT` | Optional. Host port the server is published on, default `3260`. Point your tunnel or proxy (e.g. Pangolin) at `<host IP>:<KLIPT_PORT>`. |
    | `TRUST_PROXY_HOPS` | Optional. How many reverse proxies sit in front of Klipt, default `1`. Use `1` behind Dokploy/Traefik, `0` if Klipt is exposed directly with no proxy, `2` if Cloudflare is in front of Traefik. |
 
-3. Open the **Domains** tab, add your domain, and set service name `server`, port `3000`, and enable **HTTPS** (Let's Encrypt). Point the domain's DNS at your Dokploy server first.
+3. **Without Dokploy's Traefik** (e.g. a Pangolin tunnel): skip the Domains tab and point the tunnel at `<Dokploy host IP>:<KLIPT_PORT>` with HTTPS terminated by the tunnel; keep `TRUST_PROXY_HOPS=1` (Pangolin's proxy is one hop). **With Dokploy's Traefik:** open the **Domains** tab, add your domain, and set service name `server`, port `3000`, and enable **HTTPS** (Let's Encrypt). Point the domain's DNS at your Dokploy server first.
 4. Press **Deploy**. The first build takes a few minutes.
 
 ## First login

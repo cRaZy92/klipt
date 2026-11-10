@@ -29,10 +29,14 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .btn.danger { color: var(--danger); } .btn.danger:hover { border-color: var(--danger); }
 
 .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; }
-.chip { flex: none; display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
-.chip img { height: 28px; margin: 0 -8px; border-radius: 6px; display: block; }
-.chip:has(img) { padding: 0 8px; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); font-size: .9rem; white-space: nowrap; transition: border-color .12s, color .12s; }
+.chip:hover { color: var(--text); border-color: var(--muted); }
+.chip:has(.chip-art) { padding-left: 4px; }
+.chip-art { width: 56px; height: 28px; object-fit: cover; border-radius: 6px; display: block; flex: none; }
+.chip-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.chip-count { font-size: .75rem; font-variant-numeric: tabular-nums; padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,.07); }
 .chip.active { border-color: var(--accent); color: var(--text); background: #241f3d; }
+.chip.active .chip-count { background: var(--accent); color: #fff; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 .card { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; transition: transform .12s, border-color .12s; }

@@ -28,6 +28,7 @@ Measured in Active Matter, at a fixed spot, with FPS uncapped and the GPU at 99%
 | **gsr, direct KMS (DP-1), 60 fps** | **135.7** | **122.0** | **−3.4%** ✅ | 5.4% |
 
 - The NVENC preset made no difference. The libobs cost comes from capturing and compositing the screen on the GPU, and from the portal delivering up to 144 frames per second on this monitor.
+  - *Correction (2026-11-10, Windows session):* the spike set `preset2`, which OBS 33's NVENC plugin ignores, so every libobs run actually used the default `p5`; only `tune` (`hq` vs `ll`) took effect. The conclusion stands: even the low-latency tune and 30 fps stayed at −7% to −10%, so the cost is in capture and compositing, not encoding.
 - gsr direct capture is the only setup that meets C5 (under 5%).
 
 ## Pass criteria
@@ -43,7 +44,7 @@ Measured in Active Matter, at a fixed spot, with FPS uncapped and the GPU at 99%
 | C6 | Global hotkey on Wayland, fullscreen game | ✅ | GlobalShortcuts portal: 16 of 16 presses received in fullscreen Active Matter. KDE bound the key as `Alt+;`, and rebinding happened instantly on a second run. |
 | C7 | WebKitGTK playback and the per-track volume editor | ✅ | 1080p H.264 plays in WebKitGTK 2.54 / GStreamer 1.28. Muted `<video>` plus two `<audio>` elements: independent volume and sync confirmed by the owner, with 6 ms drift at the end. |
 | C8 | Packaging | ⚠️ | gsr-kms-server needs `cap_sys_admin=ep`, which can't be granted from an AppImage or Flatpak. See Packaging. libobs bundling was not tested (not needed on Linux). |
-| C9 | Windows | ⏳ | Needs test builds run by friends (RTX 40xx + AMD). |
+| C9 | Windows | ⏳ partial | Owner's Windows (RTX 3070 Ti, OBS 33.0.1 runtime, `klipt-recorder`): `monitor_capture` (DXGI, both monitors), WASAPI output + input, NVENC `p4` CBR 1080p60 with 1 s keyframes, and the x264 fallback all produce correct clips (h264 + 2× AAC; 1× AAC without mic); a save takes ~150 ms; idle-desktop recorder CPU ≈ 10–17% of one core in short runs. **Still open:** FPS cost in a game, the hotkey in a fullscreen game, AMD/AMF on a friend's PC. |
 
 ## Linux backend details (gpu-screen-recorder)
 
@@ -73,7 +74,8 @@ Measured in Active Matter, at a fixed spot, with FPS uncapped and the GPU at 99%
 
 - Proven on Linux with libobs 33: explicit module loading (`obs_open_module` + `obs_init_module`) and the replay-buffer output with multiple audio tracks.
 - Helper executables must sit **next to the recorder executable**: `obs-ffmpeg-mux` (replay muxing) and `obs-nvenc-test` (NVENC detection). Both apply to Windows too (`.exe`).
-- Encoder settings that worked: `rate_control=CBR`, `bitrate=20000`, `keyint_sec=1`, `preset2=p4`, `tune=hq`, `multipass=disabled`, `lookahead=false`, `bf=0`.
+- Encoder settings: `rate_control=CBR`, `bitrate=20000`, `keyint_sec=1`, `preset=p4` (not `preset2`, see the correction above), `tune=hq`, `multipass=disabled`, `lookahead=false`, `bf=0`. Confirmed in the encoder's startup log on Windows.
+- Windows specifics found while building `klipt-recorder`: OBS 33 keeps plugins in `core/<name>/`; libobs loads DLLs with `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS` (register the OBS bin folder with `AddDllDirectory`); libobs's default log handler prints to stdout. Details in `docs/WINDOWS-DEV.md`.
 - Still to verify (C9): `monitor_capture` (DXGI/WGC), `wasapi_output_capture` / `wasapi_input_capture`, AMF on an AMD card, FPS cost, and `RegisterHotKey` in fullscreen-exclusive games. That needs friends' machines.
 
 ## Open issues

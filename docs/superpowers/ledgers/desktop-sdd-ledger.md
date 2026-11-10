@@ -29,3 +29,8 @@ Not done:
 - **Independent review of 8ac05fe** (started, stopped when the usage limit hit) — rerun before relying on it.
 - Linux code paths are compile-unverified (no Linux here): Step 5 on CachyOS must `cargo build` and run the printf check.
 - C9 owner test in a fullscreen game (FPS off/on, Alt+F9 hotkey, recorder CPU) — see HANDOFF.md.
+
+## Task 2: Windows CI build — implemented
+- `scripts/package-recorder-windows.ps1`: OBS layout subset (bin/64bit minus Qt/UI/scripting/OpenGL/pdb; core/{win-capture,win-wasapi,obs-ffmpeg,obs-outputs,obs-x264,obs-nvenc,obs-qsv11} minus pdb and game-capture inject/hook helpers; data/libobs) + TEST-ON-WINDOWS.md. 57 MB. Verified locally: selftest from the packaged folder → NVENC, 1 video + 2 AAC; only log noise is win-capture's missing get-graphics-offsets (game capture, unused).
+- `.github/workflows/windows-recorder.yml`: windows-latest, fetch → build → unit tests → package → `--list` smoke (non-blocking: runners have no GPU) → artifact `klipt-recorder-windows`. Actions pinned to current majors (checkout/upload-artifact v7, rust-cache v2).
+- Ruling: `server-ci.yml` goes on `feat/server`, not here — the server code doesn't exist on `feat/desktop` (it branched from spike/capture), and the CI should run on the feat/server → main PR.

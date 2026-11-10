@@ -1,6 +1,20 @@
-# Klipt — Session Handoff (2026-11-09, end of the Linux session)
+# Klipt — Session Handoff
 
-Read this first if you're a fresh Claude Code session picking up Klipt, for example on the owner's Windows dual boot. Then read the files it links to.
+Read this first if you're a fresh Claude Code session picking up Klipt. Then read the files it links to.
+
+## Latest: Windows session (2026-11-09/10)
+
+On the owner's Windows dual boot (same PC: RTX 3070 Ti, two 1920×1080 monitors). Details and evidence: `docs/superpowers/ledgers/desktop-sdd-ledger.md`.
+
+- The machine is set up per `docs/WINDOWS-DEV.md` (corrected: Node 22 package id, corepack install dir, OBS 33 layout). OBS runtime + headers are in `C:\klipt-deps`.
+- **Desktop Task 1 is built** (`desktop/recorder-obs`, `klipt-recorder`) and verified on Windows: NVENC p4 CBR 1080p60, 2 audio tracks, busy on double save, x264 fallback, second monitor. Not compiled on Linux yet.
+- **Task 2:** `scripts/fetch-obs-windows.ps1`, `scripts/package-recorder-windows.ps1` (57 MB test folder) and `.github/workflows/windows-recorder.yml`.
+- Plans, decision record and WINDOWS-DEV were corrected for OBS 33 facts (plugin layout `core/<name>/`, DLL search, stdout logging, NVENC `preset` not `preset2` — the Linux spike's preset comparison never applied the preset).
+- **Next:** the owner runs the C9 game test (`desktop/recorder-obs/TEST-ON-WINDOWS.md`, or straight from `C:\klipt-deps\obs\bin\64bit`), results go in the decision record's C9 row; then desktop Task 4. On Linux: `cargo build -p klipt-recorder` and Task 1 Step 5.
+
+The rest of this file is the handoff written at the end of the Linux session.
+
+---
 
 ## What Klipt is
 

@@ -89,10 +89,10 @@ packaging/aur/PKGBUILD
 
 **Interfaces:**
 - **Loading libobs:**
-  - Load libobs at runtime with `libloading`, using bindgen's `dynamic_library_name("Obs")`. No import library is needed: `obs.dll` on Windows, `libobs.so.30` on Linux.
+  - Load libobs at runtime with `libloading`, using bindgen's `dynamic_library_name("Obs")`. No import library is needed: `obs.dll` on Windows, `libobs.so.33` on Linux (the soname follows OBS's major version).
   - Headers come from the env var `OBS_INCLUDE_DIR` (Windows CI/local: the obs-studio source `libobs/` at tag `33.0.1` plus SIMDe), defaulting to `/usr/include/obs` plus `third_party/simde` on Linux.
 - **Runtime layout:**
-  - Windows: `klipt-recorder.exe` sits in OBS's `bin/64bit/` next to `obs.dll`, `obs-ffmpeg-mux.exe`, `obs-nvenc-test.exe` and `obs-amf-test.exe`. Plugins are found at `../../obs-plugins/64bit/<name>.dll` with data at `../../data/obs-plugins/<name>/`, and libobs data at `../../data/libobs/`.
+  - Windows: `klipt-recorder.exe` sits in OBS's `bin/64bit/` next to `obs.dll`, `obs-ffmpeg-mux.exe`, `obs-nvenc-test.exe` and `obs-amf-test.exe`. Plugins are found at `../../core/<name>/<name>.dll` with data at `../../core/<name>/data/` (OBS 33's layout), and libobs data at `../../data/libobs/` relative to the working directory.
   - Linux: the system layout from the spike (`/usr/lib/obs-modules/core`, `/usr/share/obs/obs-modules/core`). Both roots can be overridden with `--obs-root`.
 - **Modules loaded explicitly:**
   - Windows: `win-capture, win-wasapi, obs-ffmpeg, obs-nvenc, obs-x264, obs-outputs`, plus `obs-qsv11` if present.
@@ -102,7 +102,7 @@ packaging/aur/PKGBUILD
   - Windows: `monitor_capture` (settings `monitor_id` = the chosen display id, `method` = 0 for auto), `wasapi_output_capture` and `wasapi_input_capture` with `device_id` = `"default"` or the chosen device.
   - Linux: `pipewire-screen-capture-source` with RestoreToken, `pulse_output_capture` and `pulse_input_capture`.
   - System audio goes to mixer bit 0 (track 1) and the mic to mixer bit 1 (track 2).
-- **Encoder choice when `encoder:"auto"`:** the first one that creates **and** starts from `obs_nvenc_h264_tex`, `h264_texture_amf`, `obs_qsv11_v2`, `obs_x264`. Settings: `rate_control=CBR, bitrate, keyint_sec=1, preset2=p4, tune=hq, multipass=disabled, lookahead=false, bf=0, profile=high` (for AMF and x264, map them to their keys: `rate_control=CBR`, `bitrate`, `keyint_sec=1`).
+- **Encoder choice when `encoder:"auto"`:** the first one that creates **and** starts from `obs_nvenc_h264_tex`, `h264_texture_amf`, `obs_qsv11_v2`, `obs_x264`. Settings: `rate_control=CBR, bitrate, keyint_sec=1, preset=p4, tune=hq, multipass=disabled, lookahead=false, bf=0, profile=high` (OBS 30.2+'s NVENC reads `preset`; `preset2` is ignored) (for AMF and x264, map them to their keys: `rate_control=CBR`, `bitrate`, `keyint_sec=1`).
 - **Output:** `replay_buffer` with `max_time_sec`, `max_size_mb=8192`, `directory`, `format="Klipt %CCYY-%MM-%DD %hh-%mm-%ss"` and `extension=mp4`.
 - **Protocol (JSON Lines).** stdin carries commands, stdout carries events, stderr carries libobs logs.
   - Commands:
@@ -151,7 +151,7 @@ packaging/aur/PKGBUILD
 - `windows-recorder.yml`:
   - Runs on `windows-latest`, on push to `feat/desktop` and on workflow_dispatch.
   - Steps: Rust stable → LLVM (for bindgen; it's preinstalled on the runner, so set `LIBCLANG_PATH`) → run the fetch script → `cargo build -p klipt-recorder --release`.
-  - Assembles an artifact `klipt-recorder-windows`, a zip that mirrors the OBS layout: `bin/64bit/` (obs.dll and its dependency DLLs, `klipt-recorder.exe`, the helper exes), `obs-plugins/64bit/` (only the 6–7 modules listed in Task 1), `data/libobs/` and `data/obs-plugins/<those modules>/`, plus `TEST-ON-WINDOWS.md`.
+  - Assembles an artifact `klipt-recorder-windows`, a zip that mirrors the OBS layout: `bin/64bit/` (obs.dll and its dependency DLLs, `klipt-recorder.exe`, the helper exes), `core/<module>/` (only the modules listed in Task 1, with their `data/`), and `data/libobs/`, plus `TEST-ON-WINDOWS.md`. Assembled by `scripts/package-recorder-windows.ps1`.
 - `TEST-ON-WINDOWS.md`: step-by-step for the owner.
   - Run `bin\64bit\klipt-recorder.exe --selftest --mic --hotkey ALT+F9 --exit-after 180 --out %USERPROFILE%\Videos\Klipt-test` from a terminal.
   - Play a game, press Alt+F9, and check the clip with the bundled instructions.

@@ -271,6 +271,7 @@
 </script>
 
 <div class="settings">
+  <div class="head"><div class="inner">
   <header class="bar">
     <button class="btn btn-ghost back" onclick={onclose}><Icon name="back" size={18} /> Clips</button>
     <h1>Settings</h1>
@@ -306,7 +307,9 @@
       </button>
     {/each}
   </div>
+  </div></div>
 
+  <div class="scroll"><div class="inner">
   <div class="sections" role="tabpanel" aria-labelledby="tab-{tab}">
     {#if tab === "recording"}
     <section>
@@ -571,22 +574,41 @@
     </section>
     {/if}
   </div>
+</div></div>
 </div>
 
 <style>
+  /* The header and tabs stay put; only the content below them scrolls. */
   .settings {
     position: relative;
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .head {
+    flex: none;
+    background: var(--bg);
+  }
+
+  .scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .inner {
     max-width: 46rem;
     margin: 0 auto;
-    padding: 0 1.75rem 2.5rem;
+    padding: 0 1.75rem;
+  }
+
+  .scroll .inner {
+    padding-bottom: 2.5rem;
   }
 
   .bar {
-    position: sticky;
-    top: 0;
-    z-index: 10;
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -599,9 +621,6 @@
   }
 
   .tabs {
-    position: sticky;
-    top: 3.75rem;
-    z-index: 9;
     display: flex;
     gap: 0.25rem;
     overflow-x: auto;

@@ -171,6 +171,19 @@
     }
   }
 
+  let unfreezeTimer: ReturnType<typeof setTimeout> | undefined;
+  function unfreezeAfterPaint() {
+    clearTimeout(unfreezeTimer);
+    const done = () => {
+      clearTimeout(unfreezeTimer);
+      // Another seek may have started meanwhile; keep the snapshot up for it.
+      if (!video?.seeking) frozen = false;
+    };
+    const v = video as (HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }) | undefined;
+    v?.requestVideoFrameCallback?.(() => requestAnimationFrame(done));
+    unfreezeTimer = setTimeout(done, 250);
+  }
+
   function seek(ms: number) {
     if (!video) return;
     position = ms;
@@ -213,8 +226,9 @@
       video.currentTime = next / 1000;
       return;
     }
-    // Unfreeze once the new frame has been painted.
-    requestAnimationFrame(() => (frozen = false));
+    // Unfreeze only once the new frame is actually on screen (WebKitGTK paints it after
+    // `seeked`); fall back to a short delay where requestVideoFrameCallback is missing.
+    unfreezeAfterPaint();
     syncAudio();
     if (video && !video.paused) playAudio();
   }
@@ -340,6 +354,7 @@
       <video
         bind:this={video}
         src={data.videoUrl}
+        crossorigin="anonymous"
         muted
         playsinline
         preload="auto"

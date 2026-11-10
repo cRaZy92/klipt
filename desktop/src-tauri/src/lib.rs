@@ -1,5 +1,6 @@
 //! Klipt desktop app core. All logic lives here; the Svelte UI talks to it through Tauri commands.
 
+pub mod commands;
 pub mod errors;
 pub mod export;
 pub mod feedback;
@@ -25,6 +26,8 @@ pub fn run() {
         // First, as its docs require: a second launch just shows this instance's window.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| tray::show_main_window(app)))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])));
     #[cfg(windows)]
     let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
@@ -33,7 +36,15 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let state = state::AppState::init(data_dir.clone())?;
             let settings = state.settings.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+            // Thumbnails (thumbs/ in the data dir, also in tauri.conf.json) and the clips folder
+            // load in the UI through the asset protocol.
+            commands::allow_clip_folder(app.handle(), &settings.output_dir);
+            if let Err(e) = app.asset_protocol_scope().allow_directory(data_dir.join("thumbs"), false) {
+                eprintln!("klipt: can't allow thumbnails in the asset scope: {e}");
+            }
             app.manage(state);
+            app.manage(commands::Uploads::default());
+            app.manage(hotkey::HotkeyStatusState::default());
             // The tray exists before the recorder so its first events reach the icon.
             tray::create(app.handle())?;
             app.manage(recorder::spawn_for_app(app.handle(), data_dir, &settings));
@@ -56,7 +67,25 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![recorder::save_clip])
+        .invoke_handler(tauri::generate_handler![
+            recorder::save_clip,
+            commands::get_settings,
+            commands::set_settings,
+            commands::get_account,
+            commands::check_server,
+            commands::login,
+            commands::logout,
+            commands::get_hotkey_status,
+            commands::save_clip_now,
+            commands::list_clips,
+            commands::list_games,
+            commands::rename_clip,
+            commands::set_clip_game,
+            commands::delete_clip,
+            commands::show_in_folder,
+            commands::copy_share_link,
+            commands::upload_clip,
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Klipt")
         .run(|app, event| {

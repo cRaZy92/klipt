@@ -65,6 +65,31 @@ pub mod events {
     pub const HOTKEY_ERROR: &str = "hotkey-error";
 }
 
+/// The latest shortcut outcome, kept so a window that starts listening after the
+/// `hotkey-bound`/`hotkey-error` events fired can still show it (`get_hotkey_status`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HotkeyStatus {
+    /// The bound shortcut as the system reports it.
+    pub display: Option<String>,
+    /// A friendly message when binding failed or the binding was lost.
+    pub error: Option<String>,
+}
+
+/// Managed Tauri state holding the latest [`HotkeyStatus`].
+#[derive(Default)]
+pub struct HotkeyStatusState(pub Mutex<HotkeyStatus>);
+
+impl HotkeyStatusState {
+    pub fn get(&self) -> HotkeyStatus {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    fn set(&self, status: HotkeyStatus) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = status;
+    }
+}
+
 /// Binds the shortcut from Settings on a background thread (KDE may show a dialog first) and
 /// saves a clip on every press. A failure doesn't affect recording: it's reported as a
 /// `hotkey-error` event and a notification, and "Save clip now" in the tray keeps working.
@@ -76,6 +101,9 @@ pub fn start_for_app(app: &tauri::AppHandle, accel: String) {
         let presses = service.events();
         match service.bind(&accel) {
             Ok(bound) => {
+                if let Some(status) = app.try_state::<HotkeyStatusState>() {
+                    status.set(HotkeyStatus { display: Some(bound.display.clone()), error: None });
+                }
                 let _ = app.emit(events::HOTKEY_BOUND, serde_json::json!({ "display": bound.display }));
             }
             Err(e) => {
@@ -101,9 +129,12 @@ pub fn start_for_app(app: &tauri::AppHandle, accel: String) {
 
 /// Tells the UI (`hotkey-error`) and the user (a notification) about a shortcut problem.
 fn report_error(app: &tauri::AppHandle, e: &AppError) {
-    use tauri::Emitter;
+    use tauri::{Emitter, Manager};
     eprintln!("klipt: save-clip shortcut: {e}");
     let message = e.user_message();
+    if let Some(status) = app.try_state::<HotkeyStatusState>() {
+        status.set(HotkeyStatus { display: None, error: Some(message.clone()) });
+    }
     let _ = app.emit(events::HOTKEY_ERROR, serde_json::json!({ "code": e.code(), "message": message }));
     crate::feedback::notify(app, "Klipt", Some(&message));
 }

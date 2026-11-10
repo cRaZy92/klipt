@@ -1,0 +1,87 @@
+<script lang="ts">
+  import type { Snippet } from "svelte";
+  import Icon from "./Icon.svelte";
+
+  let {
+    title,
+    onclose,
+    children,
+    footer,
+    width = "28rem",
+  }: { title: string; onclose: () => void; children: Snippet; footer?: Snippet; width?: string } = $props();
+
+  function onkeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") onclose();
+  }
+</script>
+
+<svelte:window {onkeydown} />
+
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
+  <div class="modal" role="dialog" aria-modal="true" aria-label={title} style:width>
+    <header>
+      <h2>{title}</h2>
+      <button class="btn btn-ghost btn-icon" aria-label="Close" onclick={onclose}><Icon name="close" /></button>
+    </header>
+    <div class="body">{@render children()}</div>
+    {#if footer}
+      <footer>{@render footer()}</footer>
+    {/if}
+  </div>
+</div>
+
+<style>
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+    background: rgba(5, 6, 9, 0.7);
+    backdrop-filter: blur(3px);
+    animation: fade 0.15s ease-out;
+  }
+
+  .modal {
+    max-width: 100%;
+    max-height: 100%;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 0.75rem 0.25rem 1.25rem;
+  }
+
+  h2 {
+    font-size: 1.1rem;
+  }
+
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 0.75rem 1.25rem 1.25rem;
+  }
+
+  footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0 1.25rem 1.25rem;
+  }
+
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+</style>

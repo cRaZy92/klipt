@@ -36,6 +36,18 @@ pub enum AppError {
     HotkeyLost,
     #[error("not logged in to the server")]
     Unauthorized,
+    #[error("wrong username or password")]
+    WrongCredentials,
+    #[error("invalid server address")]
+    InvalidServerAddress,
+    #[error("no Klipt server at that address: {0}")]
+    ServerNotFound(String),
+    #[error("invalid clip title")]
+    InvalidTitle,
+    #[error("the clip is already uploading")]
+    AlreadyUploading,
+    #[error("the clip's video file is missing")]
+    FileMissing,
     #[error("can't reach the server: {0}")]
     Network(String),
     #[error("server error: {0}")]
@@ -84,6 +96,12 @@ impl AppError {
             AppError::HotkeyTaken => "hotkey_taken",
             AppError::HotkeyUnavailable(_) | AppError::HotkeyLost => "hotkey_unavailable",
             AppError::Unauthorized => "unauthorized",
+            AppError::WrongCredentials => "wrong_credentials",
+            AppError::InvalidServerAddress => "invalid_server_address",
+            AppError::ServerNotFound(_) => "server_not_found",
+            AppError::InvalidTitle => "invalid_title",
+            AppError::AlreadyUploading => "already_uploading",
+            AppError::FileMissing => "file_missing",
             AppError::Network(_) => "network",
             AppError::ServerError(_) => "server_error",
             AppError::InvalidVideo(_) => "invalid_video",
@@ -117,6 +135,16 @@ impl AppError {
             }
             AppError::HotkeyLost => "The save shortcut stopped working. Use the tray menu to save, or restart Klipt.".into(),
             AppError::Unauthorized => "Your session has expired. Please log in again.".into(),
+            AppError::WrongCredentials => "Wrong username or password.".into(),
+            AppError::InvalidServerAddress => {
+                "That doesn't look like a server address. It should look like clips.example.com.".into()
+            }
+            AppError::ServerNotFound(_) => {
+                "Klipt couldn't find a Klipt server at that address. Check the address and your connection.".into()
+            }
+            AppError::InvalidTitle => "Give the clip a title (up to 100 characters).".into(),
+            AppError::AlreadyUploading => "This clip is already uploading.".into(),
+            AppError::FileMissing => "This clip's video file is missing. It may have been moved or deleted.".into(),
             AppError::Network(_) => "Can't reach the Klipt server. Check your connection and try again.".into(),
             AppError::ServerError(_) => "The server had a problem. Try again in a moment.".into(),
             AppError::InvalidVideo(_) => "The server couldn't read this video. It may be damaged.".into(),

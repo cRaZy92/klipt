@@ -23,8 +23,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      # Host port for a tunnel or reverse proxy (e.g. Pangolin) to reach. Change with KLIPT_PORT.
-      - "${KLIPT_PORT:-3000}:3000"
+      # Host port for a tunnel or reverse proxy (e.g. Pangolin) to reach. Change with KLIPT_PORT (default 3260).
+      - "${KLIPT_PORT:-3260}:3000"
     volumes:
       - klipt-data:/data
     environment:

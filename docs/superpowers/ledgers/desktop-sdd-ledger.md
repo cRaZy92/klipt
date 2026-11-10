@@ -48,3 +48,8 @@ Claims checked against libobs 33.0.1 source before fixing. All 9 addressed:
 9. Minor (Linux) — `improper_ctypes` on the tuple Rusage, dead code warning. Fixed.
 Notes for Task 6 (supervisor): keep draining the recorder's stderr (a full pipe blocks libobs threads), and if `stopped` doesn't arrive within ~15 s of `stop`, kill the child by PID.
 Still unverified: the Linux paths compile only by reading; Step 5 on CachyOS needs obs-ffmpeg-mux/obs-nvenc-test symlinked next to target/debug/klipt-recorder.
+
+## C9 prep (2026-11-10): Alt+F9 is taken on NVIDIA PCs
+- The owner's first C9 run got `RegisterHotKey` error 1409 for ALT+F9. A probe showed exactly NVIDIA App's default set taken: Alt+F9, Alt+F10, Alt+Shift+F10, Alt+F1, Alt+Z, Alt+R. Alt+F8, Alt+F11, Alt+F12, F8, F9, Ctrl+Alt+F9, Alt+Shift+F9 and Ctrl+Shift+F9 were free. NVIDIA's registry (`HKCU\Software\NVIDIA Corporation\Global\ShadowPlay\NVSPCAPS`) shows ShadowPlay enabled with a 300 s buffer at 60 fps.
+- The C9 test now uses `--hotkey ALT+F8`, and TEST-ON-WINDOWS.md says to turn off other background recorders during the FPS test.
+- For Task 4: don't default the app's hotkey to Alt+F9 (the plan says `"Alt+F9"`); use Alt+F8. Task 4/6 must also handle a taken shortcut: show "already used by another app" and offer Change, not just fail.

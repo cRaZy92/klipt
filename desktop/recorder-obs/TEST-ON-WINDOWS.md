@@ -25,19 +25,21 @@ Copy all three lines into your message.
 
 Pick a game that runs **uncapped** (no FPS limit, no V-Sync) and a spot you can return to where the FPS is steady.
 
+Turn off any other background recorder for the whole test, or it skews both FPS numbers: NVIDIA Instant Replay (Alt+Z → Instant Replay → Off), AMD Instant Replay, or Xbox Game Bar background recording. NVIDIA App also takes Alt+F9 and Alt+F10, which is why this test uses Alt+F8. If the recorder says the shortcut is already in use, pick another one, for example `--hotkey CTRL+ALT+F9`.
+
 1. **Without recording:** stand in that spot for 60 seconds and note the average FPS (the game's FPS counter, or [CapFrameX](https://www.capframex.com/)).
 2. In PowerShell, start the recorder:
    ```powershell
-   .\bin\64bit\klipt-recorder.exe --selftest --mic --hotkey ALT+F9 --exit-after 180 --out "$env:USERPROFILE\Videos\Klipt-test"
+   .\bin\64bit\klipt-recorder.exe --selftest --mic --hotkey ALT+F8 --exit-after 180 --out "$env:USERPROFILE\Videos\Klipt-test"
    ```
    It records for 3 minutes, keeping the last 30 seconds in memory.
 3. Switch to the game (fullscreen) and stand in the same spot for 60 seconds. Note the average FPS again.
-4. Still in the game, say something into your mic and press **Alt+F9**. Wait a few seconds and press it again.
+4. Still in the game, say something into your mic and press **Alt+F8**. Wait a few seconds and press it again.
 5. When the 3 minutes are up, the recorder prints a `stats` line and stops.
 
 ## 4. Check the clips
 
-Open `Videos\Klipt-test`. Each Alt+F9 press should have made a file called `Klipt <date> <time>.mp4`:
+Open `Videos\Klipt-test`. Each Alt+F8 press should have made a file called `Klipt <date> <time>.mp4`:
 - It plays, and shows the last ~30 seconds of the game.
 - The first audio track is the game sound only, the second is your mic only. (VLC: Audio → Audio Track.)
 
@@ -46,7 +48,7 @@ Open `Videos\Klipt-test`. Each Alt+F9 press should have made a file called `Klip
 - The three lines from step 2.
 - The FPS without and with recording.
 - Everything the recorder printed in step 3, especially the `started`, `saved` and `stats` lines.
-- Whether Alt+F9 worked while the game was fullscreen.
+- Whether Alt+F8 worked while the game was fullscreen.
 - Your GPU model.
 
 If anything fails, also send the text it printed. To get the full log, run the command again with ` 2> log.txt` at the end and send `log.txt`.

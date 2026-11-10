@@ -10,7 +10,14 @@ On the owner's Windows dual boot (same PC: RTX 3070 Ti, two 1920×1080 monitors)
 - **Desktop Task 1 is built** (`desktop/recorder-obs`, `klipt-recorder`) and verified on Windows: NVENC p4 CBR 1080p60, 2 audio tracks, busy on double save, x264 fallback, second monitor. Not compiled on Linux yet.
 - **Task 2:** `scripts/fetch-obs-windows.ps1`, `scripts/package-recorder-windows.ps1` (57 MB test folder) and `.github/workflows/windows-recorder.yml`.
 - Plans, decision record and WINDOWS-DEV were corrected for OBS 33 facts (plugin layout `core/<name>/`, DLL search, stdout logging, NVENC `preset` not `preset2` — the Linux spike's preset comparison never applied the preset).
-- **Next:** the owner runs the C9 game test (`desktop/recorder-obs/TEST-ON-WINDOWS.md`, or straight from `C:\klipt-deps\obs\bin\64bit`), results go in the decision record's C9 row; then desktop Task 4. On Linux: `cargo build -p klipt-recorder` and Task 1 Step 5.
+- 2026-11-10: `feat/server` merged into `main` (fast-forward, CI green). `main` merged into `feat/desktop`. Windows CI fixed (clang `_udiv128`, packaging path bug) and green; each push uploads `klipt-recorder-windows`.
+- Hotkeys: NVIDIA App holds Alt+F9/F10/Z/R on the owner's PC. The recorder accepts `--hotkey ALT+BACKQUOTE` (key under Esc, `;` on Slovak). It's the app's default hotkey now (owner's choice).
+- **Desktop Task 4 is done** (commit 0e5d592, pushed): Tauri 2 + Svelte 5 scaffold, settings, library DB, ffmpeg tools; 26 tests pass. Its independent review was **started but stopped** when the owner shut down. Re-run it first (scope: `git show 0e5d592`, plan Task 4 + Review Focus 4), fix what it finds, then continue.
+- **Next:**
+  1. The Task 4 review, as above.
+  2. Desktop Task 5 (game detection).
+  3. The owner's C9 game test (postponed by the owner; command in `desktop/recorder-obs/TEST-ON-WINDOWS.md` with `--hotkey ALT+BACKQUOTE`; turn off NVIDIA Instant Replay first). Results go in the decision record's C9 row. Task 6 should wait for it.
+  4. On Linux: `cargo build -p klipt-recorder` and Task 1 Step 5.
 
 The rest of this file is the handoff written at the end of the Linux session.
 

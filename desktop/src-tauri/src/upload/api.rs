@@ -25,10 +25,16 @@ pub struct Me {
     pub is_admin: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Clone, PartialEq, Deserialize)]
 pub struct Session {
     pub token: String,
     pub me: Me,
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session").field("token", &"<redacted>").field("me", &self.me).finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +145,14 @@ impl ApiClient {
 
     pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base)
+    }
+
+    /// Whether `url` is on this server (same scheme, host and port), so it may get our token.
+    pub(crate) fn same_origin(&self, url: &str) -> bool {
+        match (reqwest::Url::parse(&self.base), reqwest::Url::parse(url)) {
+            (Ok(a), Ok(b)) => a.origin() == b.origin(),
+            _ => false,
+        }
     }
 
     /// Resolves a `Location` header (absolute or relative) against the server address.

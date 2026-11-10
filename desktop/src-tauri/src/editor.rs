@@ -98,12 +98,17 @@ pub fn save_edit(library: &Library, uploads: &Uploads, cache_dir: &Path, id: &st
     if current_edit(&clip) == edit {
         return Ok(false);
     }
+    // Drop the old cut's upload export first: if that fails, the edit isn't saved either, so a
+    // retry still sees a changed edit and cleans up (instead of resuming the old cut's upload).
+    let (trim, volumes) =
+        (Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms }, Volumes { game: edit.game_volume, mic: edit.mic_volume });
+    crate::library::validate_edit(trim, volumes)?;
+    forget_upload_export(library, cache_dir, id)?;
     library.update_edit(
         id,
         Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms },
         Volumes { game: edit.game_volume, mic: edit.mic_volume },
     )?;
-    forget_upload_export(library, cache_dir, id)?;
     Ok(true)
 }
 

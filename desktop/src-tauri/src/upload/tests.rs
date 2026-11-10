@@ -343,3 +343,47 @@ async fn get_json_sends_the_token_and_encoded_query() {
     Mock::given(method("GET")).and(path("/api/games")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
     assert_eq!(client.get_json("tok", "/api/games", &[]).await.unwrap_err(), ApiError::Unauthorized);
 }
+
+#[tokio::test]
+async fn a_saved_upload_url_on_another_server_is_not_resumed() {
+    let server = MockServer::start().await;
+    let other = MockServer::start().await;
+    Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).expect(0).mount(&other).await;
+    created(&server).expect(1).mount(&server).await;
+    patch_ok(0, 20).expect(1).mount(&server).await;
+    let (_d, f) = file();
+    let client = ApiClient::new(&server.uri()).unwrap();
+    let resume = Some((format!("{}/api/uploads/old", other.uri()), 8));
+    let out = tus::upload_with(&client, "tok", &f, resume, |_, _| {}, |_, _| {}, &fast(32)).await.unwrap();
+    assert_eq!(out.upload_id, "up1");
+}
+
+#[tokio::test]
+async fn failures_that_still_advance_the_upload_do_not_use_up_the_retries() {
+    let server = MockServer::start().await;
+    created(&server).expect(1).mount(&server).await;
+    // Every PATCH "fails" (500) yet the server keeps 2 more bytes each time, as a slow link
+    // whose requests time out after delivering part of the chunk would.
+    let offset = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let o = offset.clone();
+    Mock::given(method("PATCH"))
+        .respond_with(move |_: &Request| {
+            o.fetch_add(2, std::sync::atomic::Ordering::SeqCst);
+            ResponseTemplate::new(500)
+        })
+        .mount(&server)
+        .await;
+    let o = offset.clone();
+    Mock::given(method("HEAD"))
+        .respond_with(move |_: &Request| {
+            let now = o.load(std::sync::atomic::Ordering::SeqCst).min(20);
+            ResponseTemplate::new(200).insert_header("Upload-Offset", now.to_string().as_str()).insert_header("Upload-Length", "20")
+        })
+        .mount(&server)
+        .await;
+    let (_d, f) = file();
+    let client = ApiClient::new(&server.uri()).unwrap();
+    // 10 failing PATCHes (20 bytes / 2) is more than the 5 backoff steps; it must still finish.
+    let out = tus::upload_with(&client, "tok", &f, None, |_, _| {}, |_, _| {}, &fast(32)).await.unwrap();
+    assert_eq!(out.upload_id, "up1");
+}

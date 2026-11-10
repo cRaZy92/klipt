@@ -152,16 +152,7 @@ impl Library {
     }
 
     pub fn update_edit(&self, id: &str, trim: Trim, volumes: Volumes) -> Result<()> {
-        if let (Some(start), Some(end)) = (trim.start_ms, trim.end_ms) {
-            if start >= end {
-                return Err(AppError::InvalidInput(format!("trim start {start} ms is not before end {end} ms")));
-            }
-        }
-        for volume in [volumes.game, volumes.mic] {
-            if !(0.0..=MAX_VOLUME).contains(&volume) {
-                return Err(AppError::InvalidInput(format!("volume {volume} is outside 0..={MAX_VOLUME}")));
-            }
-        }
+        validate_edit(trim, volumes)?;
         self.update(
             id,
             "UPDATE clips SET trim_start_ms = ?2, trim_end_ms = ?3, game_volume = ?4, mic_volume = ?5 WHERE id = ?1",
@@ -246,6 +237,21 @@ fn remove_if_present(path: &Path) -> std::io::Result<()> {
         Err(e) if e.kind() != ErrorKind::NotFound => Err(e),
         _ => Ok(()),
     }
+}
+
+/// Checks a trim and volumes without touching the library.
+pub fn validate_edit(trim: Trim, volumes: Volumes) -> Result<()> {
+    if let (Some(start), Some(end)) = (trim.start_ms, trim.end_ms) {
+        if start >= end {
+            return Err(AppError::InvalidInput(format!("trim start {start} ms is not before end {end} ms")));
+        }
+    }
+    for volume in [volumes.game, volumes.mic] {
+        if !(0.0..=MAX_VOLUME).contains(&volume) {
+            return Err(AppError::InvalidInput(format!("volume {volume} is outside 0..={MAX_VOLUME}")));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -450,3 +456,4 @@ mod tests {
         assert!(f.lib.insert(new_clip(&c.path, 2, None)).is_err());
     }
 }
+

@@ -1,6 +1,7 @@
 //! The local clip library: one SQLite row per saved clip, plus generated thumbnails.
 
 mod db;
+pub use db::validate_edit;
 
 use std::path::PathBuf;
 

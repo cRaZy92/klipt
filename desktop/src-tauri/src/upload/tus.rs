@@ -103,11 +103,23 @@ pub async fn upload_with(
     let filename = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "clip.mp4".into());
     let chunk_size = opts.chunk_size.max(1);
 
+    // A saved upload URL from another server (the user switched servers) must not get this
+    // server's token: start fresh instead.
+    let resume = resume.filter(|(url, _)| {
+        let ok = client.same_origin(url);
+        if !ok {
+            eprintln!("klipt: not resuming an upload on another server; starting over");
+        }
+        ok
+    });
     let mut st = match resume {
         Some((url, offset)) => State { url: Some(url), offset, need_head: true },
         None => State { url: None, offset: 0, need_head: false },
     };
     let mut failures = 0usize;
+    // The offset when the last failure happened: a HEAD that shows the server got further
+    // (a slow PATCH that timed out after delivering bytes) resets the retry budget.
+    let mut failed_at = 0u64;
     let mut restarted = false;
 
     loop {
@@ -115,7 +127,11 @@ pub async fn upload_with(
         match step {
             Ok(Progress::Done) => break,
             Ok(Progress::Advanced) => failures = 0,
-            Ok(Progress::Idle) => {}
+            Ok(Progress::Idle) => {
+                if failures > 0 && st.offset > failed_at {
+                    failures = 0;
+                }
+            }
             Err(Fail::Fatal(e)) => return Err(e),
             Err(Fail::Gone) => {
                 if restarted {
@@ -130,6 +146,7 @@ pub async fn upload_with(
                 };
                 tokio::time::sleep(*wait).await;
                 failures += 1;
+                failed_at = st.offset;
                 st.need_head = st.url.is_some();
             }
         }

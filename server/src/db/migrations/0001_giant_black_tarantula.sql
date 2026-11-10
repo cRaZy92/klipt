@@ -1,0 +1,1 @@
+ALTER TABLE "uploads" ADD COLUMN "finalizing_at" timestamp with time zone;

@@ -1,0 +1,241 @@
+import { existsSync } from 'node:fs';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { count, eq } from 'drizzle-orm';
+import { clips, uploads } from '../src/db/schema.js';
+import { cleanupStaleUploads } from '../src/uploads/tus.js';
+import { createUser, makeCorruptVideo, makeFixtureVideo, listenOrigin, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
+
+let t: TestApp;
+let token: string;
+let headers: Record<string, string>;
+let fixture: Buffer;
+
+beforeEach(async () => {
+  t = await makeTestApp();
+  const user = await createUser(t.db, { username: 'alice' });
+  const s = await sessionFor(t.db, user.id, 'desktop');
+  token = s.token;
+  headers = s.headers;
+  const dir = await mkdtemp(join(tmpdir(), 'klipt-fx-'));
+  fixture = await readFile(await makeFixtureVideo(dir));
+});
+afterEach(() => t.close());
+
+const finalize = (uploadId: string, extra: Record<string, unknown> = {}, h = headers) =>
+  t.app.inject({ method: 'POST', url: '/api/clips', headers: h, payload: { uploadId, title: 'Nice', ...extra } });
+const tusFiles = () => readdir(join(t.dataDir, 'tus')).catch(() => [] as string[]);
+
+describe('uploads and finalize', () => {
+  it('uploads fully then finalizes into a clip', async () => {
+    const { uploadId, location } = await tusUpload(t.app, token, fixture, { chunkSize: 10_000 });
+    expect(location).toBe(`http://localhost/api/uploads/${uploadId}`);
+    const res = await finalize(uploadId, { gameName: 'Doom', steamAppId: 42 });
+    expect(res.statusCode).toBe(201);
+    const clip = res.json();
+    expect(clip.shareUrl).toMatch(/^http:\/\/localhost\/c\/[A-Za-z0-9_-]{12}$/);
+    expect(clip).toMatchObject({ title: 'Nice', gameName: 'Doom', steamAppId: 42, visibility: 'feed', owner: { username: 'alice' } });
+    expect(clip.videoUrl).toBe(`http://localhost/media/${clip.id}.mp4`);
+    expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.mp4`))).toBe(true);
+    expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.jpg`))).toBe(true);
+    expect(await tusFiles()).toEqual([]);
+    expect(await t.db.select({ id: uploads.id, clipId: uploads.clipId }).from(uploads)).toEqual([{ id: uploadId, clipId: clip.id }]);
+  });
+
+  it('a repeated finalize after success returns the same clip with 200 (lost-response retry)', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    const first = await finalize(uploadId, { gameName: 'Doom' });
+    expect(first.statusCode).toBe(201);
+    const again = await finalize(uploadId, { title: 'Different title' });
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toEqual(first.json());
+    const [{ n }] = await t.db.select({ n: count() }).from(clips);
+    expect(n).toBe(1);
+    const bob = await createUser(t.db, { username: 'bob' });
+    const b = await sessionFor(t.db, bob.id, 'desktop');
+    expect((await finalize(uploadId, {}, b.headers)).statusCode).toBe(404);
+    const del = await t.app.inject({ method: 'DELETE', url: `/api/clips/${first.json().id}`, headers });
+    expect(del.statusCode).toBe(204);
+    expect(await t.db.select().from(uploads)).toHaveLength(0);
+    expect((await finalize(uploadId)).statusCode).toBe(404);
+  });
+
+  it('removes finalized tombstones after the max age', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    expect((await finalize(uploadId)).statusCode).toBe(201);
+    const now = Date.now();
+    expect(await cleanupStaleUploads(t.db, t.dataDir, new Date(now + 3600_000))).toBe(0);
+    expect(await t.db.select().from(uploads)).toHaveLength(1);
+    expect(await cleanupStaleUploads(t.db, t.dataDir, new Date(now + 25 * 3600_000))).toBe(1);
+    expect(await t.db.select().from(uploads)).toHaveLength(0);
+    expect((await finalize(uploadId)).statusCode).toBe(404);
+  });
+
+  it('rejects unauthenticated uploads with 401', async () => {
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/api/uploads',
+      headers: { 'tus-resumable': '1.0.0', 'upload-length': '10' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('resumes: HEAD reports the offset, remaining chunks complete the upload', async () => {
+    const chunkSize = Math.ceil(fixture.length / 4);
+    const { uploadId, location } = await tusUpload(t.app, token, fixture, { chunkSize, stopAfterChunks: 2 });
+    const url = `${await listenOrigin(t.app)}${new URL(location).pathname}`;
+    const head = await fetch(url, {
+      method: 'HEAD',
+      headers: { authorization: `Bearer ${token}`, 'tus-resumable': '1.0.0' },
+    });
+    expect(head.status).toBe(200);
+    expect(head.headers.get('upload-offset')).toBe(String(2 * chunkSize));
+
+    expect((await finalize(uploadId)).statusCode).toBe(409);
+
+    const rest = fixture.subarray(2 * chunkSize);
+    const patch = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'tus-resumable': '1.0.0',
+        'content-type': 'application/offset+octet-stream',
+        'upload-offset': String(2 * chunkSize),
+      },
+      body: new Uint8Array(rest),
+    });
+    expect(patch.status).toBe(204);
+    expect((await finalize(uploadId)).statusCode).toBe(201);
+  });
+
+  it('answers 409 upload_incomplete for partial uploads', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture, { chunkSize: 1000, stopAfterChunks: 1 });
+    const res = await finalize(uploadId);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('upload_incomplete');
+  });
+
+  it("answers 404 when finalizing another user's upload, and hides it from HEAD", async () => {
+    const { uploadId, location } = await tusUpload(t.app, token, fixture);
+    const bob = await createUser(t.db, { username: 'bob' });
+    const b = await sessionFor(t.db, bob.id, 'desktop');
+    expect((await finalize(uploadId, {}, b.headers)).statusCode).toBe(404);
+    const head = await fetch(`${await listenOrigin(t.app)}${new URL(location).pathname}`, {
+      method: 'HEAD',
+      headers: { authorization: `Bearer ${b.token}`, 'tus-resumable': '1.0.0' },
+    });
+    expect(head.status).toBe(404);
+  });
+
+  it('answers 404 to tus requests for ids without an owned upload row (no store fall-through)', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture, { chunkSize: 1000, stopAfterChunks: 1 });
+    const bob = await createUser(t.db, { username: 'bob' });
+    const b = await sessionFor(t.db, bob.id, 'desktop');
+    const origin = await listenOrigin(t.app);
+    const sidecar = join(t.dataDir, 'tus', `${uploadId}.json`);
+    const del = await fetch(`${origin}/api/uploads/${uploadId}.json`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${b.token}`, 'tus-resumable': '1.0.0' },
+    });
+    expect(del.status).toBe(404);
+    expect(existsSync(sidecar)).toBe(true);
+    const own = await fetch(`${origin}/api/uploads/${uploadId}.json`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}`, 'tus-resumable': '1.0.0' },
+    });
+    expect(own.status).toBe(404);
+    expect(existsSync(sidecar)).toBe(true);
+  });
+
+  it('rejects a non-video with 422 and cleans up', async () => {
+    const { uploadId } = await tusUpload(t.app, token, Buffer.from('hello, I am not a video '.repeat(50)));
+    const res = await finalize(uploadId);
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ error: 'not_a_video', message: "That file isn't a video Klipt can play." });
+    expect(await tusFiles()).toEqual([]);
+    const [{ n }] = await t.db.select({ n: count() }).from(clips);
+    expect(n).toBe(0);
+    expect(await t.db.select().from(uploads)).toHaveLength(0);
+    expect(await readdir(join(t.dataDir, 'clips'))).toEqual([]);
+  });
+
+  it('rejects a damaged (truncated) video with 422 corrupt_video and cleans up', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'klipt-fx-'));
+    const { uploadId } = await tusUpload(t.app, token, await readFile(await makeCorruptVideo(dir)));
+    const res = await finalize(uploadId);
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({ error: 'corrupt_video', message: "That video file is damaged and can't be played." });
+    const [{ n }] = await t.db.select({ n: count() }).from(clips);
+    expect(n).toBe(0);
+    expect(await t.db.select().from(uploads)).toHaveLength(0);
+    expect(await tusFiles()).toEqual([]);
+    expect(await readdir(join(t.dataDir, 'clips'))).toEqual([]);
+  });
+
+  it('answers 500 and keeps the upload when ffprobe is missing', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    const saved = process.env.FFPROBE_PATH;
+    process.env.FFPROBE_PATH = '/nonexistent';
+    try {
+      const res = await finalize(uploadId);
+      expect(res.statusCode).toBe(500);
+    } finally {
+      if (saved === undefined) delete process.env.FFPROBE_PATH;
+      else process.env.FFPROBE_PATH = saved;
+    }
+    const [row] = await t.db.select().from(uploads).where(eq(uploads.id, uploadId));
+    expect(row).toMatchObject({ id: uploadId, finalizingAt: null });
+    expect(existsSync(join(t.dataDir, 'tus', uploadId))).toBe(true);
+    expect((await finalize(uploadId)).statusCode).toBe(201);
+  });
+
+  it('rejects uploads larger than the max size with 413', async () => {
+    await t.close();
+    t = await makeTestApp({ maxUploadMb: 1 });
+    const user = await createUser(t.db, { username: 'alice' });
+    const s = await sessionFor(t.db, user.id, 'desktop');
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/api/uploads',
+      headers: { authorization: `Bearer ${s.token}`, 'tus-resumable': '1.0.0', 'upload-length': String(2 * 1024 * 1024) },
+    });
+    expect(res.statusCode).toBe(413);
+  });
+
+  it('cleans up stale uploads only after the max age', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture, { chunkSize: 1000, stopAfterChunks: 1 });
+    const [row] = await t.db.select().from(uploads).where(eq(uploads.id, uploadId));
+    const h = (n: number) => new Date(row!.createdAt.getTime() + n * 3600_000);
+    expect(await cleanupStaleUploads(t.db, t.dataDir, h(1))).toBe(0);
+    expect(existsSync(join(t.dataDir, 'tus', uploadId))).toBe(true);
+    expect(await cleanupStaleUploads(t.db, t.dataDir, h(25))).toBe(1);
+    expect(await tusFiles()).toEqual([]);
+    expect(await t.db.select().from(uploads)).toHaveLength(0);
+  });
+
+  it('validates the title', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    expect((await finalize(uploadId, { title: '   ' })).statusCode).toBe(400);
+    expect((await finalize(uploadId, { title: 'x'.repeat(101) })).statusCode).toBe(400);
+  });
+
+  it('is race-safe: concurrent finalizes of one upload yield one clip, never a 422', async () => {
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    const results = await Promise.all([finalize(uploadId), finalize(uploadId), finalize(uploadId)]);
+    const created = results.filter((r) => r.statusCode === 201);
+    expect(created).toHaveLength(1);
+    const clipId = created[0]!.json().id;
+    for (const r of results.filter((r) => r.statusCode !== 201)) {
+      expect([200, 409]).toContain(r.statusCode);
+      if (r.statusCode === 200) expect(r.json().id).toBe(clipId);
+      else expect(r.json().error).toBe('upload_finalizing');
+    }
+    const [{ n }] = await t.db.select({ n: count() }).from(clips);
+    expect(n).toBe(1);
+    const retry = await finalize(uploadId);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().id).toBe(clipId);
+  });
+});

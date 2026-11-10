@@ -575,6 +575,7 @@
 
 <style>
   .settings {
+    position: relative;
     display: flex;
     flex-direction: column;
     max-width: 46rem;

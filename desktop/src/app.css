@@ -32,12 +32,16 @@ html,
 body {
   margin: 0;
   height: 100%;
+  /* The app shell scrolls its own main area; the page itself never scrolls. */
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
 }
 
 #app {
   height: 100%;
+  /* Only the login screen can need this; the app shell fits the window exactly. */
+  overflow-y: auto;
 }
 
 h1,

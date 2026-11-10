@@ -320,3 +320,26 @@ fn auth_file_is_private() {
     let mode = std::fs::metadata(dir.path().join("auth.json")).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
 }
+
+#[tokio::test]
+async fn get_json_sends_the_token_and_encoded_query() {
+    use wiremock::matchers::query_param;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/clips"))
+        .and(header("authorization", "Bearer tok"))
+        .and(query_param("scope", "feed"))
+        .and(query_param("game", "A & B"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"items": [], "nextCursor": null})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = ApiClient::new(&server.uri()).unwrap();
+    let body = client
+        .get_json("tok", "/api/clips", &[("scope", "feed".into()), ("game", "A & B".into())])
+        .await
+        .unwrap();
+    assert_eq!(body["nextCursor"], serde_json::Value::Null);
+    Mock::given(method("GET")).and(path("/api/games")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
+    assert_eq!(client.get_json("tok", "/api/games", &[]).await.unwrap_err(), ApiError::Unauthorized);
+}

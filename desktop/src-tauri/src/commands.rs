@@ -450,6 +450,12 @@ pub fn copy_share_link(app: AppHandle, state: State<'_, AppState>, id: String) -
     Ok(url)
 }
 
+/// Copies any text (a feed clip's share link) to the clipboard.
+#[tauri::command]
+pub fn copy_text_to_clipboard(app: AppHandle, text: String) -> Result<()> {
+    copy_text(&app, &text)
+}
+
 fn copy_text(app: &AppHandle, text: &str) -> Result<()> {
     app.clipboard().write_text(text).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
 }
@@ -968,4 +974,42 @@ mod tests {
         let empty = MockServer::start().await;
         assert!(matches!(check_server_at(&empty.uri()).await, Err(AppError::ServerNotFound(_))));
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Feed (everyone's uploaded clips, from the server)
+
+const FEED_TIMEOUT: Duration = Duration::from_secs(20);
+
+async fn server_get(app: &AppHandle, path: &str, query: Vec<(&str, String)>) -> Result<serde_json::Value> {
+    let saved = auth::load(&app.state::<AppState>().data_dir).ok_or(AppError::Unauthorized)?;
+    let client = ApiClient::with_timeout(&saved.server_url, FEED_TIMEOUT)?;
+    Ok(client.get_json(&saved.token, path, &query).await?)
+}
+
+/// One page of the shared feed: the server's `ClipList`.
+#[tauri::command]
+pub async fn feed_clips(app: AppHandle, game: Option<String>, cursor: Option<String>) -> Result<serde_json::Value> {
+    let mut query = vec![("scope", "feed".to_string())];
+    query.extend(game.filter(|g| !g.is_empty()).map(|g| ("game", g)));
+    query.extend(cursor.filter(|c| !c.is_empty()).map(|c| ("cursor", c)));
+    server_get(&app, "/api/clips", query).await
+}
+
+/// The feed's games with clip counts: the server's `GameCount[]`.
+#[tauri::command]
+pub async fn feed_games(app: AppHandle) -> Result<serde_json::Value> {
+    server_get(&app, "/api/games", vec![("scope", "feed".to_string())]).await
+}
+
+/// Opens the Klipt website (or one of its pages) in the browser.
+#[tauri::command]
+pub fn open_website(app: AppHandle, path: Option<String>) -> Result<()> {
+    let saved = auth::load(&app.state::<AppState>().data_dir).ok_or(AppError::Unauthorized)?;
+    let path = path.unwrap_or_default();
+    if !path.is_empty() && !path.starts_with('/') {
+        return Err(AppError::InvalidInput("a website path starts with /".into()));
+    }
+    let url = format!("{}{}", saved.server_url.trim_end_matches('/'), path);
+    app.opener().open_url(url, None::<&str>).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
 }

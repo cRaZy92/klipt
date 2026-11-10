@@ -194,6 +194,33 @@ export function fileUrl(path: string): string {
   return convertFileSrc(path);
 }
 
+/** A clip on the server's shared feed (the server's `Clip`). */
+export interface FeedClip {
+  id: string;
+  title: string;
+  gameName: string | null;
+  steamAppId: number | null;
+  durationMs: number;
+  width: number;
+  height: number;
+  createdAt: string;
+  owner: { username: string };
+  shareUrl: string;
+  videoUrl: string;
+  thumbnailUrl: string;
+}
+
+export interface FeedPage {
+  items: FeedClip[];
+  nextCursor: string | null;
+}
+
+export interface FeedGame {
+  gameName: string;
+  steamAppId: number | null;
+  count: number;
+}
+
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   /** Saves and applies settings: restarts the recorder, rebinds the shortcut, toggles autostart. */
@@ -218,6 +245,11 @@ export const api = {
   copyShareLink: (id: string) => invoke<string>("copy_share_link", { id }),
   uploadClip: (id: string, title: string, visibility: Visibility) =>
     invoke<void>("upload_clip", { id, title, visibility }),
+  feedClips: (game: string | null, cursor: string | null) => invoke<FeedPage>("feed_clips", { game, cursor }),
+  feedGames: () => invoke<FeedGame[]>("feed_games"),
+  copyText: (text: string) => invoke<void>("copy_text_to_clipboard", { text }),
+  /** Opens the Klipt website in the browser; `path` like `/me`. */
+  openWebsite: (path?: string) => invoke<void>("open_website", { path: path ?? null }),
   openEditor: (id: string) => invoke<EditorData>("open_editor", { id }),
   saveEdit: (id: string, edit: EditInput) => invoke<void>("save_edit", { id, ...edit }),
   /** Resolves once the copy is written; progress arrives as `export-progress`. */

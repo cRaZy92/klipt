@@ -170,6 +170,14 @@ impl ApiClient {
         parse_json(resp).await
     }
 
+    /// An authenticated GET of a JSON API path, returned as-is (the feed and game lists).
+    pub async fn get_json(&self, token: &str, path: &str, query: &[(&str, String)]) -> Result<serde_json::Value, ApiError> {
+        let mut url = reqwest::Url::parse(&self.url(path)).map_err(|_| ApiError::Network("invalid server address".into()))?;
+        url.query_pairs_mut().extend_pairs(query.iter().map(|(k, v)| (*k, v.as_str())));
+        let resp = self.http.get(url).bearer_auth(token).send().await.map_err(network)?;
+        parse_json(resp).await
+    }
+
     pub async fn logout(&self, token: &str) -> Result<(), ApiError> {
         let resp = self.http.post(self.url("/api/auth/logout")).bearer_auth(token).send().await.map_err(network)?;
         if resp.status().is_success() {

@@ -8,12 +8,13 @@
   import Toast from "./components/Toast.svelte";
   import Modal from "./components/Modal.svelte";
   import Editor from "./views/Editor.svelte";
+  import Feed from "./views/Feed.svelte";
   import Library from "./views/Library.svelte";
   import Login from "./views/Login.svelte";
   import SettingsView from "./views/Settings.svelte";
 
   // The screens. Library is home.
-  type View = { name: "library" } | { name: "editor"; clip: ClipView } | { name: "settings" };
+  type View = { name: "library" } | { name: "feed" } | { name: "editor"; clip: ClipView } | { name: "settings" };
   /** Where the user asked to go while the current screen had unsaved changes. */
   type Leaving = { to: "view"; view: View } | { to: "logout" };
 
@@ -161,6 +162,12 @@
         <span class="logo"><Icon name="record" size={16} /></span>
         Klipt
       </button>
+      <nav class="tabs" aria-label="Sections">
+        <button class:active={view.name === "library" || view.name === "editor"} onclick={() => go({ name: "library" })}>
+          My clips
+        </button>
+        <button class:active={view.name === "feed"} onclick={() => go({ name: "feed" })}>Feed</button>
+      </nav>
       <div class="right">
         <button
           class="btn btn-ghost btn-icon"
@@ -191,6 +198,13 @@
           {hotkey}
           bufferSeconds={settings?.bufferSeconds ?? 30}
           onedit={(clip) => go({ name: "editor", clip })}
+        />
+      {:else if view.name === "feed"}
+        <Feed
+          onunauthorized={() => {
+            account = null;
+            loginNotice = "Your session has expired. Log in again to see the feed.";
+          }}
         />
       {:else if view.name === "editor"}
         {#key view.clip.id}
@@ -253,6 +267,34 @@
     padding: 0 1rem 0 1.25rem;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
+  }
+
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-right: auto;
+    margin-left: 1.5rem;
+  }
+
+  .tabs button {
+    padding: 0.4rem 0.85rem;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .tabs button:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+
+  .tabs button.active {
+    color: var(--text);
+    background: var(--surface-3);
   }
 
   .brand {

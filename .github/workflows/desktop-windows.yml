@@ -48,15 +48,23 @@ jobs:
           # The real-OBS CLI tests need a GPU and run locally (KLIPT_TEST_OBS_ROOT); here they skip.
           cargo test -p klipt-recorder --release --locked
 
+      - name: Package
+        shell: pwsh
+        run: scripts/package-recorder-windows.ps1 -ObsDir "$env:DEPS\obs" -RecorderExe desktop\target\release\klipt-recorder.exe -Out dist\klipt-recorder-windows
+
+      # Bundled into the installer (tauri.windows.conf.json); tauri-build checks these exist,
+      # so this comes before anything compiles klipt-desktop.
+      - name: Fetch ffmpeg
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/fetch-ffmpeg-windows.ps1 -Dest dist\ffmpeg
+
       # Compiles and tests the Windows-only game detection code (Win32 foreground/process/registry).
       - name: Test klipt-desktop game detection
         shell: pwsh
         working-directory: desktop
         run: cargo test -p klipt-desktop --locked games
-
-      - name: Package
-        shell: pwsh
-        run: scripts/package-recorder-windows.ps1 -ObsDir "$env:DEPS\obs" -RecorderExe desktop\target\release\klipt-recorder.exe -Out dist\klipt-recorder-windows
 
       # Runners have no GPU, so libobs may fail to create a D3D11 device. Informational only.
       - name: Smoke test (--list)
@@ -74,14 +82,6 @@ jobs:
           name: klipt-recorder-windows
           path: dist/klipt-recorder-windows
           if-no-files-found: error
-
-      # The installer: klipt-desktop.exe + ffmpeg/ffprobe + the recorder under obs\ (see
-      # tauri.windows.conf.json).
-      - name: Fetch ffmpeg
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: scripts/fetch-ffmpeg-windows.ps1 -Dest dist\ffmpeg
 
       - uses: pnpm/action-setup@v6 # version from "packageManager" in package.json
       - uses: actions/setup-node@v7

@@ -224,6 +224,43 @@
     }
   }
 
+  const TABS = [
+    { id: "recording", label: "Recording" },
+    { id: "audio", label: "Audio" },
+    { id: "hotkey", label: "Hotkey" },
+    { id: "clips", label: "Clips folder" },
+    { id: "general", label: "General" },
+    { id: "account", label: "Account" },
+  ] as const;
+  type Tab = (typeof TABS)[number]["id"];
+  let tab = $state<Tab>("recording");
+
+  const FIELD_TAB: Record<string, Tab> = {
+    micEnabled: "audio",
+    micDeviceId: "audio",
+    hotkey: "hotkey",
+    outputDir: "clips",
+    startWithOs: "general",
+    saveSound: "general",
+    saveNotification: "general",
+  };
+  const tabOf = (field: string): Tab => FIELD_TAB[field] ?? "recording";
+  const tabsWithErrors = $derived(new Set(Object.keys(fieldErrors).map(tabOf)));
+
+  // After a failed save, show the first tab that needs fixing.
+  $effect(() => {
+    const first = Object.keys(fieldErrors)[0];
+    if (first && !tabsWithErrors.has(tab)) tab = tabOf(first);
+  });
+
+  function onTabKey(e: KeyboardEvent, i: number) {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    tab = TABS[(i + step + TABS.length) % TABS.length].id;
+    document.getElementById(`tab-${tab}`)?.focus();
+  }
+
   async function openFolder() {
     try {
       await api.openClipsFolder();
@@ -252,7 +289,26 @@
     <p class="form-error top-error" role="alert">Some settings need fixing before they can be saved.</p>
   {/if}
 
-  <div class="sections">
+  <div class="tabs" role="tablist" aria-label="Settings sections">
+    {#each TABS as t, i (t.id)}
+      <button
+        id="tab-{t.id}"
+        role="tab"
+        class="tab"
+        class:active={tab === t.id}
+        aria-selected={tab === t.id}
+        tabindex={tab === t.id ? 0 : -1}
+        onclick={() => (tab = t.id)}
+        onkeydown={(e) => onTabKey(e, i)}
+      >
+        {t.label}
+        {#if tabsWithErrors.has(t.id)}<span class="tab-dot" aria-label="needs fixing"></span>{/if}
+      </button>
+    {/each}
+  </div>
+
+  <div class="sections" role="tabpanel" aria-labelledby="tab-{tab}">
+    {#if tab === "recording"}
     <section>
       <h2>Recording</h2>
       <p class="intro muted">
@@ -402,6 +458,7 @@
       </fieldset>
     </section>
 
+    {:else if tab === "audio"}
     <section>
       <h2>Audio</h2>
       <p class="intro muted">Game and desktop sound are always recorded.</p>
@@ -427,6 +484,7 @@
       </label>
     </section>
 
+    {:else if tab === "hotkey"}
     <section>
       <h2>Hotkey</h2>
       <p class="intro muted">Press this shortcut anytime, even in a game, to save a clip.</p>
@@ -464,6 +522,7 @@
       {/if}
     </section>
 
+    {:else if tab === "clips"}
     <section>
       <h2>Clips folder</h2>
       <p class="intro muted">Where Klipt saves your clips.</p>
@@ -477,6 +536,7 @@
       {#if fieldErrors.outputDir}<small class="error">{fieldErrors.outputDir}</small>{/if}
     </section>
 
+    {:else if tab === "general"}
     <section>
       <h2>General</h2>
       <label class="toggle">
@@ -496,6 +556,7 @@
       </label>
     </section>
 
+    {:else if tab === "account"}
     <section>
       <h2>Account</h2>
       <dl class="account">
@@ -508,6 +569,7 @@
         <button class="btn" onclick={onlogout}><Icon name="logout" size={16} /> Log out</button>
       </div>
     </section>
+    {/if}
   </div>
 </div>
 
@@ -533,6 +595,51 @@
 
   .back {
     padding-left: 0.5rem;
+  }
+
+  .tabs {
+    position: sticky;
+    top: 3.75rem;
+    z-index: 9;
+    display: flex;
+    gap: 0.25rem;
+    overflow-x: auto;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    background: var(--bg);
+  }
+
+  .tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.7rem 0.9rem;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    background: none;
+    color: var(--text-muted, #9aa0aa);
+    font: inherit;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .tab:hover {
+    color: var(--text, #fff);
+  }
+
+  .tab.active {
+    color: var(--text, #fff);
+    border-bottom-color: var(--accent, #7c5cff);
+  }
+
+  .tab-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: var(--danger, #ef4444);
   }
 
   h1 {

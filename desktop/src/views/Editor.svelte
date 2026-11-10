@@ -152,9 +152,33 @@
     for (const audio of audios()) audio.pause();
   }
 
+  // While dragging, only one seek runs at a time; the newest target waits in `pendingSeek` and
+  // is applied when the current seek lands. Each seek first freezes the last frame on a canvas
+  // overlay, so WebKitGTK's black frame during decoding never shows.
+  let freeze = $state<HTMLCanvasElement>();
+  let frozen = $state(false);
+  let pendingSeek: number | null = null;
+
+  function freezeFrame() {
+    if (!video || !freeze || frozen || video.videoWidth === 0) return;
+    freeze.width = video.videoWidth;
+    freeze.height = video.videoHeight;
+    try {
+      freeze.getContext("2d")?.drawImage(video, 0, 0);
+      frozen = true;
+    } catch {
+      // No snapshot available: just seek.
+    }
+  }
+
   function seek(ms: number) {
     if (!video) return;
     position = ms;
+    if (video.seeking) {
+      pendingSeek = ms;
+      return;
+    }
+    freezeFrame();
     video.currentTime = ms / 1000;
   }
 
@@ -183,6 +207,14 @@
   }
 
   function onseeked() {
+    if (pendingSeek !== null && video) {
+      const next = pendingSeek;
+      pendingSeek = null;
+      video.currentTime = next / 1000;
+      return;
+    }
+    // Unfreeze once the new frame has been painted.
+    requestAnimationFrame(() => (frozen = false));
     syncAudio();
     if (video && !video.paused) playAudio();
   }
@@ -319,6 +351,7 @@
         onerror={() => (mediaError = true)}
         onclick={togglePlay}
       ></video>
+      <canvas bind:this={freeze} class="freeze" class:show={frozen} aria-hidden="true"></canvas>
       {#if mediaError}
         <div class="media-error">
           <Icon name="alert" size={28} />
@@ -481,6 +514,18 @@
     background: #000;
   }
 
+  .freeze {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    visibility: hidden;
+  }
+  .freeze.show {
+    visibility: visible;
+  }
   video {
     position: absolute;
     inset: 0;

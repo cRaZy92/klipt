@@ -171,7 +171,7 @@ fn run(tool: &'static str, program: &Path, args: &[OsString]) -> Result<Output> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::fs;
     use std::sync::OnceLock;
@@ -184,12 +184,12 @@ mod tests {
         }
     }
 
-    fn tools() -> Tools {
+    pub(crate) fn tools() -> Tools {
         locate().expect("ffmpeg and ffprobe must be installed to run these tests (see docs/WINDOWS-DEV.md)")
     }
 
-    /// A 2 s clip shaped like the recorder's: H.264 video, track 1 = game audio, track 2 = mic.
-    fn fixture() -> &'static Path {
+    /// A 6 s clip shaped like the recorder's (keyframe every 1 s): H.264 video, track 1 = game audio, track 2 = mic.
+    pub(crate) fn fixture() -> &'static Path {
         static FIXTURE: OnceLock<(tempfile::TempDir, PathBuf)> = OnceLock::new();
         &FIXTURE
             .get_or_init(|| {
@@ -200,7 +200,7 @@ mod tests {
                     .args(["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30"])
                     .args(["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"])
                     .args(["-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000"])
-                    .args(["-t", "2", "-map", "0:v", "-map", "1:a", "-map", "2:a"])
+                    .args(["-t", "6", "-map", "0:v", "-map", "1:a", "-map", "2:a"])
                     .args(["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-g", "30"])
                     .args(["-c:a", "aac", "-b:a", "96k"])
                     .arg(&path)
@@ -241,7 +241,7 @@ mod tests {
         let p = probe(&tools(), fixture()).unwrap();
         assert_eq!((p.width, p.height), (320, 240));
         assert_eq!(p.audio_tracks, 2);
-        assert!((1_900..=2_100).contains(&p.duration_ms), "{}", p.duration_ms);
+        assert!((5_900..=6_100).contains(&p.duration_ms), "{}", p.duration_ms);
     }
 
     #[test]
@@ -264,7 +264,7 @@ mod tests {
         let p = probe(&tools(), &out).unwrap();
         assert_eq!(p.audio_tracks, 1);
         assert_eq!((p.width, p.height), (0, 0), "no video");
-        assert!((1_900..=2_100).contains(&p.duration_ms), "{}", p.duration_ms);
+        assert!((5_900..=6_100).contains(&p.duration_ms), "{}", p.duration_ms);
     }
 
     // Review Focus 4: a missing file or track is an error, never a panic.

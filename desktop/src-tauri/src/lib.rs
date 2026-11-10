@@ -1,6 +1,7 @@
 //! Klipt desktop app core. All logic lives here; the Svelte UI talks to it through Tauri commands.
 
 pub mod errors;
+pub mod export;
 pub mod feedback;
 pub mod ffmpeg;
 pub mod games;

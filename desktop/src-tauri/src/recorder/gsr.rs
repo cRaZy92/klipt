@@ -252,7 +252,10 @@ fn spawn_child(program: &Path, args: &[String], tx: &Option<Sender<RecorderEvent
     if let Some(stderr) = child.stderr.take() {
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(|l| l.ok()) {
-                eprintln!("gsr: {line}");
+                // gsr reports its capture rate every second; that's noise, not news.
+                if !line.contains("gsr info: update fps") {
+                    eprintln!("gsr: {line}");
+                }
             }
         });
     }

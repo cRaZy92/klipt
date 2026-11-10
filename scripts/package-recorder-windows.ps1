@@ -26,6 +26,9 @@ $repo = Split-Path -Parent $PSScriptRoot
 $modules = 'win-capture', 'win-wasapi', 'obs-ffmpeg', 'obs-outputs', 'obs-x264', 'obs-nvenc', 'obs-qsv11'
 
 if (-not (Test-Path (Join-Path $ObsDir 'bin\64bit\obs.dll'))) { throw "$ObsDir does not contain bin\64bit\obs.dll" }
+# Normalized (no '..'), because module files are copied by cutting this prefix off the
+# normalized paths Get-ChildItem returns.
+$ObsDir = (Resolve-Path -LiteralPath $ObsDir).Path
 if (-not (Test-Path $RecorderExe)) { throw "$RecorderExe not found" }
 if (Test-Path $Out) { Remove-Item -Recurse -Force $Out }
 

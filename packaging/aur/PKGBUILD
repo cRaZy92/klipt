@@ -1,0 +1,40 @@
+# Maintainer: Adam Šromovský
+# Builds Klipt's desktop app from the repo. Install: makepkg -si (in this folder).
+pkgname=klipt-desktop-git
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Self-hosted Medal.tv alternative: save game clips with a hotkey and share them"
+arch=('x86_64')
+url="https://github.com/cRaZy92/klipt"
+license=('custom')
+depends=('gpu-screen-recorder' 'ffmpeg' 'webkit2gtk-4.1' 'libayatana-appindicator' 'gtk3')
+makedepends=('git' 'rust' 'cargo' 'nodejs' 'pnpm')
+provides=('klipt-desktop')
+conflicts=('klipt-desktop')
+options=('!lto' '!debug')
+source=("klipt::git+${url}.git#branch=${KLIPT_BRANCH:-main}")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd klipt
+  printf "%s.r%s.g%s" \
+    "$(sed -n 's/^  "version": "\(.*\)",$/\1/p' desktop/src-tauri/tauri.conf.json)" \
+    "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd klipt
+  export CARGO_HOME="$srcdir/cargo-home"
+  pnpm install --frozen-lockfile
+  cd desktop
+  pnpm tauri build --no-bundle
+}
+
+package() {
+  cd klipt
+  install -Dm755 desktop/target/release/klipt-desktop "$pkgdir/usr/bin/klipt-desktop"
+  install -Dm644 packaging/aur/app.klipt.desktop.desktop "$pkgdir/usr/share/applications/app.klipt.desktop.desktop"
+  install -Dm644 desktop/src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/app.klipt.desktop.png"
+  install -Dm644 desktop/src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/app.klipt.desktop.png"
+  install -Dm644 desktop/src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/app.klipt.desktop.png"
+}

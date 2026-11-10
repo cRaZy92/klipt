@@ -1,14 +1,19 @@
-name: windows-recorder
+name: desktop-windows
 
 on:
   push:
-    branches: [feat/desktop]
+    branches: [main, feat/desktop]
+    tags: ['v*']
     paths:
       - desktop/**
       - scripts/fetch-obs-windows.ps1
+      - scripts/fetch-ffmpeg-windows.ps1
       - scripts/package-recorder-windows.ps1
-      - .github/workflows/windows-recorder.yml
+      - .github/workflows/desktop-windows.yml
   workflow_dispatch:
+
+permissions:
+  contents: write # attach the installer to the GitHub Release on v* tags
 
 jobs:
   build:
@@ -69,3 +74,35 @@ jobs:
           name: klipt-recorder-windows
           path: dist/klipt-recorder-windows
           if-no-files-found: error
+
+      # The installer: klipt-desktop.exe + ffmpeg/ffprobe + the recorder under obs\ (see
+      # tauri.windows.conf.json).
+      - name: Fetch ffmpeg
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/fetch-ffmpeg-windows.ps1 -Dest dist\ffmpeg
+
+      - uses: pnpm/action-setup@v6 # version from "packageManager" in package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the installer
+        shell: pwsh
+        working-directory: desktop
+        run: pnpm tauri build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: klipt-windows-installer
+          path: desktop/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Attach to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/target/release/bundle/nsis/*.exe

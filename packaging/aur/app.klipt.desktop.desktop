@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Klipt
+GenericName=Game clip recorder
+Comment=Save the last moments of your game with a hotkey and share them
+Exec=klipt-desktop
+Icon=app.klipt.desktop
+Terminal=false
+Categories=Game;AudioVideo;Recorder;
+Keywords=clip;replay;record;medal;
+StartupWMClass=klipt-desktop

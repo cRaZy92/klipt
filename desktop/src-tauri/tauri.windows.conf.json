@@ -1,0 +1,16 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": {
+      "../../dist/klipt-recorder-windows/": "obs/",
+      "../../dist/ffmpeg/ffmpeg.exe": "ffmpeg.exe",
+      "../../dist/ffmpeg/ffprobe.exe": "ffprobe.exe"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

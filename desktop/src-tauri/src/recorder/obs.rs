@@ -120,9 +120,8 @@ struct Helper {
 impl Helper {
     /// `tx` receives the session events (`started`, `saved`, errors, `Exited`); None for a
     /// short-lived helper that only lists displays.
-    fn spawn(tx: Option<Sender<RecorderEvent>>) -> Result<Helper> {
-        let program = helper_path();
-        let mut cmd = Command::new(&program);
+    fn spawn(program: &Path, tx: Option<Sender<RecorderEvent>>) -> Result<Helper> {
+        let mut cmd = Command::new(program);
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         if let Some(dir) = program.parent().filter(|d| !d.as_os_str().is_empty()) {
             cmd.current_dir(dir);
@@ -269,11 +268,12 @@ impl Helper {
 pub struct ObsBackend {
     sink: EventSink,
     helper: Option<Helper>,
+    program: PathBuf,
 }
 
 impl ObsBackend {
     pub fn new() -> ObsBackend {
-        ObsBackend { sink: EventSink::default(), helper: None }
+        ObsBackend { sink: EventSink::default(), helper: None, program: helper_path() }
     }
 }
 
@@ -292,7 +292,7 @@ impl RecorderBackend for ObsBackend {
             old.shut_down();
         }
         std::fs::create_dir_all(&cfg.output_dir)?;
-        let mut helper = Helper::spawn(self.sink.current())?;
+        let mut helper = Helper::spawn(&self.program, self.sink.current())?;
         let size = match cfg.size {
             Some(size) => size,
             None => {
@@ -303,9 +303,13 @@ impl RecorderBackend for ObsBackend {
                 output_size(cfg, &displays)
             }
         };
-        let started = helper.command(&start_command(cfg, size));
+        if let Err(e) = helper.command(&start_command(cfg, size)) {
+            // Don't keep a half-started helper around: the next start would find it "running".
+            helper.shut_down();
+            return Err(e);
+        }
         self.helper = Some(helper);
-        started
+        Ok(())
     }
 
     fn save(&mut self) -> Result<()> {
@@ -330,7 +334,7 @@ impl RecorderBackend for ObsBackend {
         if let Some(helper) = self.helper.as_mut().filter(|h| h.is_alive()) {
             return helper.list_displays();
         }
-        let mut helper = Helper::spawn(None)?;
+        let mut helper = Helper::spawn(&self.program, None)?;
         let displays = helper.list_displays();
         helper.shut_down();
         displays
@@ -416,5 +420,30 @@ mod tests {
         assert_eq!(output_size(&RecordConfig { display_id: Some("a".into()), ..native.clone() }, &displays), (1920, 1080));
         assert_eq!(output_size(&native, &[]), FALLBACK_SIZE);
         assert_eq!(output_size(&cfg(), &displays), (1920, 1080));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_start_command_shuts_the_helper_down() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        // A helper that closes its stdin before saying it's ready: writing `start` fails.
+        let script = dir.path().join("fake-recorder.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nexec 0<&-\necho '{\"event\":\"ready\",\"version\":\"0\",\"platform\":\"linux\",\"encoders\":[]}'\nsleep 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut backend = ObsBackend::new();
+        backend.program = script;
+        let c = RecordConfig { output_dir: dir.path().join("out"), ..cfg() };
+        assert!(matches!(backend.start(&c), Err(AppError::RecorderFailed(_))));
+        assert!(backend.helper.is_none(), "the half-started helper must not be kept");
+        // The next start is a fresh attempt, not "already running".
+        match backend.start(&c) {
+            Err(AppError::RecorderFailed(m)) => assert!(!m.contains("already running"), "{m}"),
+            other => panic!("{other:?}"),
+        }
     }
 }

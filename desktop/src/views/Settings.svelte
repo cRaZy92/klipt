@@ -604,6 +604,8 @@
     display: flex;
     gap: 0.25rem;
     overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
     margin-bottom: 1.25rem;
     border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
     background: var(--bg);
@@ -616,8 +618,6 @@
     gap: 0.4rem;
     padding: 0.7rem 0.9rem;
     border: 0;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
     background: none;
     color: var(--text-muted, #9aa0aa);
     font: inherit;
@@ -632,7 +632,7 @@
 
   .tab.active {
     color: var(--text, #fff);
-    border-bottom-color: var(--accent, #7c5cff);
+    box-shadow: inset 0 -2px 0 var(--accent, #7c5cff);
   }
 
   .tab-dot {

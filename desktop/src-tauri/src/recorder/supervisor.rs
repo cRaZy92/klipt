@@ -88,6 +88,10 @@ pub enum Input {
     /// New settings: stop, then apply them.
     Configure(RecordConfig, RecordingMode),
     Shutdown,
+    /// Stop recording until `Resume`. The stop isn't a crash and nothing restarts meanwhile.
+    Pause,
+    /// Undo `Pause`: apply the recording mode afresh.
+    Resume,
     /// An event from the helper started as run `generation`. Events of older runs are ignored.
     Backend { generation: u64, event: RecorderEvent },
     /// A deadline may have passed.
@@ -118,6 +122,8 @@ pub struct Supervisor {
     generation: u64,
     pending_save: Option<PendingSave>,
     next_poll: Option<Duration>,
+    /// Paused by the user: nothing starts until resumed.
+    paused: bool,
     /// Where backend events are forwarded to (None in tests that feed events by hand).
     inputs: Option<Sender<Input>>,
 }
@@ -132,6 +138,7 @@ pub fn friendly_message(code: &str) -> String {
         "no_encoder" => "Klipt couldn't find a video encoder it can use on this PC.",
         "no_display" => "Klipt can't capture the selected display. Pick another one in Settings.",
         "recording_stopped" => "Recording stopped — restarting…",
+        "recording_paused" => "Recording is paused. Resume it from the tray icon to save clips.",
         _ => "Something went wrong with recording.",
     }
     .into()
@@ -149,6 +156,7 @@ impl Supervisor {
             generation: 0,
             pending_save: None,
             next_poll: None,
+            paused: false,
             inputs: None,
         }
     }
@@ -157,12 +165,20 @@ impl Supervisor {
         self.generation
     }
 
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
     pub fn is_recording(&self) -> bool {
         matches!(self.state, State::Running { .. })
     }
 
     /// Applies the recording mode: starts now (Always) or checks for a game (WhileGameRunning).
+    /// Does nothing while paused.
     pub fn begin(&mut self) {
+        if self.paused {
+            return;
+        }
         match self.mode {
             RecordingMode::Always => {
                 self.next_poll = None;
@@ -194,6 +210,22 @@ impl Supervisor {
                 }
             }
             Input::Tick => self.on_tick(),
+            Input::Pause => {
+                if !self.paused {
+                    self.paused = true;
+                    self.stop_backend();
+                    self.state = State::Idle;
+                    self.next_poll = None;
+                }
+            }
+            Input::Resume => {
+                if self.paused {
+                    self.paused = false;
+                    self.state = State::Idle;
+                    self.restarts = 0;
+                    self.begin();
+                }
+            }
         }
         true
     }
@@ -321,6 +353,10 @@ impl Supervisor {
     }
 
     fn on_save(&mut self) {
+        if self.paused {
+            self.emit_error("recording_paused");
+            return;
+        }
         if !matches!(self.state, State::Running { .. }) {
             self.emit_error("not_recording");
             return;
@@ -417,6 +453,14 @@ impl SupervisorHandle {
 
     pub fn configure(&self, cfg: RecordConfig, mode: RecordingMode) {
         let _ = self.tx.send(Input::Configure(cfg, mode));
+    }
+
+    pub fn pause(&self) {
+        let _ = self.tx.send(Input::Pause);
+    }
+
+    pub fn resume(&self) {
+        let _ = self.tx.send(Input::Resume);
     }
 
     /// Stops the helper and waits for the supervisor thread to finish. Safe to call twice.
@@ -904,6 +948,68 @@ mod tests {
         let mut s = w.supervisor(RecordingMode::Always);
         s.begin();
         assert_eq!(s.next_deadline(), None);
+    }
+
+    #[test]
+    fn pause_stops_without_a_crash_and_resume_starts_again() {
+        let w = World::new();
+        let mut s = w.supervisor(RecordingMode::Always);
+        s.begin();
+        assert!(s.handle(Input::Pause));
+        assert_eq!(w.stops(), 1);
+        assert!(!s.is_recording());
+        assert!(s.is_paused());
+        // The stopped helper's exit isn't a crash, and nothing restarts while paused.
+        backend(&mut s, RecorderEvent::Exited { code: Some(0) });
+        assert_eq!(s.next_deadline(), None);
+        w.clock.advance(Duration::from_secs(60));
+        s.handle(Input::Tick);
+        assert_eq!(w.starts(), 1);
+        assert!(w.error_codes().is_empty());
+        // Saving while paused tells the user instead of calling the backend.
+        s.handle(Input::Save);
+        assert_eq!(w.saves(), 0);
+        assert_eq!(w.error_codes(), ["recording_paused"]);
+        // New settings while paused are kept for later, without starting.
+        s.handle(Input::Configure(cfg(), RecordingMode::Always));
+        assert_eq!(w.starts(), 1);
+        assert!(s.handle(Input::Resume));
+        assert_eq!(w.starts(), 2);
+        assert!(s.is_recording() && !s.is_paused());
+    }
+
+    #[test]
+    fn pause_during_a_pending_restart_cancels_it_and_resume_resets_the_backoff() {
+        let w = World::new();
+        let mut s = w.supervisor(RecordingMode::Always);
+        s.begin();
+        backend(&mut s, RecorderEvent::Exited { code: Some(1) });
+        s.handle(Input::Pause);
+        assert_eq!(s.next_deadline(), None);
+        w.clock.advance(RESTART_BACKOFF[0]);
+        s.handle(Input::Tick);
+        assert_eq!(w.starts(), 1);
+        s.handle(Input::Resume);
+        assert_eq!(w.starts(), 2);
+        backend(&mut s, RecorderEvent::Exited { code: Some(1) });
+        assert_eq!(s.next_deadline(), Some(w.clock.now() + RESTART_BACKOFF[0]), "fresh restarts after resume");
+    }
+
+    #[test]
+    fn pause_in_game_mode_stops_polling_until_resumed() {
+        let w = World::new();
+        let mut s = w.supervisor(RecordingMode::WhileGameRunning);
+        *w.game_running.lock().unwrap() = true;
+        s.begin();
+        assert_eq!(w.starts(), 1);
+        s.handle(Input::Pause);
+        assert_eq!(s.next_deadline(), None);
+        w.clock.advance(GAME_POLL_INTERVAL);
+        s.handle(Input::Tick);
+        assert_eq!(w.starts(), 1);
+        s.handle(Input::Resume);
+        assert_eq!(w.starts(), 2, "the game still runs, so it records again");
+        assert_eq!(s.next_deadline(), Some(w.clock.now() + GAME_POLL_INTERVAL));
     }
 
     #[test]

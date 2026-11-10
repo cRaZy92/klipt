@@ -201,6 +201,8 @@ pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) ->
             process_saved_clip(&state.library, state.tools.as_ref(), saved)
         }),
         sink: Box::new(move |event| {
+            // Sound, notifications and the tray icon: the window is usually hidden while gaming.
+            crate::feedback::on_supervisor_event(&sink_app, &event);
             let sent = match event {
                 SupervisorEvent::ClipSaved(view) => sink_app.emit(events::CLIP_SAVED, view),
                 SupervisorEvent::SaveBusy => sink_app.emit(events::SAVE_BUSY, ()),

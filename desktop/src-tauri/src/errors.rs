@@ -27,6 +27,10 @@ pub enum AppError {
     RecorderFailed(String),
     #[error("not recording")]
     NotRecording,
+    #[error("the shortcut is taken by another app")]
+    HotkeyTaken,
+    #[error("can't set up the global shortcut: {0}")]
+    HotkeyUnavailable(String),
     #[error("i/o: {0}")]
     Io(#[from] std::io::Error),
     #[error("database: {0}")]
@@ -46,6 +50,8 @@ impl AppError {
             AppError::RecorderMissing(_) => "recorder_missing",
             AppError::RecorderFailed(_) => "recorder_failed",
             AppError::NotRecording => "not_recording",
+            AppError::HotkeyTaken => "hotkey_taken",
+            AppError::HotkeyUnavailable(_) => "hotkey_unavailable",
             AppError::Io(_) => "io",
             AppError::Db(_) => "database",
             AppError::Json(_) => "json",
@@ -68,6 +74,12 @@ impl AppError {
             AppError::RecorderMissing(_) => "Klipt's recorder is missing. Try reinstalling Klipt.".into(),
             AppError::RecorderFailed(_) => "Recording couldn't start. Check your recording settings.".into(),
             AppError::NotRecording => "Klipt isn't recording right now.".into(),
+            AppError::HotkeyTaken => {
+                "That shortcut is already used by another app. Pick a different one in Settings.".into()
+            }
+            AppError::HotkeyUnavailable(_) => {
+                "Klipt couldn't set up the save-clip shortcut. You can still save clips from the tray icon.".into()
+            }
             AppError::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                 "Klipt doesn't have permission to use that file or folder.".into()
             }

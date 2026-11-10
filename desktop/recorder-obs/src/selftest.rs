@@ -284,6 +284,11 @@ mod tests {
 
     #[test]
     fn parses_the_windows_test_command() {
+        // An absolute path on the current platform (`C:\clips` is not absolute on Linux).
+        #[cfg(windows)]
+        const OUT: &str = "C:\\clips";
+        #[cfg(not(windows))]
+        const OUT: &str = "/tmp/clips";
         let s = SelftestArgs::parse(&args(&[
             "--selftest",
             "--mic",
@@ -292,7 +297,7 @@ mod tests {
             "--exit-after",
             "180",
             "--out",
-            "C:\\clips",
+            OUT,
             "--save-at",
             "40,5",
         ]))
@@ -300,7 +305,7 @@ mod tests {
         assert!(s.mic);
         assert_eq!(s.hotkey.as_deref(), Some("ALT+F9"));
         assert_eq!(s.exit_after, Some(180));
-        assert_eq!(s.out, PathBuf::from("C:\\clips"));
+        assert_eq!(s.out, PathBuf::from(OUT));
         assert_eq!(s.save_at, vec![5, 40]);
         let p = s.start_params();
         assert!(p.mic);

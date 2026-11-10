@@ -17,7 +17,9 @@ mod sys {
 
 pub use sys::*;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
+#[cfg(windows)]
+use anyhow::Context;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;

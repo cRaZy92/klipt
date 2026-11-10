@@ -5,10 +5,39 @@
 //! build only needs headers:
 //! - `OBS_INCLUDE_DIR`: the directory that contains `obs.h`
 //!   (Windows: `<deps>/include/obs` from scripts/fetch-obs-windows.ps1; Linux default: /usr/include/obs)
-//! - `SIMDE_INCLUDE_DIR`: SIMDe checkout (default: third_party/simde next to this file)
+//! - `SIMDE_INCLUDE_DIR`: SIMDe checkout, the directory that contains `simde/x86/sse2.h`.
+//!   Looked up in this order, first match wins: `SIMDE_INCLUDE_DIR`; on Linux `/usr/include`
+//!   (Arch package `simde`); then `third_party/simde` next to this file. If none has the header,
+//!   the build fails with a message saying how to install SIMDe.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// A header that only exists in a real SIMDe checkout (`<include dir>/simde/x86/sse2.h`).
+const SIMDE_PROBE: &str = "simde/x86/sse2.h";
+
+/// Returns the first candidate include dir that contains SIMDe, or panics with install instructions.
+fn find_simde_include(target_os: &str, manifest_dir: &Path) -> PathBuf {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(dir) = env::var("SIMDE_INCLUDE_DIR") {
+        candidates.push(PathBuf::from(dir));
+    }
+    if target_os == "linux" {
+        candidates.push(PathBuf::from("/usr/include"));
+    }
+    candidates.push(manifest_dir.join("third_party/simde"));
+
+    if let Some(found) = candidates.iter().find(|dir| dir.join(SIMDE_PROBE).exists()) {
+        return found.clone();
+    }
+    let searched: Vec<String> = candidates.iter().map(|d| d.display().to_string()).collect();
+    let hint = if target_os == "windows" {
+        "On Windows run scripts/fetch-obs-windows.ps1 and set SIMDE_INCLUDE_DIR"
+    } else {
+        "On Linux install SIMDe (Arch: `sudo pacman -S simde`) or set SIMDE_INCLUDE_DIR"
+    };
+    panic!("SIMDe headers ({SIMDE_PROBE}) not found; searched: {}. {hint}.", searched.join(", "));
+}
 
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
@@ -20,8 +49,7 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
     let obs_include = env::var("OBS_INCLUDE_DIR").unwrap_or_else(|_| "/usr/include/obs".into());
-    let simde_include =
-        env::var("SIMDE_INCLUDE_DIR").unwrap_or_else(|_| manifest_dir.join("third_party/simde").display().to_string());
+    let simde_include = find_simde_include(&target_os, &manifest_dir);
     if !PathBuf::from(&obs_include).join("obs.h").exists() {
         panic!(
             "obs.h not found in OBS_INCLUDE_DIR={obs_include}. On Windows run \
@@ -32,7 +60,7 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .header(manifest_dir.join("wrapper.h").display().to_string())
         .clang_arg(format!("-I{obs_include}"))
-        .clang_arg(format!("-I{simde_include}"))
+        .clang_arg(format!("-I{}", simde_include.display()))
         // Last, so a real obsconfig.h next to installed headers wins over the stub.
         .clang_arg(format!("-I{}", manifest_dir.join("include-stub").display()))
         // util/util_uint64.h calls the MSVC intrinsic _udiv128 in an inline helper. Older clang

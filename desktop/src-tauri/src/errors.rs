@@ -31,6 +31,8 @@ pub enum AppError {
     HotkeyTaken,
     #[error("can't set up the global shortcut: {0}")]
     HotkeyUnavailable(String),
+    #[error("the global shortcut stopped working")]
+    HotkeyLost,
     #[error("i/o: {0}")]
     Io(#[from] std::io::Error),
     #[error("database: {0}")]
@@ -51,7 +53,7 @@ impl AppError {
             AppError::RecorderFailed(_) => "recorder_failed",
             AppError::NotRecording => "not_recording",
             AppError::HotkeyTaken => "hotkey_taken",
-            AppError::HotkeyUnavailable(_) => "hotkey_unavailable",
+            AppError::HotkeyUnavailable(_) | AppError::HotkeyLost => "hotkey_unavailable",
             AppError::Io(_) => "io",
             AppError::Db(_) => "database",
             AppError::Json(_) => "json",
@@ -80,6 +82,7 @@ impl AppError {
             AppError::HotkeyUnavailable(_) => {
                 "Klipt couldn't set up the save-clip shortcut. You can still save clips from the tray icon.".into()
             }
+            AppError::HotkeyLost => "The save shortcut stopped working. Use the tray menu to save, or restart Klipt.".into(),
             AppError::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                 "Klipt doesn't have permission to use that file or folder.".into()
             }

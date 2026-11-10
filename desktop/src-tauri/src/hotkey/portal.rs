@@ -94,6 +94,8 @@ async fn run_session(trigger: String, sink: PressSink, bound: mpsc::Sender<Resul
         }
     }
     eprintln!("klipt: the GlobalShortcuts portal stopped sending shortcut presses");
+    // Ends the press stream, so the app tells the user the shortcut is gone.
+    sink.close();
     let _ = session.close().await;
     drop(portal);
 }

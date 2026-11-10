@@ -20,6 +20,8 @@ pub const AUTOSTART_ARG: &str = "--autostart";
 
 pub fn run() {
     let builder = tauri::Builder::default()
+        // First, as its docs require: a second launch just shows this instance's window.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| tray::show_main_window(app)))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])));
     #[cfg(windows)]

@@ -34,7 +34,8 @@ pub trait HotkeyService {
     /// Binds the save-clip shortcut to `accel` (any form [`normalize`] accepts), replacing an
     /// earlier binding. May block while the system asks the user (KDE shows a dialog).
     fn bind(&mut self, accel: &str) -> Result<BoundKey>;
-    /// A fresh stream of presses. Presses go to the receiver of the latest call.
+    /// A fresh stream of presses. Presses go to the receiver of the latest call. The stream
+    /// ends if the binding is lost (e.g. the portal went away).
     fn events(&self) -> Receiver<()>;
 }
 
@@ -79,9 +80,7 @@ pub fn start_for_app(app: &tauri::AppHandle, accel: String) {
             }
             Err(e) => {
                 eprintln!("klipt: can't bind the save-clip shortcut {accel:?}: {e}");
-                let message = e.user_message();
-                let _ = app.emit(events::HOTKEY_ERROR, serde_json::json!({ "code": e.code(), "message": message }));
-                crate::feedback::notify(&app, "Klipt", Some(&message));
+                report_error(&app, &e);
                 return;
             }
         }
@@ -91,11 +90,22 @@ pub fn start_for_app(app: &tauri::AppHandle, accel: String) {
                 recorder.save();
             }
         }
+        // The press stream only ends when the binding is lost (e.g. plasmashell restarted).
         drop(service);
+        report_error(&app, &AppError::HotkeyLost);
     });
     if let Err(e) = spawned {
         eprintln!("klipt: can't start the hotkey thread: {e}");
     }
+}
+
+/// Tells the UI (`hotkey-error`) and the user (a notification) about a shortcut problem.
+fn report_error(app: &tauri::AppHandle, e: &AppError) {
+    use tauri::Emitter;
+    eprintln!("klipt: save-clip shortcut: {e}");
+    let message = e.user_message();
+    let _ = app.emit(events::HOTKEY_ERROR, serde_json::json!({ "code": e.code(), "message": message }));
+    crate::feedback::notify(app, "Klipt", Some(&message));
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
@@ -121,6 +131,11 @@ impl PressSink {
         let (tx, rx) = mpsc::channel();
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(tx);
         rx
+    }
+
+    /// The shortcut is gone for good: ends the current receiver's stream.
+    pub(crate) fn close(&self) {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
     }
 
     pub(crate) fn press(&self) {
@@ -382,5 +397,22 @@ mod tests {
         sink.press();
         assert!(new.try_recv().is_ok());
         assert!(old.try_recv().is_err());
+    }
+
+    #[test]
+    fn closing_the_sink_ends_the_press_stream() {
+        let sink = PressSink::default();
+        let presses = sink.subscribe();
+        sink.press();
+        sink.close();
+        sink.press(); // after close: dropped, not a panic
+        assert_eq!(presses.iter().count(), 1, "the stream ends after the press that came first");
+    }
+
+    #[test]
+    fn a_lost_shortcut_is_reported_as_unavailable_with_a_friendly_message() {
+        let e = AppError::HotkeyLost;
+        assert_eq!(e.code(), "hotkey_unavailable");
+        assert_eq!(e.user_message(), "The save shortcut stopped working. Use the tray menu to save, or restart Klipt.");
     }
 }

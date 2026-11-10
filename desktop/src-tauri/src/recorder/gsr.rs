@@ -180,7 +180,19 @@ pub fn parse_saved_line(line: &str) -> Option<PathBuf> {
 struct Shared {
     child: Mutex<Option<Child>>,
     stop_requested: AtomicBool,
+    /// Set by the stderr reader when gsr says the video encoder couldn't start.
+    encoder_failed: Arc<AtomicBool>,
 }
+
+/// gsr stderr lines meaning the encoder (not the capture) failed, e.g. NVENC with no free VRAM
+/// while a game holds it. The portal can't help with these; retrying KMS later can.
+fn is_encoder_failure(line: &str) -> bool {
+    line.contains("gsr_cuda_load failed") || line.contains("is not supported by your hardware")
+}
+
+/// How often, and how far apart, a KMS capture whose encoder failed is retried.
+const ENCODER_RETRIES: u32 = 3;
+const ENCODER_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 struct Run {
     shared: Arc<Shared>,
@@ -227,7 +239,13 @@ fn spawn_error(program: &Path, e: std::io::Error) -> AppError {
 
 /// Spawns gsr with piped output: stdout lines that name a saved file become `Saved`; stderr goes
 /// to the app log (and must keep being read so gsr never blocks on a full pipe).
-fn spawn_child(program: &Path, args: &[String], tx: &Option<Sender<RecorderEvent>>) -> std::io::Result<Child> {
+fn spawn_child(
+    program: &Path,
+    args: &[String],
+    tx: &Option<Sender<RecorderEvent>>,
+    encoder_failed: &Arc<AtomicBool>,
+) -> std::io::Result<Child> {
+    encoder_failed.store(false, Ordering::SeqCst);
     eprintln!("klipt: starting {} {}", program.display(), args.join(" "));
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -250,8 +268,12 @@ fn spawn_child(program: &Path, args: &[String], tx: &Option<Sender<RecorderEvent
         });
     }
     if let Some(stderr) = child.stderr.take() {
+        let encoder_failed = encoder_failed.clone();
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(|l| l.ok()) {
+                if is_encoder_failure(&line) {
+                    encoder_failed.store(true, Ordering::SeqCst);
+                }
                 // gsr reports its capture rate every second; that's noise, not news.
                 if !line.contains("gsr info: update fps") {
                     eprintln!("gsr: {line}");
@@ -267,11 +289,13 @@ fn spawn_child(program: &Path, args: &[String], tx: &Option<Sender<RecorderEvent
 fn wait_loop(
     shared: Arc<Shared>,
     mut target: Target,
+    first_args: Vec<String>,
     retry_args: Vec<String>,
     program: PathBuf,
     tx: Option<Sender<RecorderEvent>>,
 ) {
     let mut spawned_at = Instant::now();
+    let mut encoder_retries = 0;
     loop {
         thread::sleep(POLL);
         let mut slot = lock(&shared.child);
@@ -285,9 +309,43 @@ fn wait_loop(
             }
         };
         let quick_failure = spawned_at.elapsed() < KMS_FALLBACK_WINDOW && code != Some(0);
-        if matches!(target, Target::Monitor(_)) && quick_failure && !shared.stop_requested.load(Ordering::SeqCst) {
+        let kms_quick_failure =
+            matches!(target, Target::Monitor(_)) && quick_failure && !shared.stop_requested.load(Ordering::SeqCst);
+        // Stderr may still be draining when the exit is seen; give the reader a moment.
+        if kms_quick_failure {
+            thread::sleep(POLL);
+        }
+        if kms_quick_failure && shared.encoder_failed.load(Ordering::SeqCst) && encoder_retries < ENCODER_RETRIES {
+            encoder_retries += 1;
+            eprintln!(
+                "klipt: gpu-screen-recorder's encoder failed to start ({code:?}); retrying in {ENCODER_RETRY_DELAY:?} ({encoder_retries}/{ENCODER_RETRIES})"
+            );
+            *slot = None;
+            drop(slot);
+            thread::sleep(ENCODER_RETRY_DELAY);
+            let mut slot = lock(&shared.child);
+            if shared.stop_requested.load(Ordering::SeqCst) {
+                drop(slot);
+                send(&tx, RecorderEvent::Exited { code });
+                return;
+            }
+            match spawn_child(&program, &first_args, &tx, &shared.encoder_failed) {
+                Ok(new_child) => {
+                    *slot = Some(new_child);
+                    spawned_at = Instant::now();
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("klipt: can't restart gpu-screen-recorder: {e}");
+                    drop(slot);
+                    send(&tx, RecorderEvent::Exited { code });
+                    return;
+                }
+            }
+        }
+        if kms_quick_failure && !shared.encoder_failed.load(Ordering::SeqCst) {
             eprintln!("klipt: gpu-screen-recorder KMS capture exited with {code:?}; retrying with the desktop portal");
-            match spawn_child(&program, &retry_args, &tx) {
+            match spawn_child(&program, &retry_args, &tx, &shared.encoder_failed) {
                 Ok(new_child) => {
                     *slot = Some(new_child);
                     target = Target::Portal;
@@ -324,13 +382,19 @@ impl RecorderBackend for GsrBackend {
             },
         };
         let tx = self.sink.current();
-        let child = spawn_child(&self.program, &build_args(cfg, &target, &self.portal_token), &tx)
+        let encoder_failed = Arc::new(AtomicBool::new(false));
+        let first_args = build_args(cfg, &target, &self.portal_token);
+        let child = spawn_child(&self.program, &first_args, &tx, &encoder_failed)
             .map_err(|e| spawn_error(&self.program, e))?;
-        let shared = Arc::new(Shared { child: Mutex::new(Some(child)), stop_requested: AtomicBool::new(false) });
+        let shared = Arc::new(Shared {
+            child: Mutex::new(Some(child)),
+            stop_requested: AtomicBool::new(false),
+            encoder_failed,
+        });
         let retry_args = build_args(cfg, &Target::Portal, &self.portal_token);
         let waiter = {
             let (shared, program, tx) = (shared.clone(), self.program.clone(), tx.clone());
-            thread::spawn(move || wait_loop(shared, target, retry_args, program, tx))
+            thread::spawn(move || wait_loop(shared, target, first_args, retry_args, program, tx))
         };
         self.run = Some(Run { shared, waiter });
         send(&tx, RecorderEvent::Started { encoder: "h264".into() });
@@ -587,6 +651,44 @@ while :; do sleep 0.05; done
         backend.stop().unwrap();
         assert_eq!(next(&rx), RecorderEvent::Exited { code: Some(0) });
         assert!(matches!(backend.save(), Err(AppError::NotRecording)));
+    }
+
+    #[test]
+    fn encoder_failure_retries_kms_instead_of_the_portal() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake-gsr.sh");
+        let marker = dir.path().join("failed-once");
+        std::fs::write(
+            &script,
+            format!(
+                r#"#!/bin/sh
+for a; do out=$a; done
+echo "$@" >> "$out/args"
+if [ ! -e {m} ]; then : > {m}; echo "gsr error: gsr_cuda_load failed: unable to create CUDA context, error: out of memory (result: 2)" >&2; exit 54; fi
+trap 'exit 0' INT
+while :; do sleep 0.05; done
+"#,
+                m = marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut backend = GsrBackend::with_program(script, dir.path());
+        let rx = backend.events();
+        let c = RecordConfig { output_dir: dir.path().join("out"), display_id: Some("DP-1".into()), ..cfg() };
+        backend.start(&c).unwrap();
+        assert_eq!(next(&rx), RecorderEvent::Started { encoder: "h264".into() });
+        let args_file = c.output_dir.join("args");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while std::fs::read_to_string(&args_file).unwrap_or_default().lines().count() < 2 {
+            assert!(Instant::now() < deadline, "no KMS retry");
+            thread::sleep(Duration::from_millis(20));
+        }
+        let runs = std::fs::read_to_string(&args_file).unwrap();
+        assert!(runs.lines().all(|l| l.starts_with("-w DP-1")), "{runs}");
+        backend.stop().unwrap();
+        assert_eq!(next(&rx), RecorderEvent::Exited { code: Some(0) });
     }
 
     #[test]

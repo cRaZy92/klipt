@@ -13,8 +13,10 @@ pub mod portal;
 #[cfg(windows)]
 pub mod windows;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use crate::errors::{AppError, Result};
 
@@ -74,6 +76,8 @@ pub struct HotkeyStatus {
     pub display: Option<String>,
     /// A friendly message when binding failed or the binding was lost.
     pub error: Option<String>,
+    /// The error's code (`hotkey_taken`, `hotkey_unavailable`), for the UI to branch on.
+    pub error_code: Option<String>,
 }
 
 /// Managed Tauri state holding the latest [`HotkeyStatus`].
@@ -90,40 +94,116 @@ impl HotkeyStatusState {
     }
 }
 
-/// Binds the shortcut from Settings on a background thread (KDE may show a dialog first) and
-/// saves a clip on every press. A failure doesn't affect recording: it's reported as a
-/// `hotkey-error` event and a notification, and "Save clip now" in the tray keeps working.
-pub fn start_for_app(app: &tauri::AppHandle, accel: String) {
-    use tauri::{Emitter, Manager};
+/// The longest a rebind may take. KDE may show a dialog the user has to answer first.
+pub const REBIND_TIMEOUT: Duration = Duration::from_secs(180);
+
+enum Control {
+    Rebind { accel: String, reply: Sender<Result<BoundKey>> },
+}
+
+/// Talks to the hotkey thread started by [`start_for_app`] (managed Tauri state).
+#[derive(Clone)]
+pub struct HotkeyHandle(Sender<Control>);
+
+impl HotkeyHandle {
+    /// Binds the save-clip shortcut to `accel` instead of the current one and returns the binding
+    /// the system reports. On failure (e.g. [`AppError::HotkeyTaken`]) the previous shortcut is
+    /// bound again when possible. Blocks, possibly while the user answers a system dialog.
+    pub fn rebind(&self, accel: &str) -> Result<BoundKey> {
+        let (reply, answer) = mpsc::channel();
+        self.0
+            .send(Control::Rebind { accel: accel.to_string(), reply })
+            .map_err(|_| AppError::HotkeyUnavailable("the hotkey thread stopped".into()))?;
+        answer
+            .recv_timeout(REBIND_TIMEOUT)
+            .unwrap_or_else(|_| Err(AppError::HotkeyUnavailable("no answer from the shortcut service".into())))
+    }
+}
+
+/// Binds the shortcut from Settings on a background thread (KDE may show a dialog first), saves
+/// a clip on every press, and rebinds when Settings change it (through the returned handle).
+/// A failure doesn't affect recording: it's reported as a `hotkey-error` event and a
+/// notification, and "Save clip now" in the tray keeps working.
+pub fn start_for_app(app: &tauri::AppHandle, accel: String) -> HotkeyHandle {
+    let (tx, rx) = mpsc::channel();
     let app = app.clone();
     let spawned = std::thread::Builder::new().name("klipt-hotkey".into()).spawn(move || {
         let mut service = platform_service(&app);
-        let presses = service.events();
-        match service.bind(&accel) {
-            Ok(bound) => {
-                if let Some(status) = app.try_state::<HotkeyStatusState>() {
-                    status.set(HotkeyStatus { display: Some(bound.display.clone()), error: None });
-                }
-                let _ = app.emit(events::HOTKEY_BOUND, serde_json::json!({ "display": bound.display }));
+        let presses = Presses::default();
+        // The accelerator currently bound, if any.
+        let mut bound = match service.bind(&accel) {
+            Ok(key) => {
+                on_bound(&app, &*service, &presses, &key);
+                Some(accel)
             }
             Err(e) => {
                 eprintln!("klipt: can't bind the save-clip shortcut {accel:?}: {e}");
                 report_error(&app, &e);
-                return;
+                None
             }
+        };
+        // `service` lives as long as this loop (the app), which keeps the binding alive.
+        for Control::Rebind { accel, reply } in rx {
+            let result = service.bind(&accel);
+            match &result {
+                Ok(key) => {
+                    on_bound(&app, &*service, &presses, key);
+                    bound = Some(accel);
+                }
+                Err(e) => {
+                    eprintln!("klipt: can't rebind the save-clip shortcut to {accel:?}: {e}");
+                    // Binding replaced the old shortcut; put it back so saving keeps working.
+                    if let Some(old) = &bound {
+                        match service.bind(old) {
+                            Ok(key) => on_bound(&app, &*service, &presses, &key),
+                            Err(e) => {
+                                eprintln!("klipt: can't restore the save-clip shortcut {old:?}: {e}");
+                                bound = None;
+                                report_error(&app, &e);
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = reply.send(result);
         }
-        // `service` lives as long as this loop, which keeps the binding alive.
-        for () in presses {
+    });
+    if let Err(e) = spawned {
+        eprintln!("klipt: can't start the hotkey thread: {e}");
+    }
+    HotkeyHandle(tx)
+}
+
+/// Counts press-forwarding threads, so only the newest one reports a lost shortcut.
+#[derive(Clone, Default)]
+struct Presses(Arc<AtomicU64>);
+
+/// Records a successful binding (status, `hotkey-bound`) and forwards its presses as saves.
+fn on_bound(app: &tauri::AppHandle, service: &dyn HotkeyService, presses: &Presses, key: &BoundKey) {
+    use tauri::{Emitter, Manager};
+    if let Some(status) = app.try_state::<HotkeyStatusState>() {
+        status.set(HotkeyStatus { display: Some(key.display.clone()), error: None, error_code: None });
+    }
+    let _ = app.emit(events::HOTKEY_BOUND, serde_json::json!({ "display": key.display }));
+    // A new subscription ends the previous forwarder's stream; its generation is stale by then,
+    // so it leaves quietly instead of reporting the shortcut as lost.
+    let generation = presses.0.fetch_add(1, Ordering::SeqCst) + 1;
+    let stream = service.events();
+    let (app, presses) = (app.clone(), presses.clone());
+    let spawned = std::thread::Builder::new().name("klipt-hotkey-presses".into()).spawn(move || {
+        for () in stream {
             if let Some(recorder) = app.try_state::<crate::recorder::SupervisorHandle>() {
                 recorder.save();
             }
         }
-        // The press stream only ends when the binding is lost (e.g. plasmashell restarted).
-        drop(service);
-        report_error(&app, &AppError::HotkeyLost);
+        // The press stream of the current binding only ends when it is lost (e.g. plasmashell
+        // restarted).
+        if presses.0.load(Ordering::SeqCst) == generation {
+            report_error(&app, &AppError::HotkeyLost);
+        }
     });
     if let Err(e) = spawned {
-        eprintln!("klipt: can't start the hotkey thread: {e}");
+        eprintln!("klipt: can't start the hotkey press thread: {e}");
     }
 }
 
@@ -133,7 +213,7 @@ fn report_error(app: &tauri::AppHandle, e: &AppError) {
     eprintln!("klipt: save-clip shortcut: {e}");
     let message = e.user_message();
     if let Some(status) = app.try_state::<HotkeyStatusState>() {
-        status.set(HotkeyStatus { display: None, error: Some(message.clone()) });
+        status.set(HotkeyStatus { display: None, error: Some(message.clone()), error_code: Some(e.code().into()) });
     }
     let _ = app.emit(events::HOTKEY_ERROR, serde_json::json!({ "code": e.code(), "message": message }));
     crate::feedback::notify(app, "Klipt", Some(&message));

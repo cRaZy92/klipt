@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, errorMessage, on, type Account, type ClipView, type Settings } from "./lib/api";
+  import { api, errorMessage, on, type Account, type ClipView, type HotkeyStatus, type Settings } from "./lib/api";
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
   import { resumeAfterLogin, watchUploads } from "./lib/uploads.svelte";
@@ -10,9 +10,12 @@
   import Editor from "./views/Editor.svelte";
   import Library from "./views/Library.svelte";
   import Login from "./views/Login.svelte";
+  import SettingsView from "./views/Settings.svelte";
 
-  // The screens. Library is home; settings (Task 12) plugs in here.
+  // The screens. Library is home.
   type View = { name: "library" } | { name: "editor"; clip: ClipView } | { name: "settings" };
+  /** Where the user asked to go while the current screen had unsaved changes. */
+  type Leaving = { to: "view"; view: View } | { to: "logout" };
 
   let account = $state<Account | null>(null);
   let settings = $state<Settings | null>(null);
@@ -20,14 +23,14 @@
   let startupError = $state<string | null>(null);
   let loginNotice = $state<string | null>(null);
   let view = $state<View>({ name: "library" });
-  let hotkeyDisplay = $state<string | null>(null);
+  /** The save-clip shortcut as the system reports it, or why it isn't working. */
+  let hotkeyStatus = $state<HotkeyStatus>({ display: null, error: null, errorCode: null });
   let accountMenu = $state(false);
-  /** The editor has unsaved changes. */
-  let editorDirty = $state(false);
-  /** Where the user asked to go while the editor had unsaved changes. */
-  let leaving = $state<View | null>(null);
+  /** The current screen (editor or settings) has unsaved changes. */
+  let viewDirty = $state(false);
+  let leaving = $state<Leaving | null>(null);
 
-  const hotkey = $derived(hotkeyDisplay ?? (settings ? hotkeyLabel(settings.hotkey) : ""));
+  const hotkey = $derived(hotkeyStatus.display ?? (settings ? hotkeyLabel(settings.hotkey) : ""));
 
   async function start() {
     startupError = null;
@@ -36,7 +39,7 @@
       settings = s;
       account = a;
       // Events fired before this window listened are lost; the core keeps the latest state.
-      if (status.display) hotkeyDisplay = status.display;
+      hotkeyStatus = status;
       if (status.error) toast(status.error, "error");
       ready = true;
     } catch (e) {
@@ -49,8 +52,11 @@
     const stops = [
       on("save-busy", () => toast("Already saving a clip…")),
       on("recorder-error", (e) => toast(e.message, "error")),
-      on("hotkey-error", (e) => toast(e.message, "error")),
-      on("hotkey-bound", ({ display }) => (hotkeyDisplay = display)),
+      on("hotkey-error", (e) => {
+        hotkeyStatus = { display: null, error: e.message, errorCode: e.code };
+        toast(e.message, "error");
+      }),
+      on("hotkey-bound", ({ display }) => (hotkeyStatus = { display, error: null, errorCode: null })),
       on("clip-saved", () => toast("Clip saved", "success")),
       watchUploads({
         // The login expired mid-upload: log in again, then the upload carries on.
@@ -73,6 +79,16 @@
     resumeAfterLogin();
   }
 
+  /** Logs out, asking first when that would throw away unsaved changes. */
+  function requestLogout() {
+    accountMenu = false;
+    if (viewDirty) {
+      leaving = { to: "logout" };
+      return;
+    }
+    void logout();
+  }
+
   async function logout() {
     accountMenu = false;
     try {
@@ -83,23 +99,33 @@
     account = null;
   }
 
-  /** Switches screens, asking first when that would throw away the editor's unsaved changes. */
+  /** Switches screens, asking first when that would throw away unsaved changes. */
   function go(next: View) {
-    if (view.name === "editor" && editorDirty && next !== view) {
-      leaving = next;
+    if (next.name === view.name && next.name !== "editor") return;
+    if (viewDirty && next !== view) {
+      leaving = { to: "view", view: next };
       return;
     }
-    editorDirty = false;
+    viewDirty = false;
     view = next;
   }
 
   function discardAndLeave() {
     const next = leaving;
     leaving = null;
-    if (next) {
-      editorDirty = false;
-      view = next;
+    if (!next) return;
+    viewDirty = false;
+    if (next.to === "logout") {
+      view = { name: "library" };
+      void logout();
+    } else {
+      view = next.view;
     }
+  }
+
+  function settingsSaved(saved: Settings, hotkeyDisplay: string | null) {
+    settings = saved;
+    if (hotkeyDisplay) hotkeyStatus = { display: hotkeyDisplay, error: null, errorCode: null };
   }
 
   function hostOf(url: string): string {
@@ -136,7 +162,6 @@
         Klipt
       </button>
       <div class="right">
-        <!-- Task 12 replaces the placeholder settings view. -->
         <button
           class="btn btn-ghost btn-icon"
           aria-label="Settings"
@@ -153,7 +178,7 @@
           {#if accountMenu}
             <div class="menu" role="menu">
               <p class="server muted">Logged in to {hostOf(account.serverUrl)}</p>
-              <button role="menuitem" onclick={logout}><Icon name="logout" size={16} /> Log out</button>
+              <button role="menuitem" onclick={requestLogout}><Icon name="logout" size={16} /> Log out</button>
             </div>
           {/if}
         </div>
@@ -169,13 +194,18 @@
         />
       {:else if view.name === "editor"}
         {#key view.clip.id}
-          <Editor clip={view.clip} bind:dirty={editorDirty} onclose={() => go({ name: "library" })} />
+          <Editor clip={view.clip} bind:dirty={viewDirty} onclose={() => go({ name: "library" })} />
         {/key}
-      {:else}
-        <div class="center">
-          <p class="muted">This screen is coming soon.</p>
-          <button class="btn" onclick={() => (view = { name: "library" })}>Back to clips</button>
-        </div>
+      {:else if settings}
+        <SettingsView
+          {settings}
+          {account}
+          {hotkeyStatus}
+          bind:dirty={viewDirty}
+          onsaved={settingsSaved}
+          onlogout={requestLogout}
+          onclose={() => go({ name: "library" })}
+        />
       {/if}
     </main>
   </div>
@@ -183,7 +213,11 @@
 
 {#if leaving}
   <Modal title="Discard changes?" onclose={() => (leaving = null)}>
-    <p>Your trim and volume changes to this clip haven't been saved.</p>
+    {#if view.name === "settings"}
+      <p>Your settings changes haven't been saved.</p>
+    {:else}
+      <p>Your trim and volume changes to this clip haven't been saved.</p>
+    {/if}
     {#snippet footer()}
       <button class="btn" onclick={() => (leaving = null)}>Keep editing</button>
       <button class="btn btn-danger" onclick={discardAndLeave}>Discard</button>

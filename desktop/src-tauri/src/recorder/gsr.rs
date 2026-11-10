@@ -19,7 +19,7 @@ use nix::sys::prctl::set_pdeathsig;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 
-use super::{send, Display, EventSink, RecordConfig, RecorderBackend, RecorderEvent};
+use super::{send, AudioDevice, Display, EventSink, RecordConfig, RecorderBackend, RecorderEvent};
 use crate::errors::{AppError, Result};
 
 pub const PROGRAM: &str = "gpu-screen-recorder";
@@ -90,6 +90,82 @@ pub fn parse_monitors(text: &str) -> Vec<Display> {
             })
         })
         .collect()
+}
+
+/// Parses `gpu-screen-recorder --list-audio-devices` output (`ID|Description` per line), keeping
+/// only microphones: not `default_output`/`default_input` (the UI offers "Default microphone"
+/// itself) and not `.monitor` sources, which record what an output plays.
+pub fn parse_audio_devices(text: &str) -> Vec<AudioDevice> {
+    text.lines()
+        .filter_map(|line| {
+            let (id, name) = line.trim().split_once('|')?;
+            let (id, name) = (id.trim(), name.trim());
+            if id.is_empty() || id == "default_output" || id == "default_input" || id.ends_with(".monitor") {
+                return None;
+            }
+            let name = if name.is_empty() { id } else { name };
+            Some(AudioDevice { id: id.to_string(), name: name.to_string() })
+        })
+        .collect()
+}
+
+/// The monitor KDE treats as primary, from `kscreen-doctor -j`: the enabled output with
+/// priority 1. Wayland itself has no primary flag.
+pub fn parse_kscreen_primary(json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    value["outputs"]
+        .as_array()?
+        .iter()
+        .find(|o| o["enabled"].as_bool() == Some(true) && o["priority"].as_u64() == Some(1))
+        .and_then(|o| o["name"].as_str())
+        .map(String::from)
+}
+
+/// Marks `primary` (a monitor name) as the primary display.
+pub fn mark_primary(displays: &mut [Display], primary: Option<&str>) {
+    for d in displays {
+        d.primary = primary == Some(d.id.as_str());
+    }
+}
+
+/// The monitor to record when the user chose "Automatic": the primary one, else the first.
+pub fn automatic_monitor(displays: &[Display]) -> Option<&str> {
+    displays.iter().find(|d| d.primary).or(displays.first()).map(|d| d.id.as_str())
+}
+
+/// How long `kscreen-doctor` may take before it's given up on.
+const KSCREEN_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Asks KDE which monitor is primary. None off KDE, or if it doesn't answer in time.
+fn kscreen_primary() -> Option<String> {
+    let mut child = Command::new("kscreen-doctor")
+        .arg("-j")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    // Read on a thread so a large answer can't fill the pipe while this waits.
+    let reader = thread::spawn(move || {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut stdout, &mut text).ok().map(|_| text)
+    });
+    let deadline = Instant::now() + KSCREEN_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL / 2),
+            _ => {
+                eprintln!("klipt: kscreen-doctor didn't answer; using the first monitor");
+                // Our own child, by its handle.
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    parse_kscreen_primary(&reader.join().ok()??)
 }
 
 /// A stdout line from gsr that names an existing `.mp4` file is a finished save.
@@ -237,8 +313,7 @@ impl RecorderBackend for GsrBackend {
         let target = match &cfg.display_id {
             Some(id) => Target::Monitor(id.clone()),
             None => match self.list_displays() {
-                Ok(displays) if !displays.is_empty() => Target::Monitor(displays[0].id.clone()),
-                Ok(_) => Target::Portal,
+                Ok(displays) => automatic_monitor(&displays).map_or(Target::Portal, |id| Target::Monitor(id.into())),
                 Err(e) => {
                     eprintln!("klipt: can't list monitors ({e}); using the desktop portal");
                     Target::Portal
@@ -299,7 +374,20 @@ impl RecorderBackend for GsrBackend {
             .stdin(Stdio::null())
             .output()
             .map_err(|e| spawn_error(&self.program, e))?;
-        Ok(parse_monitors(&String::from_utf8_lossy(&output.stdout)))
+        let mut displays = parse_monitors(&String::from_utf8_lossy(&output.stdout));
+        if displays.len() > 1 {
+            mark_primary(&mut displays, kscreen_primary().as_deref());
+        }
+        Ok(displays)
+    }
+
+    fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>> {
+        let output = Command::new(&self.program)
+            .arg("--list-audio-devices")
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| spawn_error(&self.program, e))?;
+        Ok(parse_audio_devices(&String::from_utf8_lossy(&output.stdout)))
     }
 }
 
@@ -379,6 +467,62 @@ mod tests {
                 Display { id: "DP-1".into(), name: "DP-1".into(), width: 2560, height: 1440, primary: false },
             ]
         );
+    }
+
+    #[test]
+    fn parses_list_audio_devices_keeping_only_microphones() {
+        let text = "default_output|Default output\n\
+default_input|Default input\n\
+alsa_output.usb-HyperX-00.analog-stereo.monitor|Monitor of HyperX Analog Stereo\n\
+alsa_input.usb-HyperX-00.mono-fallback|HyperX Cloud Stinger Core Wireless DTS Mono\n\
+alsa_output.pci-0000_16_00.6.iec958-stereo.monitor|Monitor of Ryzen HD Audio Controller Digital Stereo (IEC958)\n\
+alsa_input.pci-0000_16_00.6.analog-stereo|Ryzen HD Audio Controller Analog Stereo\n\
+\n\
+garbage\n\
+|No id\n";
+        assert_eq!(
+            parse_audio_devices(text),
+            vec![
+                AudioDevice {
+                    id: "alsa_input.usb-HyperX-00.mono-fallback".into(),
+                    name: "HyperX Cloud Stinger Core Wireless DTS Mono".into()
+                },
+                AudioDevice {
+                    id: "alsa_input.pci-0000_16_00.6.analog-stereo".into(),
+                    name: "Ryzen HD Audio Controller Analog Stereo".into()
+                },
+            ]
+        );
+        assert_eq!(parse_audio_devices("weird|"), vec![AudioDevice { id: "weird".into(), name: "weird".into() }]);
+    }
+
+    #[test]
+    fn kscreen_primary_is_the_enabled_output_with_priority_one() {
+        let json = r#"{"outputs":[
+            {"name":"HDMI-A-1","priority":2,"enabled":true,"connected":true},
+            {"name":"DP-1","priority":1,"enabled":true,"connected":true},
+            {"name":"DP-2","priority":0,"enabled":false,"connected":false}
+        ]}"#;
+        assert_eq!(parse_kscreen_primary(json).as_deref(), Some("DP-1"));
+        let disabled = r#"{"outputs":[{"name":"DP-1","priority":1,"enabled":false,"connected":true}]}"#;
+        assert_eq!(parse_kscreen_primary(disabled), None);
+        assert_eq!(parse_kscreen_primary("not json"), None);
+        assert_eq!(parse_kscreen_primary(r#"{"outputs":[]}"#), None);
+    }
+
+    #[test]
+    fn the_primary_monitor_is_marked_and_preferred() {
+        let mut displays = parse_monitors("HDMI-A-1|1920x1080\nDP-1|1920x1080\n");
+        mark_primary(&mut displays, Some("DP-1"));
+        assert_eq!(displays.iter().filter(|d| d.primary).map(|d| d.id.as_str()).collect::<Vec<_>>(), ["DP-1"]);
+        assert_eq!(automatic_monitor(&displays), Some("DP-1"));
+        // Unknown primary: the first line, as before.
+        let mut displays = parse_monitors("HDMI-A-1|1920x1080\nDP-1|1920x1080\n");
+        mark_primary(&mut displays, Some("DP-9"));
+        assert_eq!(automatic_monitor(&displays), Some("HDMI-A-1"));
+        mark_primary(&mut displays, None);
+        assert_eq!(automatic_monitor(&displays), Some("HDMI-A-1"));
+        assert_eq!(automatic_monitor(&[]), None);
     }
 
     #[test]

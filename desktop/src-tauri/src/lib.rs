@@ -55,7 +55,7 @@ pub fn run() {
             if !std::env::args().any(|arg| arg == AUTOSTART_ARG) {
                 tray::show_main_window(app.handle());
             }
-            hotkey::start_for_app(app.handle(), settings.hotkey.clone());
+            app.manage(hotkey::start_for_app(app.handle(), settings.hotkey.clone()));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -78,6 +78,9 @@ pub fn run() {
             commands::login,
             commands::logout,
             commands::get_hotkey_status,
+            commands::list_displays,
+            commands::list_audio_devices,
+            commands::open_clips_folder,
             commands::save_clip_now,
             commands::list_clips,
             commands::list_games,
@@ -103,9 +106,10 @@ pub fn run() {
         });
 }
 
-/// Turns starting with the OS on or off to match `startWithOs`. Debug builds leave it alone, so a
-/// dev run doesn't register the dev binary to start at login.
-fn apply_autostart(app: &AppHandle, enabled: bool) {
+/// Turns starting with the OS on or off to match `startWithOs` (at launch and when Settings
+/// change it). Debug builds leave it alone, so a dev run doesn't register the dev binary to
+/// start at login.
+pub fn apply_autostart(app: &AppHandle, enabled: bool) {
     if cfg!(debug_assertions) {
         return;
     }

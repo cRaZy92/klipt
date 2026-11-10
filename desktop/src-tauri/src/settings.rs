@@ -228,6 +228,38 @@ impl Settings {
     }
 }
 
+/// What saving new settings must do besides writing the file. Save sound and notification need
+/// nothing: the save feedback reads them live.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Effects {
+    /// Something the recorder uses changed: restart it (which clears the replay buffer).
+    pub restart_recorder: bool,
+    /// The save-clip shortcut changed: bind the new one.
+    pub rebind_hotkey: bool,
+    /// "Start with the OS" changed: turn autostart on or off now.
+    pub autostart: bool,
+}
+
+impl Effects {
+    pub fn between(old: &Settings, new: &Settings) -> Effects {
+        let restart_recorder = old.recording_mode != new.recording_mode
+            || old.display_id != new.display_id
+            || old.resolution != new.resolution
+            || old.fps != new.fps
+            || old.bitrate_kbps() != new.bitrate_kbps()
+            || old.buffer_seconds != new.buffer_seconds
+            || old.mic_enabled != new.mic_enabled
+            || old.mic_device_id != new.mic_device_id
+            || old.output_dir != new.output_dir;
+        let canonical = |accel: &str| crate::hotkey::normalize(accel).unwrap_or_else(|_| accel.trim().to_string());
+        Effects {
+            restart_recorder,
+            rebind_hotkey: canonical(&old.hotkey) != canonical(&new.hotkey),
+            autostart: old.start_with_os != new.start_with_os,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +361,63 @@ mod tests {
         assert_eq!(s.fps, 60);
         assert_eq!(s.buffer_seconds, 30);
         assert!(s.mic_enabled, "valid values are kept");
+    }
+
+    #[test]
+    fn no_change_has_no_side_effects() {
+        let s = Settings::default();
+        assert_eq!(Effects::between(&s, &s.clone()), Effects::default());
+    }
+
+    #[test]
+    fn recording_fields_restart_the_recorder() {
+        let old = Settings::default();
+        let changes: Vec<Settings> = vec![
+            Settings { recording_mode: RecordingMode::WhileGameRunning, ..old.clone() },
+            Settings { display_id: Some("DP-1".into()), ..old.clone() },
+            Settings { resolution: Resolution::P720, ..old.clone() },
+            Settings { fps: 30, ..old.clone() },
+            Settings { quality: Quality::Low, ..old.clone() },
+            Settings { quality: Quality::Custom, custom_bitrate_kbps: 30_000, ..old.clone() },
+            Settings { buffer_seconds: 60, ..old.clone() },
+            Settings { mic_enabled: true, ..old.clone() },
+            Settings { mic_device_id: Some("alsa_input.usb".into()), ..old.clone() },
+            Settings { output_dir: "/elsewhere".into(), ..old.clone() },
+        ];
+        for new in changes {
+            let effects = Effects::between(&old, &new);
+            assert_eq!(effects, Effects { restart_recorder: true, ..Effects::default() }, "{new:?}");
+        }
+    }
+
+    #[test]
+    fn same_effective_bitrate_does_not_restart() {
+        let old = Settings::default(); // High = 20 000 kbps
+        // The hidden custom value changes, but a preset is still selected.
+        assert_eq!(Effects::between(&old, &Settings { custom_bitrate_kbps: 50_000, ..old.clone() }), Effects::default());
+        // Custom at the preset's bitrate records exactly the same.
+        let custom = Settings { quality: Quality::Custom, custom_bitrate_kbps: 20_000, ..old.clone() };
+        assert!(!Effects::between(&old, &custom).restart_recorder);
+    }
+
+    #[test]
+    fn hotkey_autostart_and_feedback_changes() {
+        let old = Settings::default();
+        let rebind = Effects::between(&old, &Settings { hotkey: "Ctrl+Shift+S".into(), ..old.clone() });
+        assert_eq!(rebind, Effects { rebind_hotkey: true, ..Effects::default() });
+        // Spelling differences of the same shortcut don't rebind.
+        let same = Effects::between(&old, &Settings { hotkey: "alt+`".into(), ..old.clone() });
+        assert_eq!(same, Effects::default());
+        let autostart = Effects::between(&old, &Settings { start_with_os: false, ..old.clone() });
+        assert_eq!(autostart, Effects { autostart: true, ..Effects::default() });
+        // Read live by the save feedback: nothing to apply.
+        let feedback = Settings { save_sound: false, save_notification: false, ..old.clone() };
+        assert_eq!(Effects::between(&old, &feedback), Effects::default());
+        let all = Settings { fps: 30, hotkey: "Alt+F8".into(), start_with_os: false, ..old.clone() };
+        assert_eq!(
+            Effects::between(&old, &all),
+            Effects { restart_recorder: true, rebind_hotkey: true, autostart: true }
+        );
     }
 
     #[test]

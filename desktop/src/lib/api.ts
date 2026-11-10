@@ -43,13 +43,59 @@ export interface ListFilter {
   sort?: Sort;
 }
 
-/** The fields the UI reads; the rest round-trips untouched through `setSettings`. */
+export type RecordingMode = "always" | "whileGameRunning";
+export type BufferLocation = "ram" | "disk";
+export type Resolution = "p720" | "p1080" | "p1440" | "native";
+export type Quality = "low" | "medium" | "high" | "custom";
+
+/** Mirrors `settings.rs`. */
 export interface Settings {
-  hotkey: string;
+  recordingMode: RecordingMode;
+  bufferLocation: BufferLocation;
+  /** Null = automatic (the primary display). */
+  displayId: string | null;
+  resolution: Resolution;
+  fps: number;
+  quality: Quality;
+  customBitrateKbps: number;
   bufferSeconds: number;
+  micEnabled: boolean;
+  /** Null = the default microphone. */
+  micDeviceId: string | null;
+  /** Canonical accelerator, e.g. "Alt+Backquote". */
+  hotkey: string;
   outputDir: string;
+  startWithOs: boolean;
+  saveSound: boolean;
+  saveNotification: boolean;
   serverUrl: string | null;
-  [key: string]: unknown;
+}
+
+export interface FieldError {
+  field: string;
+  message: string;
+}
+
+/** What `set_settings` returns: the saved settings and which side effects ran. */
+export interface SettingsSaved {
+  settings: Settings;
+  /** The recorder restarted (its buffer was cleared). */
+  recorderRestarted: boolean;
+  /** The save-clip shortcut was bound again; `hotkeyDisplay` is what the system reports. */
+  hotkeyDisplay: string | null;
+}
+
+export interface Display {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  primary: boolean;
+}
+
+export interface AudioDevice {
+  id: string;
+  name: string;
 }
 
 export interface Account {
@@ -60,11 +106,15 @@ export interface Account {
 export interface HotkeyStatus {
   display: string | null;
   error: string | null;
+  /** `hotkey_taken` or `hotkey_unavailable` when `error` is set. */
+  errorCode: string | null;
 }
 
 export interface AppError {
   code: string;
   message: string;
+  /** Per-field problems, for `invalid_settings`. */
+  fields?: FieldError[];
 }
 
 export type UploadPhase = "exporting" | "uploading" | "finalizing";
@@ -131,6 +181,11 @@ export function errorCode(e: unknown): string | null {
   return isAppError(e) && typeof e.code === "string" ? e.code : null;
 }
 
+/** The per-field messages of an `invalid_settings` error. */
+export function errorFields(e: unknown): FieldError[] {
+  return isAppError(e) && Array.isArray(e.fields) ? e.fields : [];
+}
+
 /** A local file as a URL the webview can load (thumbnails, and videos in the editor). */
 export function fileUrl(path: string): string {
   return convertFileSrc(path);
@@ -138,7 +193,12 @@ export function fileUrl(path: string): string {
 
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
-  setSettings: (settings: Settings) => invoke<Settings>("set_settings", { settings }),
+  /** Saves and applies settings: restarts the recorder, rebinds the shortcut, toggles autostart. */
+  setSettings: (settings: Settings) => invoke<SettingsSaved>("set_settings", { settings }),
+  listDisplays: () => invoke<Display[]>("list_displays"),
+  /** Microphones (inputs only). */
+  listAudioDevices: () => invoke<AudioDevice[]>("list_audio_devices"),
+  openClipsFolder: () => invoke<void>("open_clips_folder"),
   getAccount: () => invoke<Account | null>("get_account"),
   checkServer: (serverUrl: string) => invoke<string>("check_server", { serverUrl }),
   login: (serverUrl: string, username: string, password: string) =>

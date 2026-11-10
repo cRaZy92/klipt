@@ -10,7 +10,7 @@ use std::sync::{Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::{RecordConfig, RecorderBackend, RecorderEvent};
+use super::{AudioDevice, Display, RecordConfig, RecorderBackend, RecorderEvent};
 use crate::errors::{AppError, Result};
 use crate::games::Detected;
 use crate::library::ClipView;
@@ -96,6 +96,10 @@ pub enum Input {
     Backend { generation: u64, event: RecorderEvent },
     /// A deadline may have passed.
     Tick,
+    /// Lists displays through the backend (for Settings); the answer goes to the sender.
+    ListDisplays(Sender<Result<Vec<Display>>>),
+    /// Lists microphones through the backend (for Settings).
+    ListAudioDevices(Sender<Result<Vec<AudioDevice>>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -210,6 +214,12 @@ impl Supervisor {
                 }
             }
             Input::Tick => self.on_tick(),
+            Input::ListDisplays(reply) => {
+                let _ = reply.send(self.backend.list_displays());
+            }
+            Input::ListAudioDevices(reply) => {
+                let _ = reply.send(self.backend.list_audio_devices());
+            }
             Input::Pause => {
                 if !self.paused {
                     self.paused = true;
@@ -451,8 +461,26 @@ impl SupervisorHandle {
         let _ = self.tx.send(Input::Save);
     }
 
+    /// New settings: stops the recorder and starts it again with them (clearing the buffer).
     pub fn configure(&self, cfg: RecordConfig, mode: RecordingMode) {
         let _ = self.tx.send(Input::Configure(cfg, mode));
+    }
+
+    /// The displays the backend can record. Blocks up to `timeout` (the supervisor may be busy
+    /// starting the helper).
+    pub fn list_displays(&self, timeout: Duration) -> Result<Vec<Display>> {
+        self.ask(Input::ListDisplays, timeout)
+    }
+
+    /// The microphones the backend can record. Blocks up to `timeout`.
+    pub fn list_audio_devices(&self, timeout: Duration) -> Result<Vec<AudioDevice>> {
+        self.ask(Input::ListAudioDevices, timeout)
+    }
+
+    fn ask<T>(&self, input: impl FnOnce(Sender<Result<T>>) -> Input, timeout: Duration) -> Result<T> {
+        let (tx, rx) = mpsc::channel();
+        self.tx.send(input(tx)).map_err(|_| AppError::RecorderFailed("the recorder supervisor stopped".into()))?;
+        rx.recv_timeout(timeout).unwrap_or_else(|_| Err(AppError::RecorderFailed("the recorder didn't answer in time".into())))
     }
 
     pub fn pause(&self) {
@@ -529,7 +557,10 @@ mod tests {
             rx
         }
         fn list_displays(&mut self) -> Result<Vec<Display>> {
-            Ok(vec![])
+            Ok(vec![Display { id: "d1".into(), name: "D1".into(), width: 1920, height: 1080, primary: true }])
+        }
+        fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>> {
+            Ok(vec![AudioDevice { id: "m1".into(), name: "Mic".into() }])
         }
     }
 
@@ -1049,5 +1080,24 @@ mod tests {
         handle.shutdown();
         handle.shutdown();
         assert_eq!(w.stops(), 1);
+    }
+
+    #[test]
+    fn handle_lists_through_the_backend_and_configure_restarts() {
+        let w = World::new();
+        let mut deps = w.deps();
+        deps.clock = Box::new(SystemClock::new());
+        let handle =
+            SupervisorHandle::spawn(Box::new(FakeBackend(w.calls.clone())), cfg(), RecordingMode::Always, deps);
+        let timeout = Duration::from_secs(5);
+        assert_eq!(handle.list_displays(timeout).unwrap()[0].id, "d1");
+        assert_eq!(handle.list_audio_devices(timeout).unwrap()[0].id, "m1");
+        assert_eq!(w.starts(), 1);
+        handle.configure(RecordConfig { fps: 30, ..cfg() }, RecordingMode::Always);
+        // Listing after `configure` is answered after it was handled: inputs are in order.
+        handle.list_displays(timeout).unwrap();
+        assert_eq!((w.stops(), w.starts()), (1, 2), "stopped and started again with the new settings");
+        handle.shutdown();
+        assert!(handle.list_displays(timeout).is_err(), "a stopped supervisor answers with an error");
     }
 }

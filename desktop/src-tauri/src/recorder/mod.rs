@@ -28,7 +28,8 @@ pub use supervisor::{Deps, SavedClip, SupervisorEvent, SupervisorHandle, SystemC
 /// What to record, resolved from [`Settings`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordConfig {
-    /// None = the backend picks (gsr: first monitor; klipt-recorder: the primary display).
+    /// None = the backend picks (gsr: the monitor KDE calls primary, else the first one;
+    /// klipt-recorder: the primary display).
     pub display_id: Option<String>,
     pub fps: u32,
     /// The output is scaled to fit inside this box, keeping the aspect ratio. None = native size.
@@ -67,6 +68,14 @@ pub struct Display {
     pub primary: bool,
 }
 
+/// A microphone the user can pick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecorderEvent {
     Started { encoder: String },
@@ -91,6 +100,8 @@ pub trait RecorderBackend {
     /// receiver; a helper started before keeps sending to the receiver it was started with.
     fn events(&self) -> Receiver<RecorderEvent>;
     fn list_displays(&mut self) -> Result<Vec<Display>>;
+    /// Microphones (audio inputs) the helper can record from, without the "default" entry.
+    fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>>;
 }
 
 /// The sender helper threads use for one run. `subscribe` swaps in a new channel; threads of an

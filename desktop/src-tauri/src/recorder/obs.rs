@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{send, Display, EventSink, RecordConfig, RecorderBackend, RecorderEvent};
+use super::{send, AudioDevice, Display, EventSink, RecordConfig, RecorderBackend, RecorderEvent};
 use crate::errors::{AppError, Result};
 
 /// libobs startup can be slow on a cold disk.
@@ -54,7 +54,10 @@ pub enum HelperEvent {
     Displays {
         items: Vec<Display>,
     },
-    AudioDevices {},
+    AudioDevices {
+        #[serde(default)]
+        inputs: Vec<AudioDevice>,
+    },
     Started {
         encoder: String,
     },
@@ -112,7 +115,7 @@ struct Helper {
     /// Holds the child until it has been reaped, so killing it never hits a reused PID.
     child: Arc<Mutex<Option<Child>>>,
     stdin: ChildStdin,
-    /// `ready`, `displays` and `stopped`: answers the backend waits for.
+    /// `ready`, `displays`, `audioDevices` and `stopped`: answers the backend waits for.
     replies: Receiver<HelperEvent>,
     waiter: JoinHandle<()>,
 }
@@ -172,8 +175,11 @@ impl Helper {
                         eprintln!("klipt: klipt-recorder error {code}: {message}");
                         send(&events, RecorderEvent::Error { code, message })
                     }
-                    HelperEvent::AudioDevices {} | HelperEvent::Stats {} => {}
-                    reply @ (HelperEvent::Ready { .. } | HelperEvent::Displays { .. } | HelperEvent::Stopped) => {
+                    HelperEvent::Stats {} => {}
+                    reply @ (HelperEvent::Ready { .. }
+                    | HelperEvent::Displays { .. }
+                    | HelperEvent::AudioDevices { .. }
+                    | HelperEvent::Stopped) => {
                         let _ = reply_tx.send(reply);
                     }
                 }
@@ -234,6 +240,15 @@ impl Helper {
         match self.wait_for(REPLY_TIMEOUT, |e| matches!(e, HelperEvent::Displays { .. })) {
             Some(HelperEvent::Displays { items }) => Ok(items),
             _ => Err(AppError::RecorderFailed("klipt-recorder didn't list displays".into())),
+        }
+    }
+
+    fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>> {
+        self.command(r#"{"cmd":"listAudioDevices"}"#)?;
+        match self.wait_for(REPLY_TIMEOUT, |e| matches!(e, HelperEvent::AudioDevices { .. })) {
+            // libobs lists the system default as "default"; the UI offers "Default microphone".
+            Some(HelperEvent::AudioDevices { inputs }) => Ok(inputs.into_iter().filter(|d| d.id != "default").collect()),
+            _ => Err(AppError::RecorderFailed("klipt-recorder didn't list audio devices".into())),
         }
     }
 
@@ -339,6 +354,16 @@ impl RecorderBackend for ObsBackend {
         helper.shut_down();
         displays
     }
+
+    fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>> {
+        if let Some(helper) = self.helper.as_mut().filter(|h| h.is_alive()) {
+            return helper.list_audio_devices();
+        }
+        let mut helper = Helper::spawn(&self.program, None)?;
+        let devices = helper.list_audio_devices();
+        helper.shut_down();
+        devices
+    }
 }
 
 impl Drop for ObsBackend {
@@ -405,6 +430,12 @@ mod tests {
             Some(HelperEvent::Displays {
                 items: vec![Display { id: "d1".into(), name: "DELL".into(), width: 2560, height: 1440, primary: true }]
             })
+        );
+        assert_eq!(
+            parse_event_line(
+                r#"{"event":"audioDevices","outputs":[{"id":"default","name":"Default"}],"inputs":[{"id":"{0.0.1}.{m}","name":"Mic"}]}"#
+            ),
+            Some(HelperEvent::AudioDevices { inputs: vec![AudioDevice { id: "{0.0.1}.{m}".into(), name: "Mic".into() }] })
         );
         assert_eq!(parse_event_line("libobs: not json"), None);
     }

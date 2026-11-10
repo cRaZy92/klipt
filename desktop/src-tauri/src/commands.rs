@@ -19,10 +19,10 @@ use crate::errors::{AppError, Result};
 use crate::export::{self, Edit};
 use crate::ffmpeg::Tools;
 use crate::games::mappings;
-use crate::hotkey::{HotkeyStatus, HotkeyStatusState};
+use crate::hotkey::{self, HotkeyHandle, HotkeyStatus, HotkeyStatusState};
 use crate::library::{Clip, ClipView, GameCount, ListFilter};
-use crate::recorder::SupervisorHandle;
-use crate::settings::Settings;
+use crate::recorder::{AudioDevice, Display, RecordConfig, SupervisorHandle};
+use crate::settings::{Effects, FieldError, Settings};
 use crate::state::AppState;
 use crate::upload::auth::{self, Auth};
 use crate::upload::{tus, ApiClient, ApiError, FinalizeRequest, Me, Visibility};
@@ -177,17 +177,119 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
     lock(&state.settings).clone()
 }
 
-/// Validates and saves. The recorder picks up recording changes in Task 12's flow.
-#[tauri::command]
-pub fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: Settings) -> Result<Settings> {
-    let errors = settings.validate();
-    if !errors.is_empty() {
-        return Err(AppError::InvalidSettings(errors));
+/// What `set_settings` returns.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSaved {
+    pub settings: Settings,
+    /// The recorder restarted with the new settings, which cleared its buffer.
+    pub recorder_restarted: bool,
+    /// The new save-clip shortcut as the system reports it, when it was rebound.
+    pub hotkey_display: Option<String>,
+}
+
+/// One settings save at a time: each diffs against the settings the previous one saved.
+static SAVING_SETTINGS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// How long listing displays or microphones may take (the recorder may be busy starting).
+const LIST_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The settings to save: validated (as `invalid_settings` with per-field messages) and with the
+/// hotkey in canonical form.
+pub fn checked_settings(mut settings: Settings) -> Result<Settings> {
+    let mut errors = settings.validate();
+    if errors.iter().all(|e| e.field != "hotkey") {
+        match hotkey::normalize(&settings.hotkey) {
+            Ok(accel) => settings.hotkey = accel,
+            Err(_) => errors.push(FieldError {
+                field: "hotkey",
+                message: "Klipt can't use that shortcut. Pick a different one.".into(),
+            }),
+        }
     }
-    settings.save(&state.data_dir)?;
-    allow_clip_folder(&app, &settings.output_dir);
-    *lock(&state.settings) = settings.clone();
-    Ok(settings)
+    if errors.is_empty() {
+        Ok(settings)
+    } else {
+        Err(AppError::InvalidSettings(errors))
+    }
+}
+
+/// Validates, applies and saves. Applying: a new shortcut is bound first (a taken one fails
+/// the whole save with `hotkey_taken` and the old shortcut stays), then the file is written,
+/// then the recorder restarts if a recording setting changed and autostart follows
+/// `startWithOs`. Save sound and notification are read live. The server address isn't
+/// changed here (logging in sets it).
+#[tauri::command]
+pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<SettingsSaved> {
+    let mut new = checked_settings(settings)?;
+    let _saving = SAVING_SETTINGS.lock().await;
+    let state = app.state::<AppState>();
+    let old = lock(&state.settings).clone();
+    new.server_url = old.server_url.clone();
+    let effects = Effects::between(&old, &new);
+
+    let mut hotkey_display = None;
+    if effects.rebind_hotkey {
+        let key = rebind_hotkey(&app, new.hotkey.clone()).await?;
+        hotkey_display = Some(key.display);
+    }
+    let saved = {
+        let mut current = lock(&state.settings);
+        // A login may have changed the server address meanwhile.
+        new.server_url = current.server_url.clone();
+        new.save(&state.data_dir).map(|()| *current = new.clone())
+    };
+    if let Err(e) = saved {
+        if effects.rebind_hotkey {
+            // The file still has the old shortcut: bind it again, so what works matches it.
+            if let Err(e) = rebind_hotkey(&app, old.hotkey.clone()).await {
+                eprintln!("klipt: can't restore the old shortcut after a failed save: {e}");
+            }
+        }
+        return Err(e);
+    }
+
+    allow_clip_folder(&app, &new.output_dir);
+    if effects.restart_recorder {
+        app.state::<SupervisorHandle>().configure(RecordConfig::from_settings(&new), new.recording_mode);
+    }
+    if effects.autostart {
+        crate::apply_autostart(&app, new.start_with_os);
+    }
+    Ok(SettingsSaved { settings: new, recorder_restarted: effects.restart_recorder, hotkey_display })
+}
+
+async fn rebind_hotkey(app: &AppHandle, accel: String) -> Result<hotkey::BoundKey> {
+    let handle = app.state::<HotkeyHandle>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || handle.rebind(&accel))
+        .await
+        .map_err(|e| AppError::Internal(format!("hotkey rebind task failed: {e}")))?
+}
+
+/// The displays the recorder can capture.
+#[tauri::command]
+pub async fn list_displays(app: AppHandle) -> Result<Vec<Display>> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<SupervisorHandle>().list_displays(LIST_TIMEOUT))
+        .await
+        .map_err(|e| AppError::Internal(format!("display listing failed: {e}")))?
+}
+
+/// The microphones the recorder can record from (the default one isn't listed).
+#[tauri::command]
+pub async fn list_audio_devices(app: AppHandle) -> Result<Vec<AudioDevice>> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<SupervisorHandle>().list_audio_devices(LIST_TIMEOUT))
+        .await
+        .map_err(|e| AppError::Internal(format!("microphone listing failed: {e}")))?
+}
+
+/// Opens the clips folder in the file manager (creating it if needed).
+#[tauri::command]
+pub fn open_clips_folder(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let dir = lock(&state.settings).output_dir.clone();
+    std::fs::create_dir_all(&dir)?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
 }
 
 /// Lets the UI load files from the clips folder through the asset protocol. Not recursive: clips
@@ -791,6 +893,20 @@ mod tests {
         assert!(!should_save_mapping(&clip(Some("Known"), None, Some("game.exe")), Some("Game")));
         assert!(!should_save_mapping(&clip(None, None, None), Some("Game")));
         assert!(!should_save_mapping(&clip(None, Some(1), Some("wine64-preloader")), Some("Game")));
+    }
+
+    #[test]
+    fn saved_settings_are_validated_and_the_hotkey_normalized() {
+        let ok = checked_settings(Settings { hotkey: "shift+ctrl+s".into(), ..Settings::default() }).unwrap();
+        assert_eq!(ok.hotkey, "Ctrl+Shift+S");
+        let fields = |e: AppError| match e {
+            AppError::InvalidSettings(fields) => fields.into_iter().map(|f| f.field).collect::<Vec<_>>(),
+            e => panic!("{e:?}"),
+        };
+        let bad_key = checked_settings(Settings { hotkey: "Alt+Nope".into(), ..Settings::default() }).unwrap_err();
+        assert_eq!(fields(bad_key), ["hotkey"]);
+        let both = checked_settings(Settings { fps: 45, hotkey: "".into(), ..Settings::default() }).unwrap_err();
+        assert_eq!(fields(both), ["fps", "hotkey"], "an empty hotkey is reported once");
     }
 
     #[test]

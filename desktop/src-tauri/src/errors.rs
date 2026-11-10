@@ -21,6 +21,12 @@ pub enum AppError {
     InvalidInput(String),
     #[error("invalid settings: {0:?}")]
     InvalidSettings(Vec<FieldError>),
+    #[error("recorder helper not found: {0}")]
+    RecorderMissing(String),
+    #[error("recorder failed: {0}")]
+    RecorderFailed(String),
+    #[error("not recording")]
+    NotRecording,
     #[error("i/o: {0}")]
     Io(#[from] std::io::Error),
     #[error("database: {0}")]
@@ -37,6 +43,9 @@ impl AppError {
             AppError::ToolFailed { .. } => "tool_failed",
             AppError::InvalidInput(_) => "invalid_input",
             AppError::InvalidSettings(_) => "invalid_settings",
+            AppError::RecorderMissing(_) => "recorder_missing",
+            AppError::RecorderFailed(_) => "recorder_failed",
+            AppError::NotRecording => "not_recording",
             AppError::Io(_) => "io",
             AppError::Db(_) => "database",
             AppError::Json(_) => "json",
@@ -53,6 +62,12 @@ impl AppError {
             }
             AppError::InvalidInput(_) => "That change isn't valid.".into(),
             AppError::InvalidSettings(_) => "Some settings need fixing before they can be saved.".into(),
+            AppError::RecorderMissing(_) if cfg!(target_os = "linux") => {
+                "Klipt needs GPU Screen Recorder to record. Install it from your distribution's packages.".into()
+            }
+            AppError::RecorderMissing(_) => "Klipt's recorder is missing. Try reinstalling Klipt.".into(),
+            AppError::RecorderFailed(_) => "Recording couldn't start. Check your recording settings.".into(),
+            AppError::NotRecording => "Klipt isn't recording right now.".into(),
             AppError::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                 "Klipt doesn't have permission to use that file or folder.".into()
             }

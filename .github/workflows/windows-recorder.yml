@@ -1,0 +1,65 @@
+name: windows-recorder
+
+on:
+  push:
+    branches: [feat/desktop]
+    paths:
+      - desktop/**
+      - scripts/fetch-obs-windows.ps1
+      - scripts/package-recorder-windows.ps1
+      - .github/workflows/windows-recorder.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      OBS_VERSION: 33.0.1
+      DEPS: ${{ github.workspace }}\..\klipt-deps
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+
+      - name: Fetch OBS runtime and headers
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/fetch-obs-windows.ps1 -Version $env:OBS_VERSION -Dest $env:DEPS
+
+      - name: Build and unit-test klipt-recorder
+        shell: pwsh
+        working-directory: desktop
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: |
+          $env:OBS_INCLUDE_DIR = "$env:DEPS\include\obs"
+          $env:SIMDE_INCLUDE_DIR = "$env:DEPS\include\simde"
+          cargo build -p klipt-recorder --release --locked
+          # The real-OBS CLI tests need a GPU and run locally (KLIPT_TEST_OBS_ROOT); here they skip.
+          cargo test -p klipt-recorder --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: scripts/package-recorder-windows.ps1 -ObsDir "$env:DEPS\obs" -RecorderExe desktop\target\release\klipt-recorder.exe -Out dist\klipt-recorder-windows
+
+      # Runners have no GPU, so libobs may fail to create a D3D11 device. Informational only.
+      - name: Smoke test (--list)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $p = Start-Process -FilePath dist\klipt-recorder-windows\bin\64bit\klipt-recorder.exe -ArgumentList '--list' `
+            -NoNewWindow -PassThru -Wait -RedirectStandardOutput list.out -RedirectStandardError list.err
+          Get-Content list.out
+          Get-Content list.err | Select-Object -Last 20
+          exit $p.ExitCode
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: klipt-recorder-windows
+          path: dist/klipt-recorder-windows
+          if-no-files-found: error

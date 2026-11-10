@@ -593,6 +593,8 @@
   }
 
   .scroll {
+    /* Contains the hidden screen-reader text, which would otherwise poke out below. */
+    position: relative;
     flex: 1;
     min-height: 0;
     overflow-y: auto;

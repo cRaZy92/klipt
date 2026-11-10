@@ -3,6 +3,15 @@
 //! The app starts it with piped stdio and speaks the JSON-lines protocol in `protocol.rs`.
 //! `--selftest` records without the app, for testing on real hardware.
 
+/// Writes a line to stderr, ignoring errors. `eprintln!` panics when stderr is a closed pipe (the
+/// app died), and a panic inside libobs's log callback would abort the process mid-save.
+macro_rules! log {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr().lock(), $($arg)*);
+    }};
+}
+
 mod displays;
 mod hotkey_win;
 mod obs;
@@ -13,9 +22,10 @@ mod session;
 use protocol::{parse_command, AudioDevice, Command, ErrorCode, Event};
 use session::{Session, Signal};
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const USAGE: &str = "\
 klipt-recorder — Klipt's libobs recording helper
@@ -53,11 +63,78 @@ pub enum Input {
     Hotkey,
 }
 
-/// Writes one event per line to stdout and flushes, so the app sees it immediately.
+// ---------------------------------------------------------------------------------------------
+// Event output
+
+static EVENTS: OnceLock<Mutex<Box<dyn Write + Send>>> = OnceLock::new();
+
+/// Sets up where events go. On Linux, child processes started by libobs (obs-ffmpeg-mux) inherit
+/// fd 1 and may print to it, so events get a private duplicate of stdout and fd 1 is pointed at
+/// stderr. (On Windows libobs starts its helpers without a stdout handle.)
+fn init_event_output() {
+    #[cfg(target_os = "linux")]
+    let out: Box<dyn Write + Send> = {
+        use std::os::fd::FromRawFd;
+        extern "C" {
+            fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+            fn dup2(old: i32, new: i32) -> i32;
+        }
+        const F_DUPFD_CLOEXEC: i32 = 1030;
+        unsafe {
+            let private = fcntl(1, F_DUPFD_CLOEXEC, 3);
+            if private >= 0 && dup2(2, 1) >= 0 {
+                Box::new(std::fs::File::from_raw_fd(private))
+            } else {
+                Box::new(std::io::stdout())
+            }
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let out: Box<dyn Write + Send> = Box::new(std::io::stdout());
+    let _ = EVENTS.set(Mutex::new(out));
+}
+
+/// Writes one event per line and flushes, so the app sees it immediately. Write errors (the app
+/// went away) are ignored; stdin EOF shuts the process down.
 pub fn emit(event: &Event) {
-    let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "{}", event.to_line());
-    let _ = out.flush();
+    let line = event.to_line();
+    match EVENTS.get() {
+        Some(out) => {
+            let mut out = out.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = writeln!(out, "{line}");
+            let _ = out.flush();
+        }
+        None => {
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "{line}");
+            let _ = out.flush();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Process helpers
+
+static LAUNCH_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Resolves a path relative to the directory the recorder was started in. The working directory
+/// changes to OBS's bin folder during startup (libobs needs that on Windows).
+pub fn resolve_path(p: &str) -> PathBuf {
+    let base = LAUNCH_DIR.get().cloned().unwrap_or_default();
+    base.join(Path::new(p))
+}
+
+/// Guarantees the process exits with `code` even if libobs cleanup hangs (releasing an output can
+/// wait forever on libobs's stop event).
+pub fn arm_exit_watchdog(code: i32) {
+    static ARMED: OnceLock<()> = OnceLock::new();
+    if ARMED.set(()).is_ok() {
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(10));
+            log!("cleanup did not finish within 10 s; exiting");
+            std::process::exit(code);
+        });
+    }
 }
 
 pub enum Flow {
@@ -65,9 +142,13 @@ pub enum Flow {
     Exit(i32),
 }
 
+// ---------------------------------------------------------------------------------------------
+// Controller
+
 /// Applies commands and libobs signals to the (at most one) recording session.
 pub struct Controller {
-    tx: Sender<Input>,
+    pub tx: Sender<Input>,
+    pub rx: Receiver<Input>,
     registered_encoders: Vec<String>,
     pub session: Option<Session>,
 }
@@ -96,16 +177,14 @@ impl Controller {
             }
             Command::Save => self.save(),
             Command::Stop => {
-                if let Some(s) = self.session.take() {
-                    s.stop();
-                }
+                self.end_session();
                 emit(&Event::Stopped);
+                self.release_session(0);
                 return Flow::Exit(0);
             }
             Command::Shutdown => {
-                if let Some(s) = self.session.take() {
-                    s.stop();
-                }
+                self.end_session();
+                self.release_session(0);
                 return Flow::Exit(0);
             }
         }
@@ -136,7 +215,7 @@ impl Controller {
                         ErrorCode::RecordingStopped,
                         format!("Recording stopped unexpectedly (libobs output code {code})"),
                     ));
-                    self.session = None;
+                    self.release_session(2);
                     return Flow::Exit(2);
                 }
             }
@@ -148,6 +227,34 @@ impl Controller {
         if let Some(event) = self.session.as_mut().and_then(Session::poll) {
             emit(&event);
         }
+    }
+
+    /// Lets a save that is being written finish, emitting `saved` or `save_failed`. Other input
+    /// arriving meanwhile is dropped (this only runs on the way out).
+    pub fn wait_for_pending_save(&mut self) {
+        let deadline = Instant::now() + session::SAVE_TIMEOUT;
+        while self.session.as_ref().is_some_and(|s| s.is_saving()) && Instant::now() < deadline {
+            if let Ok(Input::Obs(signal)) = self.rx.recv_timeout(Duration::from_millis(50)) {
+                self.signal(signal);
+            }
+            obs::pump_events();
+            self.tick();
+        }
+    }
+
+    /// Finishes a pending save, then stops the replay buffer. Without the wait, a stop right after
+    /// a save would lose the clip's `saved` event.
+    fn end_session(&mut self) {
+        self.wait_for_pending_save();
+        if let Some(s) = self.session.as_mut() {
+            s.stop();
+        }
+    }
+
+    /// Releases libobs objects; a watchdog makes sure a hang there can't keep the process alive.
+    fn release_session(&mut self, exit_code: i32) {
+        arm_exit_watchdog(exit_code);
+        self.session = None;
     }
 }
 
@@ -163,13 +270,14 @@ fn audio_devices() -> Event {
 
 /// How often the main loop wakes up without input. Linux needs to iterate GLib often for the portal.
 #[cfg(target_os = "linux")]
-const TICK: Duration = Duration::from_millis(10);
+pub const TICK: Duration = Duration::from_millis(10);
 #[cfg(not(target_os = "linux"))]
-const TICK: Duration = Duration::from_millis(100);
+pub const TICK: Duration = Duration::from_millis(100);
 
-fn run_protocol(ctl: &mut Controller, rx: &Receiver<Input>) -> i32 {
+fn run_protocol(ctl: &mut Controller) -> i32 {
     loop {
-        match rx.recv_timeout(TICK) {
+        let input = ctl.rx.recv_timeout(TICK);
+        match input {
             Ok(Input::Line(line)) if line.trim().is_empty() => {}
             Ok(Input::Line(line)) => match parse_command(&line) {
                 Ok(cmd) => {
@@ -197,6 +305,9 @@ fn run_protocol(ctl: &mut Controller, rx: &Receiver<Input>) -> i32 {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Startup
+
 struct Args {
     obs_root: Option<PathBuf>,
     mode: Mode,
@@ -222,7 +333,8 @@ fn parse_args(raw: &[String]) -> Result<Option<Args>, String> {
     let mut it = raw.iter();
     while let Some(a) = it.next() {
         if a == "--obs-root" {
-            obs_root = Some(PathBuf::from(it.next().ok_or("--obs-root needs a directory")?));
+            let dir = it.next().ok_or("--obs-root needs a directory")?;
+            obs_root = Some(std::path::absolute(dir).map_err(|e| format!("--obs-root {dir}: {e}"))?);
         } else {
             rest.push(a.clone());
         }
@@ -240,17 +352,20 @@ fn parse_args(raw: &[String]) -> Result<Option<Args>, String> {
 }
 
 fn main() {
+    let _ = LAUNCH_DIR.set(std::env::current_dir().unwrap_or_default());
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(&raw) {
         Ok(Some(a)) => a,
         Ok(None) => return,
         Err(e) => {
-            eprintln!("klipt-recorder: {e}");
+            log!("klipt-recorder: {e}");
             std::process::exit(64);
         }
     };
+    init_event_output();
 
     let code = run(args);
+    arm_exit_watchdog(code);
     obs::shutdown();
     std::process::exit(code);
 }
@@ -263,7 +378,7 @@ fn run(args: Args) -> i32 {
             return 1;
         }
     };
-    eprintln!("libobs {} loaded; H.264 encoders: {}", info.version, info.encoders.join(", "));
+    log!("libobs {} loaded; H.264 encoders: {}", info.version, info.encoders.join(", "));
     emit(&Event::Ready {
         version: env!("CARGO_PKG_VERSION").to_string(),
         platform: if cfg!(windows) { "windows" } else { "linux" }.to_string(),
@@ -275,28 +390,33 @@ fn run(args: Args) -> i32 {
     std::thread::Builder::new()
         .name("stdin".into())
         .spawn(move || {
-            for line in std::io::stdin().lock().lines() {
-                match line {
-                    Ok(l) => {
-                        if stdin_tx.send(Input::Line(l)).is_err() {
+            // Bytes, not `lines()`: invalid UTF-8 must become a bad_command, not look like EOF.
+            let mut stdin = std::io::stdin().lock();
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                match stdin.read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf).into_owned();
+                        if stdin_tx.send(Input::Line(line)).is_err() {
                             return;
                         }
                     }
-                    Err(_) => break,
                 }
             }
             let _ = stdin_tx.send(Input::StdinClosed);
         })
         .expect("spawn stdin thread");
 
-    let mut ctl = Controller { tx: tx.clone(), registered_encoders: obs::registered_encoders(), session: None };
+    let mut ctl = Controller { tx, rx, registered_encoders: obs::registered_encoders(), session: None };
     match args.mode {
-        Mode::Protocol => run_protocol(&mut ctl, &rx),
+        Mode::Protocol => run_protocol(&mut ctl),
         Mode::List => {
             ctl.command(Command::ListDisplays);
             ctl.command(Command::ListAudioDevices);
             0
         }
-        Mode::Selftest(st) => selftest::run(&mut ctl, &tx, &rx, st),
+        Mode::Selftest(st) => selftest::run(&mut ctl, st),
     }
 }

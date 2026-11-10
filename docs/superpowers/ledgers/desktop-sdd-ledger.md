@@ -26,7 +26,7 @@ Evidence (Windows, release build in C:\klipt-deps\obs\bin\64bit):
 - x264 fallback: works, 49% of one core, 627 MB peak. Non-primary monitor (SMBX2335) captured via DXGI.
 - Idle-desktop recorder CPU ≈ 16–17% of one core over 6–9 s runs (includes session start + one save); not yet measured in a game.
 Not done:
-- **Independent review of 8ac05fe** (started, stopped when the usage limit hit) — rerun before relying on it.
+- Independent review of 8ac05fe: done, see "Task 1 review" below.
 - Linux code paths are compile-unverified (no Linux here): Step 5 on CachyOS must `cargo build` and run the printf check.
 - C9 owner test in a fullscreen game (FPS off/on, Alt+F9 hotkey, recorder CPU) — see HANDOFF.md.
 
@@ -34,3 +34,17 @@ Not done:
 - `scripts/package-recorder-windows.ps1`: OBS layout subset (bin/64bit minus Qt/UI/scripting/OpenGL/pdb; core/{win-capture,win-wasapi,obs-ffmpeg,obs-outputs,obs-x264,obs-nvenc,obs-qsv11} minus pdb and game-capture inject/hook helpers; data/libobs) + TEST-ON-WINDOWS.md. 57 MB. Verified locally: selftest from the packaged folder → NVENC, 1 video + 2 AAC; only log noise is win-capture's missing get-graphics-offsets (game capture, unused).
 - `.github/workflows/windows-recorder.yml`: windows-latest, fetch → build → unit tests → package → `--list` smoke (non-blocking: runners have no GPU) → artifact `klipt-recorder-windows`. Actions pinned to current majors (checkout/upload-artifact v7, rust-cache v2).
 - Ruling: `server-ci.yml` goes on `feat/server`, not here — the server code doesn't exist on `feat/desktop` (it branched from spike/capture), and the CI should run on the feat/server → main PR.
+
+## Task 1 review (independent reviewer, 8ac05fe) → fix wave
+Claims checked against libobs 33.0.1 source before fixing. All 9 addressed:
+1. Critical — two saves in the same second overwrote each other (libobs names to the second with overwrite=true). Fix: `ClipNamer` pushes a fresh `format` via `obs_output_update` before each save; saves < 2 s apart get " (2)", " (3)"… Verified: burst of 3 saves 0.4 s apart → 3 files, two in the same second.
+2. Important — stop/shutdown/EOF during a save lost the `saved` event. Fix: `Controller::end_session` waits for the pending save first. Verified: stop sent right after the 3rd save → all 3 `saved` before `stopped`.
+3. Important — a failed mux (libobs signals `saved` only on success) left `busy` for 60 s. Fix: `MuxWatch` sees muxing end via `get_last_replay`; no `saved` within 1 s → `save_failed`. Verified with obs-ffmpeg-mux.exe removed: `save_failed` ~1 s after the save.
+4. Important — `eprintln!` panics on a closed stderr, aborting inside the libobs log callback. Fix: `log!` macro ignoring write errors, used everywhere.
+5. Minor — relative paths resolved after the chdir. Fix: `--obs-root` and `--out` made absolute while parsing; protocol `outputDir` resolved against the launch dir. Verified.
+6. Minor — invalid UTF-8 on stdin looked like EOF. Fix: `read_until` + lossy decode.
+7. Minor — release could hang on obs_output_destroy. Fix: wait for `obs_output_active() == false` after the stop signal; `arm_exit_watchdog` exits with the intended code after 10 s if cleanup hangs.
+8. Minor (Linux) — obs-ffmpeg-mux inherits fd 1 and may print to it; helpers are looked up next to /proc/self/exe. Fix: events go to a private dup of fd 1 and fd 1 → stderr (Linux only; on Windows libobs gives helpers no stdout handle, checked in pipe-windows.c); missing-helper warning with the `ln -s` command.
+9. Minor (Linux) — `improper_ctypes` on the tuple Rusage, dead code warning. Fixed.
+Notes for Task 6 (supervisor): keep draining the recorder's stderr (a full pipe blocks libobs threads), and if `stopped` doesn't arrive within ~15 s of `stop`, kill the child by PID.
+Still unverified: the Linux paths compile only by reading; Step 5 on CachyOS needs obs-ffmpeg-mux/obs-nvenc-test symlinked next to target/debug/klipt-recorder.

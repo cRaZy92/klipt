@@ -66,6 +66,59 @@ pub fn clip_duration_ms(recording_for: Duration, buffer_seconds: u32) -> u64 {
     (recording_for.as_millis() as u64).min(buffer_seconds as u64 * 1000)
 }
 
+pub const FILENAME_FORMAT: &str = "Klipt %CCYY-%MM-%DD %hh-%mm-%ss";
+
+/// Names clips so that quick saves never collide. libobs names the file when the save starts, to
+/// the second, and overwrites an existing file. Saves less than 2 s after the previous one get
+/// " (2)", " (3)", … (2 s also covers a save requested at :59.99 but named in the next second).
+#[derive(Debug, Default)]
+pub struct ClipNamer {
+    last: Option<Instant>,
+    burst: u32,
+}
+
+impl ClipNamer {
+    pub fn next_format(&mut self, now: Instant) -> String {
+        self.burst = match self.last {
+            Some(prev) if now.duration_since(prev) < Duration::from_secs(2) => self.burst + 1,
+            _ => 0,
+        };
+        self.last = Some(now);
+        if self.burst == 0 {
+            FILENAME_FORMAT.to_string()
+        } else {
+            format!("{FILENAME_FORMAT} ({})", self.burst + 1)
+        }
+    }
+}
+
+/// Detects a save that failed while writing. libobs only signals `saved` on success; on failure
+/// muxing just ends. `get_last_replay` returns "" while muxing and the new path once it ended, so a
+/// new path without a `saved` signal shortly after means the save failed.
+#[derive(Debug)]
+pub struct MuxWatch {
+    path_before: String,
+    ended_at: Option<Instant>,
+}
+
+impl MuxWatch {
+    pub const GRACE: Duration = Duration::from_secs(1);
+
+    pub fn new(path_before: String) -> Self {
+        Self { path_before, ended_at: None }
+    }
+
+    /// `current` is what `get_last_replay` returns now. True when the save should be reported failed.
+    pub fn failed(&mut self, current: &str, now: Instant) -> bool {
+        if current.is_empty() || current == self.path_before {
+            self.ended_at = None; // still muxing, or the save hasn't started yet
+            return false;
+        }
+        let ended = *self.ended_at.get_or_insert(now);
+        now.duration_since(ended) >= Self::GRACE
+    }
+}
+
 /// Scales `src` to fit inside `max`, keeping the aspect ratio, never upscaling,
 /// with even dimensions (required by NV12/H.264).
 pub fn fit_inside(src_w: u32, src_h: u32, max_w: u32, max_h: u32) -> (u32, u32) {
@@ -145,9 +198,9 @@ const DISPLAY_WAIT: Duration = Duration::from_secs(5);
 #[cfg(not(windows))]
 const DISPLAY_WAIT: Duration = Duration::from_secs(180);
 
-/// A save that hasn't produced a file after this long is reported as failed. libobs emits no
-/// signal when muxing fails (it only logs a warning), so this timeout is the only way to notice.
-const SAVE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Backstop for a save that never even starts writing. Write failures are caught much sooner by
+/// [`MuxWatch`].
+pub const SAVE_TIMEOUT: Duration = Duration::from_secs(60);
 
 // ---------------------------------------------------------------------------------------------
 // Session
@@ -207,6 +260,8 @@ pub struct Session {
     started_at: Instant,
     buffer_seconds: u32,
     saves: SaveTracker,
+    namer: ClipNamer,
+    mux_watch: Option<MuxWatch>,
     stopping: bool,
     pub encoder: String,
     pub width: u32,
@@ -229,6 +284,8 @@ impl Session {
             started_at: Instant::now(),
             buffer_seconds: params.buffer_seconds,
             saves: SaveTracker::new(SAVE_TIMEOUT),
+            namer: ClipNamer::default(),
+            mux_watch: None,
             stopping: false,
             encoder: String::new(),
             width: 0,
@@ -246,11 +303,10 @@ impl Session {
 
     unsafe fn build(&mut self, params: &StartParams, registered_encoders: &[String]) -> Result<(), StartError> {
         let o = api();
-        std::fs::create_dir_all(&params.output_dir).map_err(|e| {
-            StartError::new(
-                ErrorCode::StartFailed,
-                format!("Cannot create the clips folder {}: {e}", params.output_dir),
-            )
+        // Relative to where the recorder was started, not OBS's bin folder (the current directory).
+        let output_dir = crate::resolve_path(&params.output_dir).to_string_lossy().into_owned();
+        std::fs::create_dir_all(&output_dir).map_err(|e| {
+            StartError::new(ErrorCode::StartFailed, format!("Cannot create the clips folder {output_dir}: {e}"))
         })?;
 
         // --- canvas size and display source ---
@@ -291,7 +347,7 @@ impl Session {
             obs::pump_events();
             std::thread::sleep(Duration::from_millis(10));
         }
-        eprintln!(
+        log!(
             "display: {}x{} after {} ms, canvas {width}x{height}@{}",
             o.obs_source_get_width(self.display),
             o.obs_source_get_height(self.display),
@@ -344,8 +400,8 @@ impl Session {
         let rb = Data::new()
             .int("max_time_sec", params.buffer_seconds as i64)
             .int("max_size_mb", 8192)
-            .str("directory", &params.output_dir)
-            .str("format", "Klipt %CCYY-%MM-%DD %hh-%mm-%ss")
+            .str("directory", &output_dir)
+            .str("format", FILENAME_FORMAT)
             .str("extension", "mp4")
             .bool("allow_spaces", true);
         self.output =
@@ -377,14 +433,14 @@ impl Session {
             let enc =
                 o.obs_video_encoder_create(cs(id).as_ptr(), cs("video").as_ptr(), settings.0, std::ptr::null_mut());
             if enc.is_null() {
-                eprintln!("encoder {id}: could not be created");
+                log!("encoder {id}: could not be created");
                 continue;
             }
             created_any = true;
             o.obs_encoder_set_video(enc, o.obs_get_video());
             o.obs_output_set_video_encoder(self.output, enc);
             if o.obs_output_start(self.output) {
-                eprintln!("encoder {id}: started");
+                log!("encoder {id}: started");
                 self.video_encoder = enc;
                 self.encoder = id.clone();
                 self.started_at = Instant::now();
@@ -394,7 +450,7 @@ impl Session {
             if last_error.is_empty() {
                 last_error = format!("{id} failed to start");
             }
-            eprintln!("encoder {id}: start failed: {last_error}");
+            log!("encoder {id}: start failed: {last_error}");
             o.obs_output_set_video_encoder(self.output, std::ptr::null_mut());
             o.obs_encoder_release(enc);
         }
@@ -410,12 +466,17 @@ impl Session {
 
     /// Asks the replay buffer to write its contents. The result arrives as [`Signal::Saved`].
     pub fn save(&mut self) -> Result<(), Event> {
+        let now = Instant::now();
         let duration_ms = clip_duration_ms(self.started_at.elapsed(), self.buffer_seconds);
-        if self.saves.begin(Instant::now(), duration_ms).is_err() {
+        if self.saves.begin(now, duration_ms).is_err() {
             return Err(Event::error(ErrorCode::Busy, "Already saving"));
         }
         let ok = unsafe {
             let o = api();
+            // libobs reads "format" when the save starts; a fresh name per burst avoids overwriting.
+            let format = Data::new().str("format", &self.namer.next_format(now));
+            o.obs_output_update(self.output, format.0);
+            self.mux_watch = Some(MuxWatch::new(self.last_replay_path()));
             let mut cd: obs::calldata_t = std::mem::zeroed();
             let called = o.proc_handler_call(o.obs_output_get_proc_handler(self.output), cs("save").as_ptr(), &mut cd);
             o.bfree(cd.stack as *mut c_void);
@@ -423,9 +484,15 @@ impl Session {
         };
         if !ok {
             self.saves.finish();
+            self.mux_watch = None;
             return Err(Event::error(ErrorCode::SaveFailed, "The replay buffer refused to save"));
         }
         Ok(())
+    }
+
+    /// The last written replay, or "" while the replay buffer is writing one.
+    fn last_replay_path(&self) -> String {
+        unsafe { obs::call_output_proc(self.output, "get_last_replay", Some("path")) }.unwrap_or_default()
     }
 
     pub fn is_saving(&self) -> bool {
@@ -435,7 +502,8 @@ impl Session {
     /// Handles [`Signal::Saved`]: returns the `saved` event for the pending save.
     pub fn on_saved(&mut self) -> Option<Event> {
         let duration_ms = self.saves.finish()?;
-        let path = unsafe { obs::call_output_proc(self.output, "get_last_replay", Some("path")) }.unwrap_or_default();
+        self.mux_watch = None;
+        let path = self.last_replay_path();
         if path.is_empty() {
             return Some(Event::error(ErrorCode::SaveFailed, "The replay buffer didn't report a file"));
         }
@@ -444,9 +512,20 @@ impl Session {
         Some(Event::Saved { path, duration_ms })
     }
 
-    /// Periodic check: a save that never finished becomes an error.
+    /// Periodic check for saves that failed: a write that ended without `saved`, or a save that
+    /// never started.
     pub fn poll(&mut self) -> Option<Event> {
-        if self.saves.check_timeout(Instant::now()) {
+        let now = Instant::now();
+        if self.saves.is_saving() {
+            let current = self.last_replay_path();
+            if self.mux_watch.as_mut().is_some_and(|w| w.failed(&current, now)) {
+                self.saves.finish();
+                self.mux_watch = None;
+                return Some(Event::error(ErrorCode::SaveFailed, "The clip file could not be written"));
+            }
+        }
+        if self.saves.check_timeout(now) {
+            self.mux_watch = None;
             return Some(Event::error(ErrorCode::SaveFailed, "Saving the clip took too long"));
         }
         None
@@ -457,12 +536,8 @@ impl Session {
         self.stopping
     }
 
-    /// Stops the replay buffer (discarding its contents) and releases everything.
-    pub fn stop(mut self) {
-        self.stop_output();
-    }
-
-    fn stop_output(&mut self) {
+    /// Stops the replay buffer (discarding its contents). Release happens on drop.
+    pub fn stop(&mut self) {
         self.stopping = true;
         if self.output.is_null() {
             return;
@@ -474,12 +549,18 @@ impl Session {
             }
             o.obs_output_stop(self.output);
             let ctx = &*self.signals;
-            let guard = ctx.stopped.lock().unwrap();
+            let guard = ctx.stopped.lock().unwrap_or_else(|e| e.into_inner());
             let (_guard, timeout) =
                 ctx.stopped_cv.wait_timeout_while(guard, Duration::from_secs(5), |stopped| !*stopped).unwrap();
             if timeout.timed_out() {
-                eprintln!("replay buffer didn't stop within 5 s; forcing");
+                log!("replay buffer didn't stop within 5 s; forcing");
                 o.obs_output_force_stop(self.output);
+            }
+            // The stop signal fires before libobs finishes tearing down; releasing before the output
+            // is inactive can race with obs_output_destroy's own stop and hang.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while o.obs_output_active(self.output) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
     }
@@ -487,7 +568,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.stop_output();
+        self.stop();
         unsafe {
             let o = api();
             if !self.output.is_null() {
@@ -570,7 +651,7 @@ unsafe fn after_display_ready(display: *mut obs::obs_source_t) {
         let path = restore_token_path();
         let _ = std::fs::create_dir_all(path.parent().unwrap());
         if let Err(e) = std::fs::write(&path, token) {
-            eprintln!("could not save the portal restore token: {e}");
+            log!("could not save the portal restore token: {e}");
         }
     }
 }
@@ -602,6 +683,47 @@ mod tests {
     fn a_saved_signal_without_a_pending_save_is_ignored() {
         let mut s = SaveTracker::new(Duration::from_secs(120));
         assert_eq!(s.finish(), None);
+    }
+
+    #[test]
+    fn quick_saves_get_distinct_file_names() {
+        let t0 = Instant::now();
+        let mut n = ClipNamer::default();
+        assert_eq!(n.next_format(t0), FILENAME_FORMAT);
+        assert_eq!(n.next_format(t0 + Duration::from_millis(500)), format!("{FILENAME_FORMAT} (2)"));
+        assert_eq!(n.next_format(t0 + Duration::from_millis(1900)), format!("{FILENAME_FORMAT} (3)"));
+        // a pause of 2 s or more starts over: the timestamp alone is unique again
+        assert_eq!(n.next_format(t0 + Duration::from_millis(3900)), FILENAME_FORMAT);
+        assert_eq!(n.next_format(t0 + Duration::from_millis(4000)), format!("{FILENAME_FORMAT} (2)"));
+    }
+
+    #[test]
+    fn mux_watch_ignores_the_old_path_and_running_writes() {
+        let t0 = Instant::now();
+        let mut w = MuxWatch::new("C:/clips/old.mp4".into());
+        // save not started yet: libobs still reports the previous file
+        assert!(!w.failed("C:/clips/old.mp4", t0 + Duration::from_secs(5)));
+        // writing: get_last_replay returns ""
+        assert!(!w.failed("", t0 + Duration::from_secs(6)));
+    }
+
+    #[test]
+    fn mux_watch_reports_a_write_that_ended_without_saved() {
+        let t0 = Instant::now();
+        let mut w = MuxWatch::new(String::new());
+        assert!(!w.failed("C:/clips/new.mp4", t0));
+        assert!(!w.failed("C:/clips/new.mp4", t0 + Duration::from_millis(900)));
+        assert!(w.failed("C:/clips/new.mp4", t0 + MuxWatch::GRACE));
+    }
+
+    #[test]
+    fn mux_watch_restarts_its_grace_if_writing_resumes() {
+        let t0 = Instant::now();
+        let mut w = MuxWatch::new("old".into());
+        assert!(!w.failed("new", t0));
+        assert!(!w.failed("", t0 + Duration::from_millis(500)));
+        assert!(!w.failed("new", t0 + Duration::from_millis(1200)));
+        assert!(w.failed("new", t0 + Duration::from_millis(2200)));
     }
 
     #[test]

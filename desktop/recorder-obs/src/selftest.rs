@@ -4,7 +4,7 @@
 use crate::protocol::{parse_command, Command, Event, StartParams};
 use crate::{emit, hotkey_win, obs, Controller, Flow, Input};
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,7 +54,11 @@ impl SelftestArgs {
                     s.mic_device = Some(value(a)?);
                     s.mic = true;
                 }
-                "--out" => s.out = PathBuf::from(value(a)?),
+                // Made absolute now: the working directory changes when libobs starts.
+                "--out" => {
+                    let v = value(a)?;
+                    s.out = std::path::absolute(&v).map_err(|e| format!("--out {v}: {e}"))?;
+                }
                 "--save-at" => {
                     for part in value(a)?.split(',').filter(|p| !p.trim().is_empty()) {
                         s.save_at.push(num(a, part.trim().to_string())?);
@@ -79,7 +83,7 @@ impl SelftestArgs {
     }
 
     pub fn start_params(&self) -> StartParams {
-        let out = std::path::absolute(&self.out).unwrap_or_else(|_| self.out.clone());
+        let out = &self.out;
         StartParams {
             display_id: self.display.clone(),
             fps: self.fps,
@@ -101,15 +105,14 @@ fn default_out_dir() -> PathBuf {
     home.join("Videos").join("Klipt-test")
 }
 
-pub fn run(ctl: &mut Controller, tx: &Sender<Input>, rx: &Receiver<Input>, args: SelftestArgs) -> i32 {
+pub fn run(ctl: &mut Controller, args: SelftestArgs) -> i32 {
     let params = args.start_params();
     if let Err(e) = params.validate() {
-        eprintln!("klipt-recorder: {e}");
+        log!("klipt-recorder: {e}");
         return 64;
     }
     ctl.command(Command::ListDisplays);
     ctl.command(Command::ListAudioDevices);
-    // The working directory is OBS's bin folder by now, so the clips folder was made absolute first.
     ctl.command(Command::Start(params.clone()));
     if ctl.session.is_none() {
         return 1;
@@ -120,15 +123,15 @@ pub fn run(ctl: &mut Controller, tx: &Sender<Input>, rx: &Receiver<Input>, args:
     let mut how_to_save = vec!["type s + Enter".to_string()];
     if let Some(h) = &args.hotkey {
         let accel = hotkey_win::parse_accelerator(h).expect("validated in parse");
-        let hotkey_tx = tx.clone();
+        let hotkey_tx = ctl.tx.clone();
         match hotkey_win::listen(accel, move || {
             let _ = hotkey_tx.send(Input::Hotkey);
         }) {
             Ok(()) => how_to_save.insert(0, format!("press {h}")),
-            Err(e) => eprintln!("hotkey {h} not available: {e}"),
+            Err(e) => log!("hotkey {h} not available: {e}"),
         }
     }
-    eprintln!(
+    log!(
         "Recording to {} (buffer {} s). To save a clip: {}. To stop: type q + Enter{}.",
         params.output_dir,
         args.seconds,
@@ -138,7 +141,8 @@ pub fn run(ctl: &mut Controller, tx: &Sender<Input>, rx: &Receiver<Input>, args:
 
     let mut save_at = args.save_at.clone();
     loop {
-        match rx.recv_timeout(Duration::from_millis(50)) {
+        let input = ctl.rx.recv_timeout(Duration::from_millis(50));
+        match input {
             Ok(Input::Line(line)) => match line.trim().to_ascii_lowercase().as_str() {
                 "" => {}
                 "s" | "save" => ctl.save(),
@@ -152,7 +156,7 @@ pub fn run(ctl: &mut Controller, tx: &Sender<Input>, rx: &Receiver<Input>, args:
                     }
                     Err(e) => emit(&e.to_event()),
                 },
-                other => eprintln!("unknown input \"{other}\" (s = save, q = stop)"),
+                other => log!("unknown input \"{other}\" (s = save, q = stop)"),
             },
             // stdin may be closed or redirected from NUL; the hotkey and timers still work.
             Ok(Input::StdinClosed) => {}
@@ -177,16 +181,8 @@ pub fn run(ctl: &mut Controller, tx: &Sender<Input>, rx: &Receiver<Input>, args:
         ctl.tick();
     }
 
-    // Let a save that is still being written finish before the buffer is torn down.
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while ctl.session.as_ref().is_some_and(|s| s.is_saving()) && Instant::now() < deadline {
-        if let Ok(Input::Obs(signal)) = rx.recv_timeout(Duration::from_millis(50)) {
-            ctl.signal(signal);
-        }
-        obs::pump_events();
-        ctl.tick();
-    }
-
+    // A save still being written is reported before the stats, so they cover it.
+    ctl.wait_for_pending_save();
     let cpu = process_cpu_seconds() - cpu_at_start;
     emit(&Event::stats(cpu, started.elapsed().as_secs_f64(), peak_memory_bytes()));
     match ctl.command(Command::Stop) {
@@ -228,9 +224,17 @@ fn peak_memory_bytes() -> u64 {
 
 #[cfg(not(windows))]
 #[repr(C)]
+struct Timeval {
+    sec: i64,
+    usec: i64,
+}
+
+/// `struct rusage` on x86_64 Linux: two timevals, then 14 longs starting with ru_maxrss.
+#[cfg(not(windows))]
+#[repr(C)]
 struct Rusage {
-    utime: (i64, i64),
-    stime: (i64, i64),
+    utime: Timeval,
+    stime: Timeval,
     maxrss: i64,
     _rest: [i64; 13],
 }
@@ -252,7 +256,8 @@ fn rusage() -> Rusage {
 #[cfg(not(windows))]
 fn process_cpu_seconds() -> f64 {
     let r = rusage();
-    r.utime.0 as f64 + r.utime.1 as f64 / 1e6 + r.stime.0 as f64 + r.stime.1 as f64 / 1e6
+    let secs = |t: &Timeval| t.sec as f64 + t.usec as f64 / 1e6;
+    secs(&r.utime) + secs(&r.stime)
 }
 
 #[cfg(not(windows))]

@@ -172,7 +172,7 @@ unsafe extern "C" fn log_to_stderr(level: c_int, format: *const c_char, args: Va
         l if l <= LOG_INFO as i64 => "info",
         _ => "debug",
     };
-    eprintln!("[obs {tag}] {msg}");
+    log!("[obs {tag}] {msg}");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -208,9 +208,9 @@ pub fn init(layout: &ObsLayout) -> Result<InitInfo> {
         reset_audio()?;
         for (name, required) in MODULES {
             match load_module(layout, name) {
-                Ok(()) => eprintln!("module {name}: loaded"),
+                Ok(()) => log!("module {name}: loaded"),
                 Err(e) if *required => return Err(e),
-                Err(e) => eprintln!("module {name}: skipped ({e})"),
+                Err(e) => log!("module {name}: skipped ({e})"),
             }
         }
         o.obs_post_load_modules();
@@ -259,7 +259,7 @@ fn prepare_process(layout: &ObsLayout) -> Result<()> {
     for helper in ["obs-ffmpeg-mux.exe", "obs-nvenc-test.exe", "obs-amf-test.exe"] {
         let next_to_exe = std::env::current_exe()?.with_file_name(helper);
         if !next_to_exe.exists() {
-            eprintln!(
+            log!(
                 "warning: {helper} is not next to klipt-recorder.exe ({}); {}",
                 next_to_exe.display(),
                 if helper == "obs-ffmpeg-mux.exe" {
@@ -273,8 +273,22 @@ fn prepare_process(layout: &ObsLayout) -> Result<()> {
     Ok(())
 }
 
+/// Linux: libobs also looks for its helpers next to this executable (`/proc/self/exe`), not in
+/// /usr/bin. For `cargo run`, symlink them into the target directory.
 #[cfg(not(windows))]
-fn prepare_process(_layout: &ObsLayout) -> Result<()> {
+fn prepare_process(layout: &ObsLayout) -> Result<()> {
+    for helper in ["obs-ffmpeg-mux", "obs-nvenc-test"] {
+        let next_to_exe = std::env::current_exe()?.with_file_name(helper);
+        if !next_to_exe.exists() {
+            log!(
+                "warning: {helper} is not next to klipt-recorder ({}); {}. Fix: ln -s {} {}",
+                next_to_exe.display(),
+                if helper == "obs-ffmpeg-mux" { "saving clips will fail" } else { "NVENC will be unavailable" },
+                layout.root.join("bin").join(helper).display(),
+                next_to_exe.display()
+            );
+        }
+    }
     Ok(())
 }
 

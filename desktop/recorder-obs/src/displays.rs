@@ -3,6 +3,7 @@
 use crate::protocol::DisplayInfo;
 
 /// OBS labels monitors as "<name>: <w>x<h> @ <x>,<y>[ (Primary Monitor)]". Keeps "<name>".
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn name_from_obs_label(label: &str) -> Option<String> {
     let (name, _) = label.rsplit_once(": ")?;
     let name = name.trim();

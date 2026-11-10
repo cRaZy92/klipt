@@ -125,7 +125,7 @@ packaging/aur/PKGBUILD
 - [ ] **Step 2:** Run `cargo test -p klipt-recorder protocol`. Expected: FAIL (missing module).
 - [ ] **Step 3:** Implement `protocol.rs`, `obs.rs` (dynamic bindings, module loading per OS), `session.rs` (scene, sources, encoders, replay buffer, save/busy state machine) and `main.rs` (stdin thread, GLib iteration on Linux and a message loop on Windows, an event writer that flushes per line).
 - [ ] **Step 4:** Run `cargo test -p klipt-recorder`. Expected: PASS.
-- [ ] **Step 5: Linux integration check (manual, owner present):**
+- [ ] **Step 5: Linux integration check (manual, owner present).** First `cargo build -p klipt-recorder`, then symlink libobs's helpers next to the binary (libobs looks for them beside `/proc/self/exe`): `ln -s /usr/bin/obs-ffmpeg-mux /usr/bin/obs-nvenc-test desktop/target/debug/`.
   ```
   printf '{"cmd":"listDisplays"}\n{"cmd":"start","displayId":null,"fps":60,"width":1920,"height":1080,"bitrateKbps":20000,"bufferSeconds":30,"mic":true,"micDeviceId":null,"outputDir":"/tmp/klipt-test","encoder":"auto"}\n' | cargo run -p klipt-recorder
   ```

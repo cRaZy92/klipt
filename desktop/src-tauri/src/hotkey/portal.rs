@@ -34,9 +34,6 @@ struct Listener {
 pub struct PortalHotkey {
     sink: PressSink,
     listener: Option<Listener>,
-    /// Set after the first bind. Until then a key KDE already remembers for Klipt is reused
-    /// without showing the bind dialog again.
-    bound_once: bool,
 }
 
 impl PortalHotkey {
@@ -83,7 +80,6 @@ fn portal_error(e: ashpd::Error) -> AppError {
 /// activations to `sink` until `stop` fires (or the portal goes away).
 async fn run_session(
     trigger: String,
-    reuse_existing: bool,
     sink: PressSink,
     bound: mpsc::Sender<Result<BoundKey>>,
     mut stop: oneshot::Receiver<()>,
@@ -91,28 +87,14 @@ async fn run_session(
     let setup = async {
         let portal = GlobalShortcuts::new().await?;
         let session: Session<'static, GlobalShortcuts<'static>> = portal.create_session().await?;
-        let describe = |shortcuts: &[ashpd::desktop::global_shortcuts::Shortcut]| {
-            shortcuts
-                .iter()
-                .find(|s| s.id() == SHORTCUT_ID)
-                .map(|s| s.trigger_description().trim().to_string())
-                .unwrap_or_default()
-        };
-        // At startup, KDE usually still has the key from the last run. Binding again would show
-        // its confirmation dialog on every launch, so reuse what it already has.
-        let mut display = String::new();
-        if reuse_existing {
-            match portal.list_shortcuts(&session).await.and_then(|r| r.response()) {
-                Ok(list) => display = describe(list.shortcuts()),
-                Err(e) => eprintln!("klipt: can't list portal shortcuts ({e}); binding again"),
-            }
-        }
-        if display.is_empty() {
-            let shortcut =
-                NewShortcut::new(SHORTCUT_ID, SHORTCUT_DESCRIPTION).preferred_trigger(Some(trigger.as_str()));
-            let response = portal.bind_shortcuts(&session, &[shortcut], None).await?.response()?;
-            display = describe(response.shortcuts());
-        }
+        let shortcut = NewShortcut::new(SHORTCUT_ID, SHORTCUT_DESCRIPTION).preferred_trigger(Some(trigger.as_str()));
+        let response = portal.bind_shortcuts(&session, &[shortcut], None).await?.response()?;
+        let display = response
+            .shortcuts()
+            .iter()
+            .find(|s| s.id() == SHORTCUT_ID)
+            .map(|s| s.trigger_description().trim().to_string())
+            .unwrap_or_default();
         let activated = portal.receive_activated().await?;
         Ok::<_, ashpd::Error>((portal, session, display, activated))
     };
@@ -163,15 +145,13 @@ impl HotkeyService for PortalHotkey {
         self.unbind();
         let (tx, rx) = mpsc::channel();
         let (stop, stop_rx) = oneshot::channel();
-        let reuse = !self.bound_once;
-        let task = async_runtime::spawn(run_session(trigger, reuse, self.sink.clone(), tx, stop_rx));
+        let task = async_runtime::spawn(run_session(trigger, self.sink.clone(), tx, stop_rx));
         // Blocks until the portal answers, which includes the time the user spends in KDE's
         // dialog the first time. Callers run this off the main thread.
         let result = rx
             .recv()
             .unwrap_or_else(|_| Err(AppError::HotkeyUnavailable("the portal task ended without an answer".into())));
         if result.is_ok() {
-            self.bound_once = true;
             self.listener = Some(Listener { task, stop });
         }
         result

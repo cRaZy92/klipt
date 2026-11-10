@@ -33,7 +33,7 @@ A self-hosted alternative to Medal.tv for a small friend group. You press a hotk
 - **Linux:** CachyOS, KDE Plasma on Wayland, RTX 3070 Ti, main monitor DP-1 at 1920×1080@144 Hz, Slovak keyboard layout. **Dual-boots Windows** and tests Windows builds personally.
 - Friends use Windows with RTX 40xx and AMD GPUs.
 - **Server:** Proxmox with Dokploy. Deploys as one Docker Compose stack. Repo: `github.com/cRaZy92/klipt`.
-- The owner approved pushing **feature branches** and using GitHub Actions. Never force-push `main`. Merging to `main` happens through PRs the owner reviews.
+- The owner approved pushing **feature branches** and using GitHub Actions. Never force-push `main`. Since 2026-11-10 the owner wants no PRs: once a branch is finished and its CI is green, fast-forward `main` to it (`git push origin <sha>:refs/heads/main`). `feat/server` was merged this way at `ad512b7`.
 - **Safety:** never kill processes by name or pattern. Stop only processes you started, by exact PID. The owner rejected a `pkill` command earlier.
 - Chosen process: superpowers skills, with **subagent-driven development** (implementer plus reviewer per task) for building, and evidence-based spikes with the owner at the machine.
 

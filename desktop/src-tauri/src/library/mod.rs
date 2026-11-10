@@ -1,0 +1,107 @@
+//! The local clip library: one SQLite row per saved clip, plus generated thumbnails.
+
+mod db;
+
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+pub use db::Library;
+
+/// What the save flow knows about a fresh clip.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewClip {
+    pub path: PathBuf,
+    /// Unix time in milliseconds.
+    pub created_at: i64,
+    pub duration_ms: u64,
+    pub width: u32,
+    pub height: u32,
+    pub has_mic: bool,
+    pub game_name: Option<String>,
+    pub steam_app_id: Option<u32>,
+    pub exe: Option<String>,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Clip {
+    pub id: String,
+    pub path: PathBuf,
+    /// Unix time in milliseconds.
+    pub created_at: i64,
+    pub duration_ms: u64,
+    pub width: u32,
+    pub height: u32,
+    pub has_mic: bool,
+    pub game_name: Option<String>,
+    pub steam_app_id: Option<u32>,
+    pub exe: Option<String>,
+    pub title: String,
+    pub trim_start_ms: Option<u64>,
+    pub trim_end_ms: Option<u64>,
+    pub game_volume: f32,
+    pub mic_volume: f32,
+    pub server_clip_id: Option<String>,
+    pub share_url: Option<String>,
+    pub visibility: Option<String>,
+    pub upload_id: Option<String>,
+    pub upload_offset: Option<u64>,
+}
+
+/// A clip as the library screen shows it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipView {
+    #[serde(flatten)]
+    pub clip: Clip,
+    /// The video file is gone (deleted in Explorer or Dolphin, or its drive is unplugged).
+    pub file_missing: bool,
+    /// Set only when the thumbnail has been generated.
+    pub thumb_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Sort {
+    #[default]
+    NewestFirst,
+    OldestFirst,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ListFilter {
+    /// Only clips tagged with this game.
+    pub game: Option<String>,
+    pub sort: Sort,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameCount {
+    pub name: String,
+    pub steam_app_id: Option<u32>,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trim {
+    pub start_ms: Option<u64>,
+    pub end_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Volumes {
+    pub game: f32,
+    pub mic: f32,
+}
+
+impl Default for Volumes {
+    fn default() -> Self {
+        Volumes { game: 1.0, mic: 1.0 }
+    }
+}

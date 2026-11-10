@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["recorder-obs"]
+members = ["recorder-obs", "src-tauri"]
 
 [profile.release]
 lto = "thin"

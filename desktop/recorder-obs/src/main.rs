@@ -43,7 +43,7 @@ SELFTEST OPTIONS:
   --out DIR           clips folder (default: <Videos>/Klipt-test)
   --save-at N[,M...]  save automatically N seconds after recording starts
   --exit-after N      stop N seconds after recording starts and print stats
-  --hotkey KEYS       Windows: save when KEYS is pressed, e.g. ALT+F9
+  --hotkey KEYS       Windows: save when KEYS is pressed, e.g. ALT+F8, or ALT+BACKQUOTE for the key under Esc
   --fps N             frames per second (default 60)
   --width N           maximum output width (default 1920)
   --height N          maximum output height (default 1080)

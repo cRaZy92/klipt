@@ -13,7 +13,7 @@ pub struct Accelerator {
     pub vk: u32,
 }
 
-/// Parses "ALT+F9", "ctrl+shift+s", "F8"… into Win32 modifier flags and a virtual-key code.
+/// Parses "ALT+F9", "ctrl+shift+s", "F8", "ALT+BACKQUOTE"… into Win32 modifier flags and a virtual-key code.
 pub fn parse_accelerator(text: &str) -> Result<Accelerator, String> {
     let parts: Vec<&str> = text.split('+').map(str::trim).collect();
     if parts.iter().any(|p| p.is_empty()) {
@@ -62,6 +62,9 @@ fn virtual_key(key: &str) -> Result<u32, String> {
         "DELETE" | "DEL" => 0x2E,
         "PAUSE" => 0x13,
         "SCROLLLOCK" => 0x91,
+        // The key under Esc (W3C/Tauri code "Backquote"). It types ` on US and ; on Slovak, but it is
+        // VK_OEM_3 on both, so it is named by position, not by the character it types.
+        "BACKQUOTE" | "GRAVE" | "TILDE" | "`" | "~" => 0xC0,
         _ => return Err(format!("unknown key \"{key}\"")),
     })
 }
@@ -122,6 +125,13 @@ mod tests {
         assert_eq!(parse_accelerator("ctrl+num5"), Ok(Accelerator { modifiers: MOD_CONTROL, vk: 0x65 }));
         assert_eq!(parse_accelerator("Alt+Home"), Ok(Accelerator { modifiers: MOD_ALT, vk: 0x24 }));
         assert_eq!(parse_accelerator("alt+7"), Ok(Accelerator { modifiers: MOD_ALT, vk: b'7' as u32 }));
+    }
+
+    #[test]
+    fn the_key_under_escape_is_named_by_position() {
+        for text in ["ALT+BACKQUOTE", "alt+backquote", "Alt+Grave", "ALT+`", "Alt+~"] {
+            assert_eq!(parse_accelerator(text), Ok(Accelerator { modifiers: MOD_ALT, vk: 0xC0 }), "{text}");
+        }
     }
 
     #[test]

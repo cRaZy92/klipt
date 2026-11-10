@@ -2,7 +2,18 @@
 
 Read this first if you're a fresh Claude Code session picking up Klipt. Then read the files it links to.
 
-## Latest: Windows session (2026-11-09/10)
+## Latest: Linux session (2026-11-10, CachyOS)
+
+Owner was low on usage, so the goal switched to a working Linux prototype. Full per-task record (commits, rulings, deferred minors): `docs/superpowers/ledgers/desktop-sdd-progress-2026-11-10-linux.md`.
+
+- Done and reviewed: Task 4 review (clean), Task 5 game detection, Task 6 recorder backends + supervisor, Task 7 hotkeys/tray/feedback, Task 8 API client + tus, Task 9 export, Task 10 login/library/upload UI, Task 11 editor. Windows CI green through Task 10.
+- Task 12 settings view is committed (3eb584f) but **its review was skipped** — review it first.
+- Recorder (Task 1) now builds/tests on Linux (bccc821). SIMDe: `sudo pacman -S simde` or set `SIMDE_INCLUDE_DIR`.
+- **No owner manual checks have been done yet** for Tasks 1 (Linux), 6, 7, 10, 11. Run the app: `cd desktop && pnpm tauri dev`, or the release binary `desktop/target/release/klipt-desktop`.
+- Not started: Task 13 (packaging), Task 14 (auto-update), the final whole-branch review, and the deferred minors (several marked "fix before merge" in the ledger: save_edit cleanup order, tus retry budget on slow uplinks, upload URL origin/Debug token redaction).
+- C9 Windows game test is still open.
+
+## Earlier: Windows session (2026-11-09/10)
 
 On the owner's Windows dual boot (same PC: RTX 3070 Ti, two 1920×1080 monitors). Details and evidence: `docs/superpowers/ledgers/desktop-sdd-ledger.md`.
 

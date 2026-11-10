@@ -74,7 +74,23 @@
   // svelte-ignore state_referenced_locally
   let draft = $state<Settings>({ ...settings });
   let saving = $state(false);
-  let fieldErrors = $state<Record<string, string>>({});
+  /** Problems from the last failed save, with the draft they were found in. */
+  // svelte-ignore state_referenced_locally
+  let saveErrors = $state<{ errors: Record<string, string>; draft: Settings }>({ errors: {}, draft: settings });
+  /** The problems still showing: one disappears as soon as its field is edited. */
+  const fieldErrors = $derived(
+    Object.fromEntries(
+      Object.entries(saveErrors.errors).filter(
+        ([field]) => draft[field as keyof Settings] === saveErrors.draft[field as keyof Settings],
+      ),
+    ) as Record<string, string>,
+  );
+  function setErrors(errors: Record<string, string>) {
+    saveErrors = { errors, draft: $state.snapshot(draft) };
+    // Show the first tab that needs fixing, once; the user can still move between tabs.
+    const first = Object.keys(errors)[0];
+    if (first && !Object.keys(errors).some((f) => tabOf(f) === tab)) tab = tabOf(first);
+  }
   /** A shortcut problem from the last save (e.g. taken), shown in the Hotkey section. */
   let hotkeyProblem = $state<string | null>(null);
 
@@ -138,7 +154,7 @@
 
   async function save() {
     const errors = validateSettings(draft);
-    fieldErrors = Object.fromEntries(errors.map((e) => [e.field, e.message]));
+    setErrors(Object.fromEntries(errors.map((e) => [e.field, e.message])));
     if (errors.length > 0) return;
     saving = true;
     hotkeyProblem = null;
@@ -146,12 +162,12 @@
       const result = await api.setSettings($state.snapshot(draft));
       onsaved(result.settings, result.hotkeyDisplay);
       draft = { ...result.settings };
-      fieldErrors = {};
+      setErrors({});
       toast(result.recorderRestarted ? RESTARTED : "Settings saved", "success");
     } catch (e) {
       const code = errorCode(e);
       if (code === "invalid_settings") {
-        fieldErrors = Object.fromEntries(errorFields(e).map((f) => [f.field, f.message]));
+        setErrors(Object.fromEntries(errorFields(e).map((f) => [f.field, f.message])));
       } else if (code === "hotkey_taken" || code === "hotkey_unavailable") {
         // Nothing was saved and the old shortcut still works. Keep the other changes.
         hotkeyProblem = code === "hotkey_taken" ? TAKEN : errorMessage(e);
@@ -167,7 +183,7 @@
 
   function discard() {
     draft = { ...settings };
-    fieldErrors = {};
+    setErrors({});
   }
 
   async function startCapture() {
@@ -190,7 +206,6 @@
     switch (result.kind) {
       case "accel":
         draft.hotkey = result.accel;
-        delete fieldErrors.hotkey;
         stopCapture();
         break;
       case "cancel":
@@ -217,7 +232,6 @@
       });
       if (typeof picked === "string" && picked) {
         draft.outputDir = picked;
-        delete fieldErrors.outputDir;
       }
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -246,12 +260,6 @@
   };
   const tabOf = (field: string): Tab => FIELD_TAB[field] ?? "recording";
   const tabsWithErrors = $derived(new Set(Object.keys(fieldErrors).map(tabOf)));
-
-  // After a failed save, show the first tab that needs fixing.
-  $effect(() => {
-    const first = Object.keys(fieldErrors)[0];
-    if (first && !tabsWithErrors.has(tab)) tab = tabOf(first);
-  });
 
   function onTabKey(e: KeyboardEvent, i: number) {
     const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;

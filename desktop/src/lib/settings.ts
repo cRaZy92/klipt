@@ -33,7 +33,8 @@ export function validateSettings(s: Settings): FieldError[] {
   const fail = (field: string, message: string) => errors.push({ field, message });
   if (s.bufferLocation === "disk") fail("bufferLocation", "Recording to disk isn't supported yet.");
   if (!(FPS_CHOICES as readonly number[]).includes(s.fps)) fail("fps", "Frame rate must be 30 or 60.");
-  if (!inRange(s.customBitrateKbps, BITRATE_KBPS_MIN, BITRATE_KBPS_MAX)) {
+  // Only Custom uses (and shows) the bitrate field; a stale value there must not block saving.
+  if (s.quality === "custom" && !inRange(s.customBitrateKbps, BITRATE_KBPS_MIN, BITRATE_KBPS_MAX)) {
     fail("customBitrateKbps", "Bitrate must be between 2,000 and 80,000 kbps.");
   }
   if (!inRange(s.bufferSeconds, BUFFER_SECONDS_MIN, BUFFER_SECONDS_MAX)) {

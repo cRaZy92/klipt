@@ -190,7 +190,8 @@ impl Settings {
         if !FPS_CHOICES.contains(&self.fps) {
             fail("fps", "Frame rate must be 30 or 60.");
         }
-        if !BITRATE_KBPS_RANGE.contains(&self.custom_bitrate_kbps) {
+        // Only Custom uses (and shows) the bitrate; a stale value there must not block saving.
+        if self.quality == Quality::Custom && !BITRATE_KBPS_RANGE.contains(&self.custom_bitrate_kbps) {
             fail("customBitrateKbps", "Bitrate must be between 2,000 and 80,000 kbps.");
         }
         if !BUFFER_SECONDS_RANGE.contains(&self.buffer_seconds) {
@@ -427,8 +428,11 @@ mod tests {
         assert_eq!(fields(Settings { buffer_seconds: 601, ..Settings::default() }), ["bufferSeconds"]);
         assert!(fields(Settings { buffer_seconds: 600, ..Settings::default() }).is_empty());
         assert_eq!(fields(Settings { fps: 45, ..Settings::default() }), ["fps"]);
-        assert_eq!(fields(Settings { custom_bitrate_kbps: 1_999, ..Settings::default() }), ["customBitrateKbps"]);
-        assert_eq!(fields(Settings { custom_bitrate_kbps: 80_001, ..Settings::default() }), ["customBitrateKbps"]);
+        let custom = |kbps| Settings { quality: Quality::Custom, custom_bitrate_kbps: kbps, ..Settings::default() };
+        assert_eq!(fields(custom(1_999)), ["customBitrateKbps"]);
+        assert_eq!(fields(custom(80_001)), ["customBitrateKbps"]);
+        // A preset quality ignores the (hidden) custom bitrate.
+        assert!(fields(Settings { custom_bitrate_kbps: 1, ..Settings::default() }).is_empty());
         assert_eq!(
             fields(Settings { buffer_location: BufferLocation::Disk, ..Settings::default() }),
             ["bufferLocation"]

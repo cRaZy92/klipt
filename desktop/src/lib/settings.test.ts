@@ -65,7 +65,8 @@ describe("validateSettings mirrors Settings::validate", () => {
   });
 
   it("checks the custom bitrate range 2000–80000 even when a preset is chosen", () => {
-    expect(fields({ customBitrateKbps: 1999 })).toEqual(["customBitrateKbps"]);
+    expect(fields({ customBitrateKbps: 1999, quality: "custom" })).toEqual(["customBitrateKbps"]);
+    expect(fields({ customBitrateKbps: 1999, quality: "high" })).toEqual([]);
     expect(fields({ customBitrateKbps: 80001, quality: "custom" })).toEqual(["customBitrateKbps"]);
     expect(fields({ customBitrateKbps: 2000 })).toEqual([]);
     expect(fields({ customBitrateKbps: 80000 })).toEqual([]);
@@ -81,7 +82,7 @@ describe("validateSettings mirrors Settings::validate", () => {
   });
 
   it("uses the same messages and order as the core", () => {
-    const errors = validateSettings({ ...defaults, bufferLocation: "disk", fps: 45, customBitrateKbps: 1, bufferSeconds: 5, hotkey: "", outputDir: "" });
+    const errors = validateSettings({ ...defaults, bufferLocation: "disk", fps: 45, quality: "custom", customBitrateKbps: 1, bufferSeconds: 5, hotkey: "", outputDir: "" });
     expect(errors).toEqual([
       { field: "bufferLocation", message: "Recording to disk isn't supported yet." },
       { field: "fps", message: "Frame rate must be 30 or 60." },

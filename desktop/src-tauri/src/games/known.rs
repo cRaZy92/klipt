@@ -52,3 +52,26 @@ mod tests {
         }
     }
 }
+
+/// Steam apps that run in the background next to a game (idle "games", wallpapers, overlays,
+/// tools). Detection skips them so a clip isn't tagged with e.g. "Bongo Cat" instead of the game.
+const IDLE_APP_IDS: &[u32] = &[
+    3419430, // Bongo Cat
+    2923300, // Banana
+    431960,  // Wallpaper Engine
+    993090,  // Lossless Scaling
+    629520,  // Soundpad
+];
+
+pub fn is_idle_app(app_id: u32) -> bool {
+    IDLE_APP_IDS.contains(&app_id)
+}
+
+#[cfg(test)]
+mod idle_tests {
+    #[test]
+    fn idle_apps_are_recognised() {
+        assert!(super::is_idle_app(3419430));
+        assert!(!super::is_idle_app(2887580)); // Active Matter is a real game
+    }
+}

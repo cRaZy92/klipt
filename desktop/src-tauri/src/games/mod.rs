@@ -87,6 +87,9 @@ pub fn identify_exe_path(path: &str, manifests: &[AppManifest], data_dir: &Path)
     // A bare "steamapps\common\<exe>" has no game folder: the third part must not be the exe itself.
     if let Some(dir) = install_dir.filter(|d| *d != exe) {
         if let Some(m) = manifests.iter().find(|m| m.installdir.eq_ignore_ascii_case(dir)) {
+            if known::is_idle_app(m.appid) {
+                return None;
+            }
             return Some(Detected { game_name: Some(m.name.clone()), steam_app_id: Some(m.appid), exe: Some(exe) });
         }
     }
@@ -99,6 +102,14 @@ pub fn identify_exe_path(path: &str, manifests: &[AppManifest], data_dir: &Path)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_steam_apps_are_not_games() {
+        let manifests = vec![AppManifest { appid: 3419430, name: "Bongo Cat".into(), installdir: "BongoCat".into() }];
+        let dir = tempfile::tempdir().unwrap();
+        let path = r"C:\Steam\steamapps\common\BongoCat\BongoCat.exe";
+        assert_eq!(identify_exe_path(path, &manifests, dir.path()), None);
+    }
 
     fn active_matter() -> Vec<AppManifest> {
         vec![AppManifest { appid: 2887580, name: "Active Matter".into(), installdir: "ActiveMatter".into() }]

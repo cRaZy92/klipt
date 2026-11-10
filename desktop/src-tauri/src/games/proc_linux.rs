@@ -59,7 +59,8 @@ pub fn find_steam_game() -> Option<SteamProcess> {
         }
         // Other users' processes are unreadable; skip them quietly.
         let Ok(environ) = fs::read(format!("/proc/{pid}/environ")) else { continue };
-        if let Some(app_id) = parse_environ(&environ) {
+        // Idle/overlay apps (Bongo Cat, Wallpaper Engine…) also carry a SteamAppId: keep looking.
+        if let Some(app_id) = parse_environ(&environ).filter(|id| !super::known::is_idle_app(*id)) {
             let exe = fs::read_link(format!("/proc/{pid}/exe"))
                 .ok()
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));

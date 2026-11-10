@@ -658,6 +658,10 @@ pub struct EditorData {
     pub game_audio_path: PathBuf,
     /// None when the clip has no mic track: the editor hides the Mic slider.
     pub mic_audio_path: Option<PathBuf>,
+    /// Loopback HTTP URLs for the media elements (WebKitGTK can't stream media from `asset://`).
+    pub video_url: String,
+    pub game_audio_url: String,
+    pub mic_audio_url: Option<String>,
     pub duration_ms: u64,
 }
 
@@ -692,7 +696,14 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
             eprintln!("klipt: can't allow {} in the asset scope: {e}", file.display());
         }
     }
+    let media = app.state::<crate::media_server::MediaServer>();
+    let video_url = media.url_for(&clip.path);
+    let game_audio_url = media.url_for(&game);
+    let mic_audio_url = mic.as_deref().map(|m| media.url_for(m));
     Ok(EditorData {
+        video_url,
+        game_audio_url,
+        mic_audio_url,
         video_path: clip.path.clone(),
         clip: ClipView { clip, file_missing: false, thumb_path: thumb.is_file().then_some(thumb) },
         game_audio_path: game,

@@ -147,6 +147,9 @@ export interface EditorData {
   gameAudioPath: string;
   /** Null when the clip has no mic track. */
   micAudioPath: string | null;
+  videoUrl: string;
+  gameAudioUrl: string;
+  micAudioUrl: string | null;
   durationMs: number;
 }
 

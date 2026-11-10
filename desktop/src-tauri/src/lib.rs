@@ -9,6 +9,7 @@ pub mod ffmpeg;
 pub mod games;
 pub mod hotkey;
 pub mod library;
+pub mod media_server;
 pub mod recorder;
 pub mod settings;
 pub mod sound;
@@ -44,6 +45,7 @@ pub fn run() {
             if let Err(e) = app.asset_protocol_scope().allow_directory(data_dir.join("thumbs"), false) {
                 eprintln!("klipt: can't allow thumbnails in the asset scope: {e}");
             }
+            app.manage(media_server::MediaServer::start()?);
             app.manage(state);
             app.manage(commands::Uploads::default());
             app.manage(hotkey::HotkeyStatusState::default());

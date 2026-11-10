@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { api, errorMessage, fileUrl, on, type ClipView, type EditInput, type EditorData } from "../lib/api";
+  import { api, errorMessage, on, type ClipView, type EditInput, type EditorData } from "../lib/api";
   import { exportFileName } from "../lib/format";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
   import { toast } from "../lib/toasts.svelte";
@@ -307,7 +307,7 @@
       <!-- svelte-ignore a11y_media_has_caption -->
       <video
         bind:this={video}
-        src={fileUrl(data.videoPath)}
+        src={data.videoUrl}
         muted
         playsinline
         preload="auto"
@@ -325,9 +325,9 @@
           <p>Klipt can't play this clip here. You can still trim, export and upload it.</p>
         </div>
       {/if}
-      <audio bind:this={gameAudio} src={fileUrl(data.gameAudioPath)} preload="auto"></audio>
-      {#if data.micAudioPath}
-        <audio bind:this={micAudio} src={fileUrl(data.micAudioPath)} preload="auto"></audio>
+      <audio bind:this={gameAudio} src={data.gameAudioUrl} preload="auto"></audio>
+      {#if data.micAudioUrl}
+        <audio bind:this={micAudio} src={data.micAudioUrl} preload="auto"></audio>
       {/if}
     </div>
 

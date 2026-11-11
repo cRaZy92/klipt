@@ -66,7 +66,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | Leave voice chat out       | Game audio and voice/chat apps on separate tracks, so a clip can be shared without friends' voices |
 | Favorites and search       | Star clips in the library; search by title, game or friend in the library, Feed and website      |
 | Views and "seen by"        | A view count on each clip, and which friends watched it                                            |
-| Your storage on the server | Show each user how much server storage their clips use. No quotas                                  |
+| Your storage on the server | **Done.** "N clips · 1.5 GB on the server" on the website's My clips and in Settings → Account; admins see it per user. No quotas |
 | Thumbnail handle           | A third handle in the editor's trim bar, dragged to any frame; that frame becomes the clip's thumbnail (Feed, website, Discord) |
 | Tag friends in a clip      | "With bob, alice": the clip shows on their profiles too, and the Feed gets an "I'm in it" filter  |
 | Next clip suggestion       | When a clip ends in the Feed, suggest the next one (no autoplay); arrow keys move between clips  |

@@ -9,6 +9,8 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 2026-11-11 | Review bugs fixed        | All 13 bugs deferred by reviews fixed (see "Next"); not yet released                                   |
+| 2026-11-11 | Linux update notice      | The Linux package checks GitHub and shows the command that installs a newer release; autostart follows the installed copy |
 | 2026-11-11 | v0.1.10                  | In-app logo matches the app icon; login hint removed                                                   |
 | 2026-11-11 | v0.1.8, first release    | Signed Windows installer on GitHub Releases; installed copies update themselves                        |
 | 2026-11-11 | Desktop v1 complete      | Feed tab, installer CI, AUR package, auto-update; final whole-branch review: Ready                     |
@@ -39,29 +41,17 @@ link, with no help.
 
 ## Next: fixes found in review
 
-Small bugs that reviews deferred. None blocks v1. They're ordered by how likely a friend is to hit
-them. The final whole-branch review parked 9 more minors in
+The 13 small bugs that reviews deferred were all fixed on 2026-11-11 (commits `4eeba85`…`804e089`):
+in-game notice for a save that didn't happen, one message per recorder failure, the missing-recorder
+warning shown once, more non-game Steam tools ignored, the real game exe found behind Proton/Steam
+Runtime wrappers, a corrupt `mappings.json` or `library.db` kept aside instead of lost or crashing,
+logout stopping uploads cleanly, the editor's play blip, keyboard menus and dialog focus, disk-full
+ffmpeg failures keeping the upload, share ids and invite codes kept out of server logs, and the
+website's error messages, visibility button and empty states.
+
+Still open: the final whole-branch review parked 9 more minors in
 `.superpowers/sdd/2026-11-09-klipt-desktop/final-review.md`, which exists only on the Linux machine.
 Copy them here or into a ledger.
-
-| Area    | Problem                                                                                     | Source        |
-| ------- | ------------------------------------------------------------------------------------------- | ------------- |
-| Desktop | Pressing the hotkey while recording is paused or stopped, or when a save fails, gives no feedback in game | Task 7        |
-| Desktop | Windows counts any `steamapps\common` exe as a game, so Wallpaper Engine keeps "record while a game runs" always on | Task 5        |
-| Desktop | A corrupt `library.db` crashes the app at startup; it should back the file up and say so      | Task 4        |
-| Desktop | A corrupt game-mappings file is silently overwritten, losing every mapping                  | Task 5        |
-| Desktop | Linux game mappings key on the Proton wrapper exe, so one mapping applies to every Proton game | Task 5        |
-| Desktop | "Record while a game runs" warns "recorder missing" again at every game start               | Task 6        |
-| Desktop | A recorder start failure shows two toasts                                                   | Task 6        |
-| Desktop | Logging out during an upload shows "session expired" and resumes the upload under the next login | Task 10       |
-| Desktop | Editor: a short audio blip when playing right after a seek; logging out skips the unsaved-changes prompt | Task 11       |
-| Desktop | Modals don't trap focus; the clip menus can't be used from the keyboard                     | Task 10       |
-| Server  | A server-side ffmpeg failure (disk full) is treated as a corrupt video and the upload is deleted | Final review  |
-| Server  | Server logs include link-only share ids and invite codes                                    | Final review  |
-| Website | Raw error codes, no empty states, unclear visibility button label                           | Server Task 8 |
-
-Sources: `docs/superpowers/ledgers/desktop-sdd-progress-2026-11-10-linux.md`,
-`docs/superpowers/ledgers/server-sdd-ledger.md`.
 
 ## Later: after v1
 

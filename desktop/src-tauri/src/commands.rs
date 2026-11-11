@@ -227,6 +227,16 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
     let old = lock(&state.settings).clone();
     new.server_url = old.server_url.clone();
     let effects = Effects::between(&old, &new);
+    if new.output_dir != old.output_dir {
+        // Otherwise the recorder would fail later with only a generic "recording" error.
+        if let Err(e) = check_writable_dir(&new.output_dir) {
+            eprintln!("klipt: can't use {} for clips: {e}", new.output_dir.display());
+            return Err(AppError::InvalidSettings(vec![FieldError {
+                field: "outputDir",
+                message: "Klipt can't save clips in that folder. Pick another one.".into(),
+            }]));
+        }
+    }
 
     let mut hotkey_display = None;
     if effects.rebind_hotkey {
@@ -256,7 +266,17 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
     if effects.autostart {
         crate::apply_autostart(&app, new.start_with_os);
     }
-    Ok(SettingsSaved { settings: new, recorder_restarted: effects.restart_recorder, hotkey_display })
+    // While paused nothing restarts: the new settings apply on resume.
+    let paused = app.try_state::<crate::tray::Tray>().is_some_and(|t| t.is_paused());
+    Ok(SettingsSaved { settings: new, recorder_restarted: effects.restart_recorder && !paused, hotkey_display })
+}
+
+/// Creates `dir` if needed and checks a file can be written in it.
+pub fn check_writable_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let probe = dir.join(format!(".klipt-write-test-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::write(&probe, b"")?;
+    std::fs::remove_file(&probe)
 }
 
 async fn rebind_hotkey(app: &AppHandle, accel: String) -> Result<hotkey::BoundKey> {
@@ -344,11 +364,17 @@ pub async fn login(app: AppHandle, server_url: String, username: String, passwor
     let Me { username, .. } = session.me;
     let state = app.state::<AppState>();
     auth::save(&state.data_dir, &Auth { server_url: base.clone(), token: session.token, username: username.clone() })?;
-    let mut settings = lock(&state.settings).clone();
-    if settings.server_url.as_deref() != Some(base.as_str()) {
-        settings.server_url = Some(base.clone());
-        settings.save(&state.data_dir)?;
-        *lock(&state.settings) = settings;
+    // The same lock as Settings saves, and the change made to the current settings, so a save
+    // finishing meanwhile isn't overwritten.
+    let _saving = SAVING_SETTINGS.lock().await;
+    {
+        let mut current = lock(&state.settings);
+        if current.server_url.as_deref() != Some(base.as_str()) {
+            let mut next = current.clone();
+            next.server_url = Some(base.clone());
+            next.save(&state.data_dir)?;
+            *current = next;
+        }
     }
     Ok(Account { server_url: base, username })
 }
@@ -1086,5 +1112,30 @@ mod feed_tests {
         let items = page["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["thumbnailUrl"], "https://k.example/media/a.jpg");
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn a_clips_folder_must_be_writable() {
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("new").join("Klipt");
+        check_writable_dir(&fresh).unwrap();
+        assert!(fresh.is_dir(), "created");
+        assert_eq!(std::fs::read_dir(&fresh).unwrap().count(), 0, "the probe file is gone");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let locked = dir.path().join("locked");
+            std::fs::create_dir(&locked).unwrap();
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let result = check_writable_dir(&locked);
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(result.is_err(), "read-only folder accepted");
+        }
     }
 }

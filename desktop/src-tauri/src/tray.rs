@@ -101,6 +101,11 @@ impl Tray {
         new
     }
 
+    /// Recording is paused by the user (from the tray).
+    pub fn is_paused(&self) -> bool {
+        *self.status.lock().unwrap_or_else(PoisonError::into_inner) == TrayStatus::Paused
+    }
+
     pub fn set_status(&self, status: TrayStatus) {
         self.update(|_| status);
     }

@@ -44,6 +44,17 @@ describe('uploads and finalize', () => {
     expect(await t.db.select({ id: uploads.id, clipId: uploads.clipId }).from(uploads)).toEqual([{ id: uploadId, clipId: clip.id }]);
   });
 
+  it('finalize tags friends; an unknown name is refused before the upload is used', async () => {
+    await createUser(t.db, { username: 'bob' });
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    const bad = await finalize(uploadId, { tagged: ['ghost'] });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toMatchObject({ error: 'unknown_user' });
+    const res = await finalize(uploadId, { tagged: ['Bob'] });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().tagged).toEqual(['bob']);
+  });
+
   it('a repeated finalize after success returns the same clip with 200 (lost-response retry)', async () => {
     const { uploadId } = await tusUpload(t.app, token, fixture);
     const first = await finalize(uploadId, { gameName: 'Doom' });

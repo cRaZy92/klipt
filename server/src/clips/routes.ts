@@ -1,7 +1,7 @@
 import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { and, eq, isNull, lt, or } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Clip } from '@klipt/shared';
 import { clips, uploads } from '../db/schema.js';
@@ -10,12 +10,24 @@ import { requireUser } from '../auth/plugin.js';
 import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
 import { assertPlayable, makeThumbnail, MediaError, probeVideo, remuxFaststart } from './media.js';
 import { newClipId } from './ids.js';
-import { getClip, getUserStorage, InvalidCursorError, listClips, listGames, listViewers, recordView } from './repo.js';
+import {
+  getClip,
+  getUserStorage,
+  InvalidCursorError,
+  listClips,
+  listGames,
+  listUsernames,
+  listViewers,
+  recordView,
+  resolveTags,
+  setTags,
+  UnknownUserError,
+} from './repo.js';
 
 type ClipRow = typeof clips.$inferSelect;
 
 /** Maps a clip row to its API shape. Shared by every clip endpoint. */
-export function toClip(row: ClipRow, owner: { username: string }, baseUrl: string, views = 0): Clip {
+export function toClip(row: ClipRow, owner: { username: string }, baseUrl: string, views = 0, tagged: string[] = []): Clip {
   return {
     id: row.id,
     title: row.title,
@@ -27,6 +39,7 @@ export function toClip(row: ClipRow, owner: { username: string }, baseUrl: strin
     height: row.height,
     sizeBytes: row.sizeBytes,
     views,
+    tagged,
     createdAt: row.createdAt.toISOString(),
     owner: { username: owner.username },
     shareUrl: `${baseUrl}/c/${row.id}`,
@@ -47,6 +60,8 @@ const finalizeBody = z.object({
   visibility: z.enum(['feed', 'link']).optional(),
   /** The frame (ms into the uploaded video) to use as the thumbnail. */
   thumbnailMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).nullish(),
+  /** Friends in the clip, by username. */
+  tagged: z.array(z.string().max(64)).max(20).optional(),
 });
 
 /**
@@ -74,6 +89,8 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     username: z.string().max(64).optional(),
     game: z.string().max(100).optional(),
     q: z.string().max(100).optional(),
+    /** `me`: only clips you're tagged in. */
+    with: z.enum(['me']).optional(),
     cursor: z.string().max(512).optional(),
     limit: z.coerce.number().int().min(1).max(60).optional(),
   });
@@ -85,16 +102,22 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       visibility: z.enum(['feed', 'link']),
       gameName: z.string().trim().min(1).max(100).nullable(),
       steamAppId: z.number().int().positive().nullable(),
+      tagged: z.array(z.string().max(64)).max(20),
     })
     .partial()
     .strict();
+
+  const unknownUser = (reply: FastifyReply, err: UnknownUserError) =>
+    reply.code(400).send({ error: 'unknown_user', message: err.message });
+
+  app.get('/api/users', { preHandler: requireUser }, async () => listUsernames(db));
 
   app.get('/api/clips', { preHandler: requireUser }, async (req, reply) => {
     const q = listQuery.safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
-      const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q });
-      return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl, i.views)), nextCursor };
+      const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q, withMe: q.data.with === 'me' });
+      return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl, i.views, i.tagged)), nextCursor };
     } catch (err) {
       if (err instanceof InvalidCursorError) return reply.code(400).send({ error: 'invalid_cursor' });
       throw err;
@@ -113,7 +136,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const p = idParam.safeParse(req.params);
     const found = p.success ? await getClip(db, p.data.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
-    return toClip(found.clip, found.owner, config.baseUrl, found.views);
+    return toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged);
   });
 
   // A play of the clip, from the website or the app. Open to logged-out visitors (share links),
@@ -139,12 +162,21 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (found.clip.userId !== req.user!.id) return reply.code(403).send({ error: 'forbidden' });
     const body = patchBody.safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const patch = Object.fromEntries(Object.entries(body.data).filter(([, v]) => v !== undefined));
-    let row = found.clip;
-    if (Object.keys(patch).length > 0) {
-      [row] = (await db.update(clips).set(patch).where(eq(clips.id, row.id)).returning()) as [ClipRow];
+    const { tagged, ...fields } = body.data;
+    if (tagged !== undefined) {
+      let ids: string[];
+      try {
+        ids = await resolveTags(db, found.clip.userId, tagged);
+      } catch (err) {
+        if (err instanceof UnknownUserError) return unknownUser(reply, err);
+        throw err;
+      }
+      await db.transaction((tx) => setTags(tx, found.clip.id, ids));
     }
-    return toClip(row, found.owner, config.baseUrl, found.views);
+    const patch = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+    if (Object.keys(patch).length > 0) await db.update(clips).set(patch).where(eq(clips.id, found.clip.id));
+    const now = (await getClip(db, found.clip.id))!;
+    return toClip(now.clip, now.owner, config.baseUrl, now.views, now.tagged);
   });
 
   app.delete('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
@@ -192,12 +224,19 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const sendFinalized = async (clipId: string) => {
       const found = await getClip(db, clipId);
       if (!found) return reply.code(404).send({ error: 'not_found' });
-      return reply.code(200).send(toClip(found.clip, found.owner, config.baseUrl, found.views));
+      return reply.code(200).send(toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged));
     };
 
     const owned = await ownedUpload();
     if (!owned) return reply.code(404).send({ error: 'not_found' });
     if (owned.clipId) return sendFinalized(owned.clipId);
+    let tagIds: string[];
+    try {
+      tagIds = await resolveTags(db, user.id, body.tagged ?? []);
+    } catch (err) {
+      if (err instanceof UnknownUserError) return unknownUser(reply, err);
+      throw err;
+    }
 
     // Atomically claim the upload so concurrent/retried finalizes can't both process it.
     const [upload] = await db
@@ -269,6 +308,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
           .where(and(eq(uploads.id, upload.id), isNull(uploads.clipId)))
           .returning({ id: uploads.id });
         if (tomb.length === 0) throw new AlreadyFinalizedError();
+        await setTags(tx, id, tagIds);
         return inserted;
       });
     } catch (err) {
@@ -288,6 +328,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     }
     // The clip is committed; tus file removal is best-effort (stale cleanup will catch leftovers).
     await removeTusFiles(config.dataDir, upload.id).catch((e) => req.log.error(e, 'upload cleanup failed'));
-    return reply.code(201).send(toClip(row, user, config.baseUrl));
+    const created = await getClip(db, row.id);
+    return reply.code(201).send(toClip(row, user, config.baseUrl, 0, created?.tagged ?? []));
   });
 }

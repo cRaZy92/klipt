@@ -54,6 +54,13 @@ export function SharePage(props: {
           <span> · {skDate(clip.createdAt)}</span>
           <span data-role="views"> · {viewsLabel(clip.views)}</span>
         </p>
+        {clip.tagged.length > 0 ? (
+          <p class="meta" data-role="tagged">
+            With {clip.tagged.map((name, i) => `${i > 0 ? ', ' : ''}<a href="/u/${encodeURIComponent(name)}">${e(name)}</a>`).join('')}
+          </p>
+        ) : (
+          ''
+        )}
         {props.viewers ? (
           <p class="meta seen-by" data-role="seen-by">
             {props.viewers.length > 0 ? `Seen by ${props.viewers.map((v) => e(v)).join(', ')}` : 'No friends have watched it yet.'}
@@ -63,6 +70,11 @@ export function SharePage(props: {
         )}
         <div class="actions" data-clip-id={e(clip.id)}>
           <button type="button" class="btn" data-action="copy" data-url={e(clip.shareUrl)}>Copy link</button>
+          {props.viewers ? (
+            <button type="button" class="btn" data-action="tag" data-tagged={e(clip.tagged.join(', '))}>Tag friends</button>
+          ) : (
+            ''
+          )}
           <a class="btn" href={e(`${clip.videoUrl}?download=1`)} download="">Download</a>
           {props.canDelete ? (
             <button type="button" class="btn danger" data-action="delete" data-redirect="/">Delete</button>

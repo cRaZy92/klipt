@@ -201,6 +201,42 @@ describe('views', () => {
   });
 });
 
+describe('tagging friends', () => {
+  const patch = (id: string, body: object, h = a.h) =>
+    t.app.inject({ method: 'PATCH', url: `/api/clips/${id}`, headers: h, payload: body });
+  const list = async (url: string, h = b.h) =>
+    ((await t.app.inject({ url, headers: h })).json() as { items: { id: string; tagged: string[] }[] }).items.map((c) => c.id);
+
+  it('the owner tags friends by name; unknown names, the owner and duplicates are refused or dropped', async () => {
+    const id = await addClip(a.id, {}, false);
+    const res = await patch(id, { tagged: ['Bob', 'root', 'bob', 'alice'] });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { tagged: string[] }).tagged).toEqual(['bob', 'root']);
+    expect((await patch(id, { tagged: ['nobody'] })).json()).toEqual({ error: 'unknown_user', message: 'No user called nobody.' });
+    expect((await patch(id, { tagged: ['bob'] }, b.h)).statusCode).toBe(403);
+    expect(((await patch(id, { tagged: [] })).json() as { tagged: string[] }).tagged).toEqual([]);
+  });
+
+  it('a tagged feed clip shows on the friend\'s profile and under "with me"', async () => {
+    const tagged = await addClip(a.id, {}, false);
+    const hidden = await addClip(a.id, { visibility: 'link' }, false);
+    const other = await addClip(a.id, {}, false);
+    await patch(tagged, { tagged: ['bob'] });
+    await patch(hidden, { tagged: ['bob'] });
+    expect(await list('/api/clips?scope=user&username=bob', admin.h)).toEqual([tagged]);
+    expect(await list('/api/clips?scope=feed&with=me')).toEqual([tagged]);
+    expect(await list('/api/clips?scope=feed&with=me', admin.h)).toEqual([]);
+    expect(await list('/api/clips?scope=user&username=alice', admin.h)).toEqual([other, tagged]);
+  });
+
+  it('lists active users to tag', async () => {
+    const res = await t.app.inject({ url: '/api/users', headers: a.h });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { username: string }[]).map((u) => u.username)).toEqual(['alice', 'bob', 'root']);
+    expect((await t.app.inject({ url: '/api/users' })).statusCode).toBe(401);
+  });
+});
+
 describe('my storage', () => {
   it('counts only your own clips, private ones included', async () => {
     await addClip(a.id, { sizeBytes: 3_000_000_000 }, false);

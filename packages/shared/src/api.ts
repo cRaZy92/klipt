@@ -76,6 +76,8 @@ export interface FinalizeRequest {
   visibility?: Visibility;
   /** The frame (ms into the uploaded video) to use as the thumbnail; omitted = automatic. */
   thumbnailMs?: number | null;
+  /** Friends in the clip, by username. */
+  tagged?: string[];
 }
 
 export interface Clip {
@@ -90,6 +92,8 @@ export interface Clip {
   sizeBytes: number;
   /** Friends who watched it (each once, never the owner) plus logged-out plays. */
   views: number;
+  /** Friends in the clip, by username (alphabetical). */
+  tagged: string[];
   createdAt: string;
   owner: { username: string };
   shareUrl: string;

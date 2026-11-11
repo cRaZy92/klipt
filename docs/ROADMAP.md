@@ -68,7 +68,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | Views and "seen by"        | **Done.** Each friend counts once (never the owner), plus every logged-out play; counts on the website and in the app; the owner sees "Seen by …" on the share page and in My clips |
 | Your storage on the server | **Done.** "N clips · 1.5 GB on the server" on the website's My clips and in Settings → Account; admins see it per user. No quotas |
 | Thumbnail handle           | **Done.** A thumbnail marker above the editor's trim bar (kept inside the cut); saving redraws the local thumbnail, and an upload sends the frame for the Feed, website and Discord thumbnail |
-| Tag friends in a clip      | "With bob, alice": the clip shows on their profiles too, and the Feed gets an "I'm in it" filter  |
+| Tag friends in a clip      | **Done.** Pick "Who's in it" when uploading (or "Tag friends" on the share page); tagged feed clips show on their profiles, "With …" on the share page and player, and an "I'm in it" filter in the Feed and on the website |
 | Next clip suggestion       | **Done (desktop Feed).** When a clip ends, "Up next" offers the next one (Play next / Replay, no autoplay); ← → and header arrows move between clips |
 | Download on the share page | **Done.** A Download button saves the video as "<title>.mp4" (`/media/<id>.mp4?download=1`)       |
 | Screenshots                | A screenshot hotkey; screenshots live in the library next to clips, with a Clips / Screenshots filter (library, Feed, website) |

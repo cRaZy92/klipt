@@ -29,6 +29,7 @@
   }
 
   var MESSAGES = {
+    unknown_user: "One of those names isn't a Klipt user.",
     invalid_credentials: 'Wrong username or password.',
     account_disabled: 'This account is disabled.',
     username_taken: 'That username is taken.',
@@ -110,6 +111,12 @@
         clipRow.querySelector('[data-role=title]').textContent = next;
         btn.dataset.title = next;
         toast('Renamed');
+      } else if (action === 'tag') {
+        var names = prompt('Who is in this clip? Usernames, separated by commas.', btn.dataset.tagged);
+        if (names === null) return;
+        var list = names.split(',').map(function (n) { return n.trim(); }).filter(Boolean);
+        await api('PATCH', '/api/clips/' + clipRow.dataset.clipId, { tagged: list });
+        location.reload();
       } else if (action === 'visibility') {
         var vis = btn.dataset.visibility === 'feed' ? 'link' : 'feed';
         await api('PATCH', '/api/clips/' + clipRow.dataset.clipId, { visibility: vis });

@@ -59,6 +59,7 @@ fn req() -> FinalizeRequest {
         steam_app_id: None,
         visibility: Visibility::Feed,
         thumbnail_ms: None,
+        tagged: Vec::new(),
     }
 }
 

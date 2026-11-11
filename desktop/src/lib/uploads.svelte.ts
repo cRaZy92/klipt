@@ -77,13 +77,17 @@ export function stopUploadsForLogout() {
   }
 }
 
-/** Starts (or retries, resuming where it stopped) an upload. */
-export async function startUpload(id: string, title: string, visibility: Visibility) {
+/** Friends tagged in each upload, kept for retries. */
+const taggedFor: Record<string, string[]> = {};
+
+/** Starts (or retries, resuming where it stopped) an upload. `tagged` is kept for retries. */
+export async function startUpload(id: string, title: string, visibility: Visibility, tagged?: string[]) {
   stoppedByLogout.delete(id);
   requested[id] = { title, visibility };
+  if (tagged) taggedFor[id] = tagged;
   const previous = uploads[id];
   try {
-    await api.uploadClip(id, title, visibility);
+    await api.uploadClip(id, title, visibility, taggedFor[id] ?? []);
   } catch (e) {
     // "Already uploading" means the core is still on it: leave what's shown alone; its
     // progress events keep updating the card.

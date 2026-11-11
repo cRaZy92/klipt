@@ -56,6 +56,9 @@ pub struct FinalizeRequest {
     /// The thumbnail's frame in the uploaded (trimmed) video; `None` lets the server pick.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thumbnail_ms: Option<u64>,
+    /// Friends in the clip, by username.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tagged: Vec<String>,
 }
 
 /// The server's `Clip`.

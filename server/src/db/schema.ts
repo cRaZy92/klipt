@@ -79,3 +79,13 @@ export const clipViews = pgTable(
   },
   (t) => [primaryKey({ columns: [t.clipId, t.userId] })],
 );
+
+/** Friends in a clip ("with bob, alice"): the clip also shows on their profiles. */
+export const clipTags = pgTable(
+  'clip_tags',
+  {
+    clipId: text('clip_id').notNull().references(() => clips.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.clipId, t.userId] }), index('clip_tags_user_idx').on(t.userId)],
+);

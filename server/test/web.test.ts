@@ -171,6 +171,24 @@ describe('web pages', () => {
     expect((await get('/u/carol', b.cookie)).body).not.toContain('data-stat=');
   });
 
+  it('feed filters to clips you are in; share page names the friends in it', async () => {
+    const a = await mk('alice');
+    const b = await mk('bob');
+    const withBob = await addClip(a.u.id, { title: 'Duo' });
+    await addClip(a.u.id, { title: 'Solo' });
+    await t.app.inject({ method: 'PATCH', url: `/api/clips/${withBob}`, headers: { cookie: a.cookie }, payload: { tagged: ['bob'] } });
+    const feed = (await get('/?with=me', b.cookie)).body;
+    expect(feed).toContain('Duo');
+    expect(feed).not.toContain('Solo');
+    expect(feed).toMatch(/<a class="chip active" href="\/"[^>]*>I'm in it</);
+    expect((await get('/', b.cookie)).body).toMatch(/<a class="chip" href="\/\?with=me"[^>]*>I'm in it</);
+    const share = (await get(`/c/${withBob}`, b.cookie)).body;
+    expect(share).toMatch(/data-role="tagged">With <a href="\/u\/bob">bob<\/a></);
+    expect((await get(`/c/${withBob}`, a.cookie)).body).toContain('data-action="tag"');
+    expect(share).not.toContain('data-action="tag"');
+    expect((await get('/u/bob', a.cookie)).body).toContain('Duo');
+  });
+
   it('me page shows how much server storage your clips use', async () => {
     const a = await mk('alice');
     const b = await mk('bob');

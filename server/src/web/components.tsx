@@ -88,15 +88,16 @@ function href(base: string, params: Record<string, string | null | undefined>): 
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
   const s = q.toString();
-  return s ? `${base}?${s}` : base;
+  return s ? `${base}${base.includes('?') ? '&' : '?'}${s}` : base;
 }
 
 /** A search box for the list at `basePath`; the game filter is kept. */
-export function SearchBox(props: { basePath: string; search?: string; game?: string }): JSX.Element {
+export function SearchBox(props: { basePath: string; search?: string; game?: string; withMe?: boolean }): JSX.Element {
   return (
     <form class="search" method="get" action={e(props.basePath)} role="search">
       <input type="search" name="q" value={e(props.search ?? '')} placeholder="Search by title, game or friend" aria-label="Search clips" maxlength="100" />
       {props.game ? <input type="hidden" name="game" value={e(props.game)} /> : ''}
+      {props.withMe ? <input type="hidden" name="with" value="me" /> : ''}
       <button type="submit" class="btn">Search</button>
     </form>
   );
@@ -125,6 +126,17 @@ export function GameFilter(props: { games: GameCount[]; active?: string; basePat
           <span class="chip-count">{String(g.count)}</span>
         </a>
       ))}
+    </div>
+  );
+}
+
+/** The feed's "I'm in it" filter: clips you're tagged in. */
+export function WithMeChip(props: { active: boolean }): JSX.Element {
+  return (
+    <div class="chips">
+      <a class={`chip${props.active ? ' active' : ''}`} href={props.active ? '/' : '/?with=me'} title="Clips your friends tagged you in">
+        I'm in it
+      </a>
     </div>
   );
 }

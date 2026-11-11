@@ -114,6 +114,9 @@
             <span>{viewsLabel(clip.views)}</span>
           {/if}
         </div>
+        {#if clip.tagged?.length}
+          <div class="seen-by">With {clip.tagged.join(", ")}</div>
+        {/if}
         {#if viewers}
           <div class="seen-by">{viewers.length > 0 ? `Seen by ${viewers.join(", ")}` : "No friends have watched it yet."}</div>
         {/if}

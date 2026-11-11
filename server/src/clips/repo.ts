@@ -1,8 +1,8 @@
-import { and, count, desc, eq, ilike, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { GameCount, MyStorage } from '@klipt/shared';
 import type { AuthUser } from '../auth/sessions.js';
 import type { Db } from '../db/client.js';
-import { clipViews, clips, users } from '../db/schema.js';
+import { clipTags, clipViews, clips, users } from '../db/schema.js';
 
 export type ClipRow = typeof clips.$inferSelect;
 export type Scope = 'feed' | 'mine' | 'user';
@@ -11,6 +11,16 @@ export interface ClipWithOwner {
   owner: { username: string };
   /** Friends who watched it plus logged-out plays. */
   views: number;
+  /** Friends in the clip, by name. */
+  tagged: string[];
+}
+
+/** The usernames tagged in a clip, alphabetically. */
+const taggedExpr = sql<string[]>`coalesce((select array_agg(tu.username order by tu.username_key) from ${clipTags} ct join ${users} tu on tu.id = ct.user_id where ct.clip_id = ${clips.id}), '{}')`;
+
+/** Clips `username` is tagged in. */
+function taggedIn(usernameKey: string): SQL {
+  return sql`exists (select 1 from ${clipTags} ct join ${users} tu on tu.id = ct.user_id where ct.clip_id = ${clips.id} and tu.username_key = ${usernameKey})`;
 }
 
 /** A clip's view count: its logged-in viewers plus its logged-out plays. */
@@ -37,13 +47,18 @@ export function decodeCursor(cursor: string): { createdAt: Date; id: string } {
   return { createdAt, id };
 }
 
-function scopeCondition(viewer: AuthUser, scope: Scope, username?: string): SQL {
+/**
+ * Which clips a list shows. A profile (`user`) has the user's own clips (link-only ones only to
+ * themselves) and, unless `ownOnly`, feed clips they're tagged in.
+ */
+function scopeCondition(viewer: AuthUser, scope: Scope, username?: string, ownOnly = false): SQL {
   if (scope === 'mine') return eq(clips.userId, viewer.id);
   if (scope === 'feed') return eq(clips.visibility, 'feed');
   const key = (username ?? '').toLowerCase();
   const isSelf = key === viewer.username.toLowerCase();
   const owner = eq(users.usernameKey, key);
-  return isSelf ? owner : and(owner, eq(clips.visibility, 'feed'))!;
+  const own = isSelf ? owner : and(owner, eq(clips.visibility, 'feed'))!;
+  return ownOnly ? own : or(own, and(eq(clips.visibility, 'feed'), taggedIn(key)))!;
 }
 
 /**
@@ -64,24 +79,25 @@ export function searchCondition(text: string | undefined): SQL | undefined {
 export async function listClips(
   db: Db,
   viewer: AuthUser,
-  q: { scope: Scope; username?: string; game?: string; search?: string; cursor?: string; limit?: number },
+  q: { scope: Scope; username?: string; game?: string; search?: string; withMe?: boolean; cursor?: string; limit?: number },
 ): Promise<{ items: ClipWithOwner[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(Math.trunc(q.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
   const conds: (SQL | undefined)[] = [scopeCondition(viewer, q.scope, q.username)];
   if (q.game) conds.push(eq(clips.gameName, q.game));
   conds.push(searchCondition(q.search));
+  if (q.withMe) conds.push(taggedIn(viewer.username.toLowerCase()));
   if (q.cursor) {
     const c = decodeCursor(q.cursor);
     conds.push(or(lt(clips.createdAt, c.createdAt), and(eq(clips.createdAt, c.createdAt), lt(clips.id, c.id))));
   }
   const rows = await db
-    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr })
+    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr, tagged: taggedExpr })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(and(...conds))
     .orderBy(desc(clips.createdAt), desc(clips.id))
     .limit(limit + 1);
-  const items = rows.slice(0, limit).map((r) => ({ ...r, views: Number(r.views) }));
+  const items = rows.slice(0, limit).map((r) => ({ ...r, views: Number(r.views), tagged: r.tagged ?? [] }));
   const last = items[items.length - 1];
   const nextCursor = rows.length > limit && last ? encodeCursor(last.clip.createdAt, last.clip.id) : null;
   return { items, nextCursor };
@@ -96,7 +112,7 @@ export interface ProfileStats {
 
 /** A profile's totals over the clips `viewer` may see there (feed clips, or all for your own). */
 export async function getProfileStats(db: Db, viewer: AuthUser, username: string): Promise<ProfileStats> {
-  const where = scopeCondition(viewer, 'user', username);
+  const where = scopeCondition(viewer, 'user', username, true);
   const [totals] = await db
     .select({ clips: sql<number>`count(*)::int`, views: sql<number>`coalesce(sum(${viewsExpr}), 0)::int` })
     .from(clips)
@@ -170,11 +186,44 @@ export async function listViewers(db: Db, clipId: string): Promise<{ username: s
   return rows.map((r) => ({ username: r.username, viewedAt: r.viewedAt.toISOString() }));
 }
 
+export class UnknownUserError extends Error {
+  constructor(public username: string) {
+    super(`No user called ${username}.`);
+  }
+}
+
+/**
+ * The user ids for tagging `names` in a clip of `ownerId`: case-insensitive, duplicates and the
+ * owner dropped. Throws UnknownUserError for a name that isn't an active user.
+ */
+export async function resolveTags(db: Db, ownerId: string, names: string[]): Promise<string[]> {
+  const keys = [...new Set(names.map((n) => n.trim().toLowerCase()).filter(Boolean))];
+  if (keys.length === 0) return [];
+  const rows = await db
+    .select({ id: users.id, key: users.usernameKey })
+    .from(users)
+    .where(and(inArray(users.usernameKey, keys), isNull(users.disabledAt)));
+  const missing = keys.find((k) => !rows.some((r) => r.key === k));
+  if (missing) throw new UnknownUserError(names.find((n) => n.trim().toLowerCase() === missing)!.trim());
+  return rows.filter((r) => r.id !== ownerId).map((r) => r.id);
+}
+
+/** Replaces the friends tagged in `clipId`. */
+export async function setTags(db: Pick<Db, 'delete' | 'insert'>, clipId: string, userIds: string[]): Promise<void> {
+  await db.delete(clipTags).where(eq(clipTags.clipId, clipId));
+  if (userIds.length > 0) await db.insert(clipTags).values(userIds.map((userId) => ({ clipId, userId })));
+}
+
+/** Active users, for picking friends to tag. */
+export async function listUsernames(db: Db): Promise<{ username: string }[]> {
+  return db.select({ username: users.username }).from(users).where(isNull(users.disabledAt)).orderBy(asc(users.usernameKey));
+}
+
 export async function getClip(db: Db, id: string): Promise<ClipWithOwner | null> {
   const [row] = await db
-    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr })
+    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr, tagged: taggedExpr })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(eq(clips.id, id));
-  return row ? { ...row, views: Number(row.views) } : null;
+  return row ? { ...row, views: Number(row.views), tagged: row.tagged ?? [] } : null;
 }

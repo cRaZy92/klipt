@@ -524,6 +524,8 @@ struct Job {
     clip: Clip,
     title: String,
     visibility: Visibility,
+    /// Friends in the clip, by username.
+    tagged: Vec<String>,
     auth: Auth,
     tools: Tools,
     data_dir: PathBuf,
@@ -540,8 +542,11 @@ pub fn upload_clip(
     id: String,
     title: String,
     visibility: Visibility,
+    tagged: Option<Vec<String>>,
 ) -> Result<()> {
     let title = clean_title(&title)?;
+    let tagged: Vec<String> =
+        tagged.unwrap_or_default().into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).take(20).collect();
     let clip = lock(&state.library).get(&id)?;
     if !clip.path.is_file() {
         return Err(AppError::FileMissing);
@@ -550,7 +555,7 @@ pub fn upload_clip(
     let auth = auth::load(&state.data_dir).ok_or(AppError::Unauthorized)?;
     let cache_dir = cache_dir(&app)?;
     let guard = uploads.try_begin(&id)?;
-    let job = Job { clip, title, visibility, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
+    let job = Job { clip, title, visibility, tagged, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
     tauri::async_runtime::spawn(async move {
         let id = job.clip.id.clone();
         let (data_dir, token) = (job.data_dir.clone(), job.auth.token.clone());
@@ -680,6 +685,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
         steam_app_id: clip.steam_app_id,
         visibility: job.visibility,
         thumbnail_ms: upload_thumbnail_ms(clip),
+        tagged: job.tagged.clone(),
     };
     let server_clip = client.finalize(token, &request).await?;
     let visibility = match server_clip.visibility {
@@ -1116,8 +1122,12 @@ pub async fn feed_clips(
     game: Option<String>,
     cursor: Option<String>,
     search: Option<String>,
+    with_me: Option<bool>,
 ) -> Result<serde_json::Value> {
     let mut query = vec![("scope", "feed".to_string())];
+    if with_me == Some(true) {
+        query.push(("with", "me".to_string()));
+    }
     query.extend(game.filter(|g| !g.is_empty()).map(|g| ("game", g)));
     query.extend(search.map(|s| s.trim().chars().take(100).collect::<String>()).filter(|s| !s.is_empty()).map(|s| ("q", s)));
     query.extend(cursor.filter(|c| !c.is_empty()).map(|c| ("cursor", c)));
@@ -1136,6 +1146,12 @@ pub async fn feed_games(app: AppHandle) -> Result<serde_json::Value> {
 #[tauri::command]
 pub async fn my_storage(app: AppHandle) -> Result<serde_json::Value> {
     Ok(server_get(&app, "/api/me/storage", Vec::new()).await?.0)
+}
+
+/// The server's active users (`[{ username }]`), for tagging friends in a clip.
+#[tauri::command]
+pub async fn list_users(app: AppHandle) -> Result<serde_json::Value> {
+    Ok(server_get(&app, "/api/users", Vec::new()).await?.0)
 }
 
 /// Opens the Klipt website in the browser: its home page, or `url` (e.g. a clip's share link),

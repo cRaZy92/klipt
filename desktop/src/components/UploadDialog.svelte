@@ -11,6 +11,22 @@
   // svelte-ignore state_referenced_locally
   let title = $state(uploadTitle(clip));
   let visibility = $state<Visibility>("feed");
+  /** Friends you can tag (everyone on the server but you); null until loaded or if it failed. */
+  let friends = $state<string[] | null>(null);
+  let tagged = $state<string[]>([]);
+
+  $effect(() => {
+    Promise.all([api.listUsers(), api.getAccount()])
+      .then(([users, account]) => {
+        const me = account?.username.toLowerCase();
+        friends = users.map((u) => u.username).filter((name) => name.toLowerCase() !== me);
+      })
+      .catch(() => (friends = null));
+  });
+
+  function toggleTag(name: string) {
+    tagged = tagged.includes(name) ? tagged.filter((n) => n !== name) : [...tagged, name];
+  }
   // svelte-ignore state_referenced_locally
   let started = $state(isBusy(uploads[clip.id]));
 
@@ -32,7 +48,7 @@
     e.preventDefault();
     if (!trimmedTitle) return;
     started = true;
-    void startUpload(clip.id, trimmedTitle, visibility);
+    void startUpload(clip.id, trimmedTitle, visibility, tagged);
   }
 
   async function copyAgain() {
@@ -74,6 +90,25 @@
           <span class="ring" aria-hidden="true"></span>
         </label>
       </fieldset>
+      {#if friends && friends.length > 0}
+        <fieldset>
+          <legend>Who's in it <span class="optional">optional</span></legend>
+          <div class="friends">
+            {#each friends as name (name)}
+              <button
+                type="button"
+                class="friend"
+                class:on={tagged.includes(name)}
+                aria-pressed={tagged.includes(name)}
+                onclick={() => toggleTag(name)}
+              >
+                {#if tagged.includes(name)}<Icon name="check" size={13} />{/if}
+                {name}
+              </button>
+            {/each}
+          </div>
+        </fieldset>
+      {/if}
     </form>
   {:else if job.status === "done"}
     <div class="done">
@@ -142,6 +177,50 @@
     color: var(--text-muted);
     font-size: 0.87rem;
     font-weight: 600;
+  }
+
+  .optional {
+    margin-left: 0.3rem;
+    color: var(--text-faint);
+    font-weight: 500;
+  }
+
+  .friends {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    max-height: 7.5rem;
+    overflow-y: auto;
+  }
+
+  .friend {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.87rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      border-color 0.15s,
+      color 0.15s,
+      background 0.15s;
+  }
+
+  .friend:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
+  .friend.on {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
   }
 
   .option {

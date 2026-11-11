@@ -23,6 +23,8 @@
   let games = $state<GameCount[]>([]);
   let game = $state<string | null>(null);
   let search = $state("");
+  /** Only clips you're tagged in. */
+  let withMe = $state(false);
   let cursor = $state<string | null>(null);
   let loading = $state(false);
   let loaded = $state(false);
@@ -55,12 +57,12 @@
     loading = true;
     if (!more) loadError = null;
     try {
-      const page = await api.feedClips(game, more ? cursor : null, search.trim() || null);
+      const page = await api.feedClips(game, more ? cursor : null, search.trim() || null, withMe);
       if (id !== request) return;
       clips = more ? [...clips, ...page.items] : page.items;
       cursor = page.nextCursor;
       // The unfiltered first page is the whole feed's newest end: you've now seen it.
-      if (!more && !game && !search.trim() && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
+      if (!more && !game && !search.trim() && !withMe && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
       now = Date.now();
       loaded = true;
     } catch (e) {
@@ -127,6 +129,18 @@
       delay={300}
       onsearch={() => void load()}
     />
+    <button
+      class="with-me"
+      class:on={withMe}
+      aria-pressed={withMe}
+      title="Clips your friends tagged you in"
+      onclick={() => {
+        withMe = !withMe;
+        void load();
+      }}
+    >
+      I'm in it
+    </button>
   </div>
 
   {#if games.length > 0}
@@ -159,6 +173,8 @@
       <div class="empty-icon"><Icon name="users" size={28} /></div>
       {#if search.trim()}
         <p>No clips match “{search.trim()}”.</p>
+      {:else if withMe}
+        <p>Nobody has tagged you in a clip yet.</p>
       {:else if game}
         <p>No clips for this game yet.</p>
       {:else}
@@ -228,7 +244,33 @@
 
 <style>
   .filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
     margin-bottom: 0.75rem;
+  }
+
+  .with-me {
+    padding: 0.42rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .with-me:hover {
+    color: var(--text);
+  }
+
+  .with-me.on {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
   }
 
   .refresh-icon {

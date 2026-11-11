@@ -69,8 +69,9 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   };
 
   const listQuery = (req: FastifyRequest) => {
-    const q = req.query as { game?: unknown; q?: unknown; cursor?: unknown };
+    const q = req.query as { game?: unknown; q?: unknown; with?: unknown; cursor?: unknown };
     return {
+      withMe: q.with === 'me',
       game: typeof q.game === 'string' && q.game ? q.game.slice(0, 100) : undefined,
       search: typeof q.q === 'string' && q.q.trim() ? q.q.trim().slice(0, 100) : undefined,
       cursor: typeof q.cursor === 'string' && q.cursor ? q.cursor.slice(0, 512) : undefined,
@@ -79,14 +80,14 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
 
   /** Shared list loading; an invalid cursor falls back to the first page. */
   async function load(req: FastifyRequest, scope: Scope, username?: string) {
-    const { game, search, cursor } = listQuery(req);
+    const { game, search, withMe, cursor } = listQuery(req);
     const user = req.user!;
-    const run = (c?: string) => listClips(db, user, { scope, username, game, search, cursor: c });
+    const run = (c?: string) => listClips(db, user, { scope, username, game, search, withMe, cursor: c });
     const [page, games] = await Promise.all([
       run(cursor).catch((err) => (err instanceof InvalidCursorError ? run() : Promise.reject(err))),
       listGames(db, user, scope, username),
     ]);
-    return { ...page, games, game, search };
+    return { ...page, games, game, search, withMe };
   }
 
   app.get('/login', async (req, reply) => {
@@ -125,7 +126,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const found = /^[A-Za-z0-9_-]{12}$/.test(id) ? await getClip(db, id) : null;
     if (!found) return html(reply, NotFoundPage({ user: req.user, message: "This clip doesn't exist or was deleted." }) as string, 404);
     const canDelete = !!req.user && (req.user.id === found.clip.userId || req.user.isAdmin);
-    const clip = toClip(found.clip, found.owner, config.baseUrl, found.views);
+    const clip = toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged);
     const viewers = req.user?.id === found.clip.userId ? (await listViewers(db, clip.id)).map((v) => v.username) : undefined;
     return html(reply, SharePage({ user: req.user, clip, canDelete, viewers }) as string);
   });

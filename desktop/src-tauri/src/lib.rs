@@ -114,6 +114,7 @@ pub fn run() {
             commands::feed_clips,
             commands::feed_games,
             commands::my_storage,
+            commands::list_users,
             commands::open_website,
             server_clips::my_uploads,
             server_clips::update_upload,

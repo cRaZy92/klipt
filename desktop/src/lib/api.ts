@@ -219,6 +219,8 @@ export interface FeedClip {
   thumbnailUrl: string;
   /** Friends who watched it (each once, never the owner) plus logged-out plays. */
   views: number;
+  /** Friends in the clip, by username. Missing from older servers. */
+  tagged?: string[];
 }
 
 /** A friend who watched one of your uploads. */
@@ -284,11 +286,13 @@ export const api = {
   /** Downloads your upload into the library (linked to the server copy). */
   downloadUpload: (id: string) => invoke<ClipView>("download_upload", { id }),
   copyShareLink: (id: string) => invoke<string>("copy_share_link", { id }),
-  uploadClip: (id: string, title: string, visibility: Visibility) =>
-    invoke<void>("upload_clip", { id, title, visibility }),
+  uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = []) =>
+    invoke<void>("upload_clip", { id, title, visibility, tagged }),
+  /** The server's users, for tagging friends in a clip. */
+  listUsers: () => invoke<{ username: string }[]>("list_users"),
   /** One page of the feed; `search` matches title, game and uploader on the server. */
-  feedClips: (game: string | null, cursor: string | null, search: string | null = null) =>
-    invoke<FeedPage>("feed_clips", { game, cursor, search }),
+  feedClips: (game: string | null, cursor: string | null, search: string | null = null, withMe = false) =>
+    invoke<FeedPage>("feed_clips", { game, cursor, search, withMe }),
   feedGames: () => invoke<FeedGame[]>("feed_games"),
   /** Friends' clips new since you last opened the Feed. */
   feedNewCount: () => invoke<number>("feed_new_count"),

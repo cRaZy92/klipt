@@ -63,11 +63,25 @@ export const clips = pgTable(
     kind: text('kind', { enum: ['clip', 'screenshot'] }).notNull().default('clip'),
     /** Plays by visitors who weren't logged in (share links); logged-in viewers are in clip_views. */
     anonViews: integer('anon_views').notNull().default(0),
+    /**
+     * Server-side compression of a video clip (null for screenshots): `queued` and `running` clips
+     * play the uploaded file meanwhile; `done` replaced it with a smaller one; `skipped` kept the
+     * upload because compressing barely helped; `failed` kept it too (an admin can retry).
+     */
+    transcodeState: text('transcode_state', { enum: ['queued', 'running', 'done', 'skipped', 'failed'] }),
+    /** Bumped each time the video file is replaced: version n > 0 is stored as `<id>.v<n>.mp4`. */
+    mediaVersion: integer('media_version').notNull().default(0),
+    /** The uploaded file's size, once a compression ran (sizeBytes is then the stored file's). */
+    originalBytes: bigint('original_bytes', { mode: 'number' }),
+    transcodeError: text('transcode_error'),
+    transcodeStartedAt: ts('transcode_started_at'),
+    transcodeFinishedAt: ts('transcode_finished_at'),
     createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
   },
   (t) => [
     index('clips_created_idx').on(t.createdAt.desc(), t.id.desc()),
     index('clips_game_idx').on(t.gameName),
+    index('clips_transcode_idx').on(t.transcodeState),
   ],
 );
 
@@ -90,4 +104,15 @@ export const clipTags = pgTable(
     userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   },
   (t) => [primaryKey({ columns: [t.clipId, t.userId] }), index('clip_tags_user_idx').on(t.userId)],
+);
+
+/** Clips a user starred: any clip they can open (their own, friends', link-only ones they have the link to). */
+export const clipFavorites = pgTable(
+  'clip_favorites',
+  {
+    clipId: text('clip_id').notNull().references(() => clips.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.clipId, t.userId] }), index('clip_favorites_user_idx').on(t.userId)],
 );

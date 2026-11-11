@@ -10,9 +10,11 @@ import { requireUser } from '../auth/plugin.js';
 import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
 import { assertPlayable, makeThumbnail, MediaError, probeImage, probeVideo, remuxFaststart, toPng } from './media.js';
 import { newClipId } from './ids.js';
+import { MEDIA_FILE, mediaFileName } from './files.js';
 import {
   getClip,
   getUserStorage,
+  setFavorite,
   InvalidCursorError,
   listClips,
   listGames,
@@ -27,7 +29,14 @@ import {
 type ClipRow = typeof clips.$inferSelect;
 
 /** Maps a clip row to its API shape. Shared by every clip endpoint. */
-export function toClip(row: ClipRow, owner: { username: string }, baseUrl: string, views = 0, tagged: string[] = []): Clip {
+export function toClip(
+  row: ClipRow,
+  owner: { username: string },
+  baseUrl: string,
+  views = 0,
+  tagged: string[] = [],
+  favorite = false,
+): Clip {
   return {
     id: row.id,
     title: row.title,
@@ -40,13 +49,20 @@ export function toClip(row: ClipRow, owner: { username: string }, baseUrl: strin
     sizeBytes: row.sizeBytes,
     views,
     tagged,
+    favorite,
     kind: row.kind,
+    processing: processingOf(row),
     createdAt: row.createdAt.toISOString(),
     owner: { username: owner.username },
     shareUrl: `${baseUrl}/c/${row.id}`,
-    videoUrl: `${baseUrl}/media/${row.id}.${row.kind === 'screenshot' ? 'png' : 'mp4'}`,
+    videoUrl: `${baseUrl}/media/${mediaFileName(row)}`,
     thumbnailUrl: `${baseUrl}/media/${row.id}.jpg`,
   };
+}
+
+/** Whether the server is still compressing the clip (it plays meanwhile). */
+export function processingOf(row: Pick<ClipRow, 'transcodeState'>): 'queued' | 'running' | null {
+  return row.transcodeState === 'queued' || row.transcodeState === 'running' ? row.transcodeState : null;
 }
 
 const CLAIM_TTL_MS = 30 * 60 * 1000;
@@ -94,6 +110,8 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     with: z.enum(['me']).optional(),
     /** Only video clips or only screenshots. */
     kind: z.enum(['clip', 'screenshot']).optional(),
+    /** `1`: only clips you starred. */
+    favorites: z.enum(['1']).optional(),
     cursor: z.string().max(512).optional(),
     limit: z.coerce.number().int().min(1).max(60).optional(),
   });
@@ -119,8 +137,8 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const q = listQuery.safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
-      const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q, withMe: q.data.with === 'me', kind: q.data.kind });
-      return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl, i.views, i.tagged)), nextCursor };
+      const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q, withMe: q.data.with === 'me', kind: q.data.kind, favorites: q.data.favorites === '1' });
+      return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl, i.views, i.tagged, i.favorite)), nextCursor };
     } catch (err) {
       if (err instanceof InvalidCursorError) return reply.code(400).send({ error: 'invalid_cursor' });
       throw err;
@@ -137,10 +155,24 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const found = p.success ? await getClip(db, p.data.id) : null;
+    const found = p.success ? await getClip(db, p.data.id, req.user?.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
-    return toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged);
+    return toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged, found.favorite);
   });
+
+  // Starring: any clip you can open (the id is the secret, as for the share page).
+  for (const [method, favorite] of [['PUT', true], ['DELETE', false]] as const) {
+    app.route({
+      method,
+      url: '/api/clips/:id/favorite',
+      preHandler: requireUser,
+      handler: async (req, reply) => {
+        const p = idParam.safeParse(req.params);
+        if (!p.success || !(await setFavorite(db, p.data.id, req.user!.id, favorite))) return reply.code(404).send({ error: 'not_found' });
+        return reply.code(204).send();
+      },
+    });
+  }
 
   // A play of the clip, from the website or the app. Open to logged-out visitors (share links),
   // so it's rate limited per address.
@@ -152,7 +184,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/clips/:id/viewers', { preHandler: requireUser }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const found = p.success ? await getClip(db, p.data.id) : null;
+    const found = p.success ? await getClip(db, p.data.id, req.user?.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
     if (found.clip.userId !== req.user!.id) return reply.code(403).send({ error: 'forbidden' });
     return listViewers(db, found.clip.id);
@@ -160,7 +192,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const found = p.success ? await getClip(db, p.data.id) : null;
+    const found = p.success ? await getClip(db, p.data.id, req.user?.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
     if (found.clip.userId !== req.user!.id) return reply.code(403).send({ error: 'forbidden' });
     const body = patchBody.safeParse(req.body ?? {});
@@ -178,18 +210,21 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     }
     const patch = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
     if (Object.keys(patch).length > 0) await db.update(clips).set(patch).where(eq(clips.id, found.clip.id));
-    const now = (await getClip(db, found.clip.id))!;
-    return toClip(now.clip, now.owner, config.baseUrl, now.views, now.tagged);
+    const now = (await getClip(db, found.clip.id, req.user!.id))!;
+    return toClip(now.clip, now.owner, config.baseUrl, now.views, now.tagged, now.favorite);
   });
 
   app.delete('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    const found = p.success ? await getClip(db, p.data.id) : null;
+    const found = p.success ? await getClip(db, p.data.id, req.user?.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
     if (found.clip.userId !== req.user!.id && !req.user!.isAdmin) return reply.code(403).send({ error: 'forbidden' });
     await db.delete(clips).where(eq(clips.id, found.clip.id));
+    app.transcoder.cancel(found.clip.id);
     const dir = join(config.dataDir, 'clips');
-    await Promise.all(['mp4', 'jpg', 'png'].map((ext) => rm(join(dir, `${found.clip.id}.${ext}`), { force: true })));
+    // The upload too: a compressed clip keeps it for a few minutes after the swap.
+    const files = new Set([mediaFileName(found.clip), `${found.clip.id}.mp4`, `${found.clip.id}.jpg`]);
+    await Promise.all([...files].map((f) => rm(join(dir, f), { force: true })));
     return reply.code(204).send();
   });
 
@@ -199,7 +234,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
   await app.register(fastifyStatic, { root: clipsDir, serve: false });
   app.get('/media/:file', async (req, reply) => {
     const { file } = req.params as { file: string };
-    if (!/^[A-Za-z0-9_-]{12}\.(mp4|jpg|png)$/.test(file)) return reply.code(404).send({ error: 'not_found' });
+    if (!MEDIA_FILE.test(file)) return reply.code(404).send({ error: 'not_found' });
     if (!(await stat(join(clipsDir, file)).catch(() => null))) return reply.code(404).send({ error: 'not_found' });
     if (!file.endsWith('.jpg') && (req.query as { download?: string }).download === '1') {
       const found = await getClip(db, file.slice(0, 12));
@@ -225,9 +260,9 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     };
     // A finalized upload is kept as a tombstone, so a client that lost the 201 can retry and learn its clip.
     const sendFinalized = async (clipId: string) => {
-      const found = await getClip(db, clipId);
+      const found = await getClip(db, clipId, user.id);
       if (!found) return reply.code(404).send({ error: 'not_found' });
-      return reply.code(200).send(toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged));
+      return reply.code(200).send(toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged, found.favorite));
     };
 
     const owned = await ownedUpload();
@@ -314,6 +349,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
             steamAppId: body.steamAppId ?? null,
             visibility: body.visibility ?? 'feed',
             kind: image ? 'screenshot' : 'clip',
+            transcodeState: !image && config.transcode.enabled ? 'queued' : null,
             durationMs: info.durationMs,
             width: info.width,
             height: info.height,
@@ -346,6 +382,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     }
     // The clip is committed; tus file removal is best-effort (stale cleanup will catch leftovers).
     await removeTusFiles(config.dataDir, upload.id).catch((e) => req.log.error(e, 'upload cleanup failed'));
+    if (row.transcodeState === 'queued') app.transcoder.kick();
     const created = await getClip(db, row.id);
     return reply.code(201).send(toClip(row, user, config.baseUrl, 0, created?.tagged ?? []));
   });

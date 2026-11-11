@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { checkFolder, importing } from "../lib/imports.svelte";
+  import ImportDialog from "../components/ImportDialog.svelte";
+  import ImportPanel from "../components/ImportPanel.svelte";
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay } from "../lib/format";
   import { gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
@@ -106,6 +110,9 @@
         now = Date.now();
         local = [clip, ...local.filter((c) => c.id !== clip.id)];
       }),
+      on("clip-imported", (clip) => {
+        local = [clip, ...local.filter((c) => c.id !== clip.id)];
+      }),
       on("upload-done", load),
       on("thumbnail-changed", ({ id }) => (thumbVersion = { ...thumbVersion, [id]: Date.now() })),
       on("clips-cleaned", ({ deleted }) => {
@@ -137,11 +144,36 @@
     setTimeout(() => (saving = false), 1500);
   }
 
+  /** Shows a server clip as starred or not in the uploads list. */
+  function markUpload(id: string, favorite: boolean) {
+    if (uploads) uploads = uploads.map((u) => (u.id === id ? { ...u, favorite } : u));
+  }
+
+  /** A clip on this PC: starred locally (the cleanup keeps it) and, once uploaded, on the server too. */
   async function toggleFavorite(clip: ClipView) {
     const favorite = !clip.favorite;
-    // Shown at once; put back if the library refuses.
+    const serverId = clip.serverClipId && uploads?.some((u) => u.id === clip.serverClipId) ? clip.serverClipId : null;
+    // Shown at once; put back if the library or the server refuses.
     local = local.map((c) => (c.id === clip.id ? { ...c, favorite } : c));
-    if (!(await act(() => api.setClipFavorite(clip.id, favorite)))) void loadLocal();
+    if (serverId) markUpload(serverId, favorite);
+    const ok = await act(async () => {
+      await api.setClipFavorite(clip.id, favorite);
+      if (serverId) await api.setServerFavorite(serverId, favorite);
+    });
+    if (!ok) load();
+  }
+
+  /** An upload with no copy on this PC: starred on the server. */
+  async function toggleOnlineFavorite(upload: MyUpload) {
+    const favorite = !upload.favorite;
+    markUpload(upload.id, favorite);
+    if (!(await act(() => api.setServerFavorite(upload.id, favorite)))) markUpload(upload.id, !favorite);
+  }
+
+  /** Picks a folder (ShadowPlay, OBS, Medal…) and imports the clips in it. */
+  async function importClips() {
+    const folder = await openDialog({ directory: true, title: "Choose a folder with clips to import" });
+    if (typeof folder === "string") await checkFolder(folder);
   }
 
   async function copyLink(clip: ClipView) {
@@ -243,6 +275,14 @@
         <Icon name="sort" size={16} />
         {sort === "newestFirst" ? "Newest first" : "Oldest first"}
       </button>
+      <button
+        class="btn btn-ghost"
+        onclick={importClips}
+        disabled={importing.phase !== "idle"}
+        title="Add clips you already have (ShadowPlay, OBS, Medal…) from a folder"
+      >
+        <Icon name="folder" size={16} /> Import…
+      </button>
       <button class="btn" onclick={() => act(() => api.takeScreenshot())} title="Take a screenshot of the recorded screen">
         <Icon name="image" size={16} /> Screenshot
       </button>
@@ -275,6 +315,8 @@
       </p>
     {/if}
   </div>
+
+  <ImportPanel />
 
   {#if games.length > 0}
     <GameFilter {games} selected={game} onselect={(g) => (game = g)} />
@@ -328,6 +370,10 @@
           <li><span>2</span> Press the hotkey</li>
           <li><span>3</span> Upload and share the link</li>
         </ol>
+        <p class="import-hint">
+          Already have clips from ShadowPlay, OBS or Medal?
+          <button class="link" onclick={importClips} disabled={importing.phase !== "idle"}>Import them from a folder</button>
+        </p>
       </div>
     {/if}
   {:else}
@@ -368,6 +414,7 @@
                   onvisibility={() => toggleVisibility(upload)}
                   ondownload={() => download(upload)}
                   ondelete={() => (deletingOnline = upload)}
+                  onfavorite={upload.favorite === undefined ? undefined : () => toggleOnlineFavorite(upload)}
                 />
               {/if}
             {/each}
@@ -441,6 +488,8 @@
   </Modal>
 {/if}
 
+<ImportDialog />
+
 {#if removing}
   <Modal title="Remove clip?" onclose={() => (removing = null)}>
     <p>
@@ -499,6 +548,12 @@
   .places button.active {
     background: var(--surface-3);
     color: var(--text);
+  }
+
+  .import-hint {
+    margin-top: 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
   }
 
   .uploads-error {

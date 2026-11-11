@@ -5,6 +5,7 @@
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
   import { resumeAfterLogin, stopUploadsForLogout, watchUploads } from "./lib/uploads.svelte";
+  import { importing, watchImports } from "./lib/imports.svelte";
   import Avatar from "./components/Avatar.svelte";
   import Icon from "./components/Icon.svelte";
   import Toast from "./components/Toast.svelte";
@@ -72,6 +73,7 @@
       on("clip-saved", (clip) => toast(clip.kind === "screenshot" ? "Screenshot saved" : "Clip saved", "success")),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
       on("feed-new", ({ count }) => (feedNew = count)),
+      watchImports(),
       watchUploads({
         // The login expired mid-upload: log in again, then the upload carries on.
         unauthorized: () => {
@@ -218,8 +220,23 @@
       </button>
 
       <div class="nav">
-        <button class="item" class:active={inClips} aria-current={inClips ? "page" : undefined} onclick={() => go({ name: "library" })}>
-          <span class="item-icon"><Icon name="film" size={20} /></span>
+        <button
+          class="item"
+          class:active={inClips}
+          aria-current={inClips ? "page" : undefined}
+          onclick={() => go({ name: "library" })}
+          title={importing.phase === "running" && importing.progress
+            ? `Importing clips: ${Math.round(importing.progress.fraction * 100)}%`
+            : undefined}
+        >
+          <span class="item-icon">
+            <Icon name="film" size={20} />
+            {#if importing.phase === "running"}
+              <span class="import-pct" aria-hidden="true">
+                {importing.progress ? `${Math.round(importing.progress.fraction * 100)}%` : "…"}
+              </span>
+            {/if}
+          </span>
           Clips
         </button>
         <button
@@ -445,6 +462,22 @@
 
   .item-icon {
     position: relative;
+  }
+
+  /* A running import's progress on the Clips tab, so it's visible from every page. */
+  .import-pct {
+    position: absolute;
+    top: -0.3rem;
+    right: -0.9rem;
+    padding: 0 0.3rem;
+    border: 2px solid var(--bg, #0b0a10);
+    border-radius: 999px;
+    background: var(--surface-3, #2a2638);
+    color: var(--accent-text, #c9bcff);
+    font-size: 0.62rem;
+    font-weight: 750;
+    line-height: 0.95rem;
+    font-variant-numeric: tabular-nums;
   }
 
   .new-count {

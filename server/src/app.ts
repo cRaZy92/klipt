@@ -8,6 +8,8 @@ import { adminRoutes } from './admin/routes.js';
 import { mountTus } from './uploads/tus.js';
 import { clipRoutes } from './clips/routes.js';
 import { webRoutes } from './web/routes.js';
+import { join } from 'node:path';
+import { Transcoder } from './clips/transcoder.js';
 import { ServerErrorPage } from './web/pages/serverError.js';
 
 export interface AppDeps {
@@ -41,6 +43,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
   app.decorate('config', deps.config);
   app.decorate('db', deps.db);
+  const transcoder = new Transcoder({
+    db: deps.db,
+    clipsDir: join(deps.config.dataDir, 'clips'),
+    log: app.log,
+    ...deps.config.transcode,
+  });
+  app.decorate('transcoder', transcoder);
+  app.addHook('onReady', () => transcoder.start());
+  app.addHook('onClose', () => transcoder.stop());
 
   // Unexpected failures are logged and answered generically, never with err.message.
   // 4xx errors (bad JSON, body too large, rate limit, ...) go to Fastify's default handler unchanged.
@@ -71,5 +82,6 @@ declare module 'fastify' {
   interface FastifyInstance {
     config: Config;
     db: Db;
+    transcoder: Transcoder;
   }
 }

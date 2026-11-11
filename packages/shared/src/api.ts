@@ -60,6 +60,35 @@ export interface MyStorage {
   bytes: number;
 }
 
+/** A clip in the compression queue or recently compressed, for the admin page. */
+export interface TranscodeJob {
+  clipId: string;
+  title: string;
+  owner: string;
+  state: 'queued' | 'running' | 'done' | 'skipped' | 'failed';
+  durationMs: number;
+  /** The stored file's size (the compressed one once `done`). */
+  sizeBytes: number;
+  /** The upload's size, once compression ran. */
+  originalBytes: number | null;
+  error: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** 0..1 while running. */
+  progress: number | null;
+}
+
+/** `GET /api/admin/transcodes`: the compression queue. */
+export interface AdminTranscodes {
+  enabled: boolean;
+  counts: { queued: number; running: number; done: number; skipped: number; failed: number };
+  savedBytes: number;
+  /** The running job, then the queue in the order it'll be worked (newest upload first). */
+  active: TranscodeJob[];
+  /** Finished jobs, latest first. */
+  recent: TranscodeJob[];
+}
+
 export interface AdminStats {
   users: number;
   clips: number;
@@ -94,8 +123,15 @@ export interface Clip {
   views: number;
   /** Friends in the clip, by username (alphabetical). */
   tagged: string[];
+  /** You starred it (`PUT`/`DELETE /api/clips/:id/favorite`); list only those with `favorites=1`. */
+  favorite: boolean;
   /** A video clip, or a screenshot whose `videoUrl` is the PNG. */
   kind: 'clip' | 'screenshot';
+  /**
+   * The server is still compressing the clip: `queued` waits its turn, `running` is being
+   * compressed. It plays meanwhile (the uploaded file); null once it's done or for screenshots.
+   */
+  processing: 'queued' | 'running' | null;
   createdAt: string;
   owner: { username: string };
   shareUrl: string;

@@ -62,6 +62,26 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .url { word-break: break-all; font-size: .9rem; }
 .badge { display: inline-block; font-size: .72rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-left: 6px; }
 .badge.accent { color: var(--accent-2); border-color: var(--accent); }
+.badge.job-running, .badge.job-queued { color: var(--accent-2); border-color: var(--accent); }
+.badge.job-done { color: #3ccf8e; border-color: rgba(60,207,142,.4); }
+.badge.job-failed { color: var(--danger); border-color: var(--danger); }
+.section-note { font-size: .9rem; margin: -4px 0 12px; max-width: 70ch; }
+#transcodes h3 { font-size: 1rem; margin: 20px 0 0; color: var(--muted); font-weight: 600; }
+.job-progress { position: relative; height: 18px; margin-top: 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; max-width: 420px; }
+.job-progress div { position: absolute; inset: 0 auto 0 0; background: var(--accent); transition: width .6s ease; }
+.job-progress span { position: relative; display: block; text-align: center; font-size: .75rem; line-height: 16px; font-variant-numeric: tabular-nums; }
+.job-error summary { cursor: pointer; color: var(--danger); font-size: .85rem; margin-top: 6px; }
+.job-error pre { white-space: pre-wrap; word-break: break-word; font-size: .78rem; color: var(--muted); background: var(--panel-2); padding: 8px; border-radius: 8px; max-height: 200px; overflow: auto; }
+
+.btn.fav.on { color: #ffc94d; border-color: rgba(255,201,77,.5); }
+.fav-mark { position: absolute; right: 6px; top: 6px; background: rgba(0,0,0,.75); color: #ffc94d; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: .8rem; line-height: 1; }
+
+/* A clip the server is still compressing: a small pill on its thumbnail. */
+.proc { position: absolute; left: 6px; top: 6px; display: inline-flex; align-items: center; gap: 5px; background: rgba(0,0,0,.75); padding: 2px 7px 2px 5px; border-radius: 999px; font-size: .72rem; color: var(--accent-2); }
+.proc svg { width: 12px; height: 12px; flex: none; }
+.proc.running svg { animation: proc-spin 1s linear infinite; }
+@keyframes proc-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .proc.running svg { animation: none; } }
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 8px; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }

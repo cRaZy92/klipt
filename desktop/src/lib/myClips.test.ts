@@ -73,6 +73,20 @@ describe("favorites and search", () => {
     expect(visibleClips(items, "favorites", null, "newestFirst").map((i) => i.key)).toEqual(["l:star"]);
   });
 
+  it("Favorites includes online-only clips starred on the server", () => {
+    const items = mergeClips([local("plain", 2)], [upload("S1", 1, { favorite: true }), upload("S2", 1)]);
+    expect(visibleClips(items, "favorites", null, "newestFirst").map((i) => i.key)).toEqual(["s:S1"]);
+  });
+
+  it("an uploaded local clip starred on the server (e.g. on the website) shows as starred", () => {
+    const items = mergeClips(
+      [local("a", 2, { serverClipId: "S1", shareUrl: "https://k/c/S1" })],
+      [upload("S1", 2, { favorite: true })],
+    );
+    expect(items[0].kind === "local" && items[0].clip.favorite).toBe(true);
+    expect(visibleClips(items, "favorites", null, "newestFirst").map((i) => i.key)).toEqual(["l:a"]);
+  });
+
   it("matches every word in the title or game, ignoring case and accents", () => {
     const items = mergeClips(
       [local("a", 3, { title: "Clutch ACE", gameName: "Counter-Strike 2" }), local("b", 2, { title: "Útek z väzenia", gameName: null })],

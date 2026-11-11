@@ -11,7 +11,11 @@ export interface Config {
   secureCookies: boolean;
   /** Number of trusted reverse-proxy hops in front of the server (X-Forwarded-For). */
   trustProxyHops: number;
+  /** Server-side compression of uploaded clips (H.264, so they play everywhere). */
+  transcode: { enabled: boolean; crf: number; preset: string; threads: number };
 }
+
+const X264_PRESETS = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'] as const;
 
 const emptyToUndefined = (v: unknown) => (v === '' ? undefined : v);
 
@@ -24,6 +28,10 @@ const envSchema = z.object({
   TRUST_PROXY_HOPS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(10).default(1)),
   ADMIN_USERNAME: z.preprocess(emptyToUndefined, z.string().optional()),
   ADMIN_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
+  TRANSCODE: z.preprocess(emptyToUndefined, z.enum(['on', 'off']).default('on')),
+  TRANSCODE_CRF: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(51).default(23)),
+  TRANSCODE_PRESET: z.preprocess(emptyToUndefined, z.enum(X264_PRESETS).default('medium')),
+  TRANSCODE_THREADS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(64).default(2)),
 });
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
@@ -46,5 +54,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     adminPassword: e.ADMIN_PASSWORD,
     trustProxyHops: e.TRUST_PROXY_HOPS,
     secureCookies: baseUrl.startsWith('https://'),
+    transcode: { enabled: e.TRANSCODE === 'on', crf: e.TRANSCODE_CRF, preset: e.TRANSCODE_PRESET, threads: e.TRANSCODE_THREADS },
   };
 }

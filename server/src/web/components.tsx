@@ -63,12 +63,41 @@ export function viewsLabel(views: number): string {
   return views === 1 ? '1 view' : `${views} views`;
 }
 
+/**
+ * A small pill on a thumbnail while the server compresses the clip: a clock while it waits in the
+ * queue, a spinner while it's being compressed. The clip plays either way.
+ */
+export function ProcessingPill(props: { state: string | null }): JSX.Element {
+  if (props.state !== 'queued' && props.state !== 'running') return '';
+  const running = props.state === 'running';
+  return (
+    <span
+      class={`proc ${props.state}`}
+      title={running ? 'Compressing on the server to save space. It already plays.' : 'Waiting to be compressed on the server. It already plays.'}
+    >
+      {running ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 3a9 9 0 1 0 9 9" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+      )}
+      {running ? 'Processing' : 'Queued'}
+    </span>
+  );
+}
+
 export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
   const { clip, owner, views } = props.item;
   return (
     <a class="card" href={`/c/${clip.id}`}>
       <div class="thumb">
         <img src={`/media/${clip.id}.jpg`} alt="" loading="lazy" width="320" height="180" />
+        <ProcessingPill state={clip.transcodeState} />
+        {props.item.favorite ? <span class="fav-mark" title="In your favorites">★</span> : ''}
         <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>
       </div>
       <div class="card-body">
@@ -92,13 +121,14 @@ function href(base: string, params: Record<string, string | null | undefined>): 
 }
 
 /** A search box for the list at `basePath`; the game filter is kept. */
-export function SearchBox(props: { basePath: string; search?: string; game?: string; withMe?: boolean; kind?: KindFilter }): JSX.Element {
+export function SearchBox(props: { basePath: string; search?: string; game?: string; withMe?: boolean; kind?: KindFilter; favorites?: boolean }): JSX.Element {
   return (
     <form class="search" method="get" action={e(props.basePath)} role="search">
       <input type="search" name="q" value={e(props.search ?? '')} placeholder="Search by title, game or friend" aria-label="Search clips" maxlength="100" />
       {props.game ? <input type="hidden" name="game" value={e(props.game)} /> : ''}
       {props.withMe ? <input type="hidden" name="with" value="me" /> : ''}
       {props.kind ? <input type="hidden" name="kind" value={props.kind} /> : ''}
+      {props.favorites ? <input type="hidden" name="fav" value="1" /> : ''}
       <button type="submit" class="btn">Search</button>
     </form>
   );
@@ -133,22 +163,24 @@ export function GameFilter(props: { games: GameCount[]; active?: string; basePat
 
 export type KindFilter = 'clip' | 'screenshot' | undefined;
 
-/** The feed's base path for a set of filters ("I'm in it", clips or screenshots). */
-export function feedBase(withMe: boolean, kind: KindFilter): string {
-  return href('/', { with: withMe ? 'me' : undefined, kind });
+/** The feed's base path for a set of filters ("I'm in it", clips or screenshots, favorites). */
+export function feedBase(withMe: boolean, kind: KindFilter, favorites = false): string {
+  return href('/', { with: withMe ? 'me' : undefined, kind, fav: favorites ? '1' : undefined });
 }
 
-/** The feed's filters: "I'm in it" (clips you're tagged in), and clips or screenshots only. */
-export function FeedFilters(props: { withMe: boolean; kind: KindFilter }): JSX.Element {
+/** The feed's filters: "I'm in it" (clips you're tagged in), your favorites, and clips or screenshots only. */
+export function FeedFilters(props: { withMe: boolean; kind: KindFilter; favorites?: boolean }): JSX.Element {
+  const fav = !!props.favorites;
   const chip = (label: string, active: boolean, to: string, title?: string) => (
     <a class={`chip${active ? ' active' : ''}`} href={e(to)} title={title ?? ''}>
       {label}
     </a>
   );
-  const kindTo = (k: KindFilter) => feedBase(props.withMe, props.kind === k ? undefined : k);
+  const kindTo = (k: KindFilter) => feedBase(props.withMe, props.kind === k ? undefined : k, fav);
   return (
     <div class="chips">
-      {chip("I'm in it", props.withMe, feedBase(!props.withMe, props.kind), 'Clips your friends tagged you in')}
+      {chip("I'm in it", props.withMe, feedBase(!props.withMe, props.kind, fav), 'Clips your friends tagged you in')}
+      {chip('★ Favorites', fav, feedBase(props.withMe, props.kind, !fav), 'Clips you starred')}
       {chip('Clips', props.kind === 'clip', kindTo('clip'))}
       {chip('Screenshots', props.kind === 'screenshot', kindTo('screenshot'))}
     </div>

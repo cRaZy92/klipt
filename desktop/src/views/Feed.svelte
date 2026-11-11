@@ -8,6 +8,7 @@
   import ClipPlayer from "../components/ClipPlayer.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import Icon from "../components/Icon.svelte";
+  import ProcessingPill from "../components/ProcessingPill.svelte";
   import SearchInput from "../components/SearchInput.svelte";
 
   let {
@@ -27,6 +28,8 @@
   let withMe = $state(false);
   /** Only video clips or only screenshots. */
   let kind = $state<"clip" | "screenshot" | null>(null);
+  /** Only clips you starred. */
+  let favoritesOnly = $state(false);
   let cursor = $state<string | null>(null);
   let loading = $state(false);
   let loaded = $state(false);
@@ -59,12 +62,12 @@
     loading = true;
     if (!more) loadError = null;
     try {
-      const page = await api.feedClips(game, more ? cursor : null, search.trim() || null, withMe, kind);
+      const page = await api.feedClips(game, more ? cursor : null, search.trim() || null, withMe, kind, favoritesOnly);
       if (id !== request) return;
       clips = more ? [...clips, ...page.items] : page.items;
       cursor = page.nextCursor;
       // The unfiltered first page is the whole feed's newest end: you've now seen it.
-      if (!more && !game && !search.trim() && !withMe && !kind && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
+      if (!more && !game && !search.trim() && !withMe && !kind && !favoritesOnly && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
       now = Date.now();
       loaded = true;
     } catch (e) {
@@ -93,6 +96,21 @@
   function selectGame(g: string | null) {
     game = g;
     void load();
+  }
+
+  /** Stars or unstars a clip: shown at once, put back if the server refuses. */
+  async function toggleFavorite(clip: FeedClip) {
+    const favorite = !clip.favorite;
+    const set = (on: boolean) => (clips = clips.map((c) => (c.id === clip.id ? { ...c, favorite: on } : c)));
+    set(favorite);
+    try {
+      await api.setServerFavorite(clip.id, favorite);
+      // Unstarred while viewing favorites: it no longer belongs here.
+      if (favoritesOnly && !favorite) clips = clips.filter((c) => c.id !== clip.id);
+    } catch (e) {
+      set(!favorite);
+      toast(failed(e), "error");
+    }
   }
 
   async function copyLink(clip: FeedClip) {
@@ -143,6 +161,18 @@
     >
       I'm in it
     </button>
+    <button
+      class="with-me"
+      class:on={favoritesOnly}
+      aria-pressed={favoritesOnly}
+      title="Clips you starred"
+      onclick={() => {
+        favoritesOnly = !favoritesOnly;
+        void load();
+      }}
+    >
+      <Icon name={favoritesOnly ? "starFilled" : "star"} size={14} /> Favorites
+    </button>
     {#each [["clip", "Clips"], ["screenshot", "Screenshots"]] as const as [value, label] (value)}
       <button
         class="with-me"
@@ -188,6 +218,8 @@
       <div class="empty-icon"><Icon name="users" size={28} /></div>
       {#if search.trim()}
         <p>No clips match “{search.trim()}”.</p>
+      {:else if favoritesOnly}
+        <p>No favorites yet. Star a clip to keep it here.</p>
       {:else if withMe}
         <p>Nobody has tagged you in a clip yet.</p>
       {:else if game}
@@ -213,8 +245,21 @@
                       <span class="game-dot"></span>{clip.gameName}
                     </span>
                   {/if}
+                  <ProcessingPill state={clip.processing} />
                   <span class="dur">{clip.kind === "screenshot" ? "Screenshot" : formatDuration(clip.durationMs)}</span>
                 </button>
+                {#if clip.favorite !== undefined}
+                  <button
+                    class="star"
+                    class:on={clip.favorite}
+                    onclick={() => toggleFavorite(clip)}
+                    aria-pressed={clip.favorite}
+                    aria-label={clip.favorite ? "Remove from favorites" : "Add to favorites"}
+                    title={clip.favorite ? "In your favorites" : "Add to favorites"}
+                  >
+                    <Icon name={clip.favorite ? "starFilled" : "star"} size={16} />
+                  </button>
+                {/if}
                 <div class="body">
                   <Avatar name={clip.owner.username} size={32} />
                   <div class="text">
@@ -267,6 +312,9 @@
   }
 
   .with-me {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     padding: 0.42rem 0.9rem;
     border: 1px solid var(--border);
     border-radius: 999px;
@@ -280,6 +328,39 @@
 
   .with-me:hover {
     color: var(--text);
+  }
+
+  /* Favorite star: always shown when starred, on hover or focus otherwise (like My clips). */
+  .star {
+    position: absolute;
+    top: 0.45rem;
+    right: 0.45rem;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 50%;
+    background: rgba(12, 10, 20, 0.7);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity 0.15s,
+      color 0.15s;
+  }
+
+  .card:hover .star,
+  .star:focus-visible,
+  .star.on {
+    opacity: 1;
+  }
+
+  .star.on {
+    color: #ffc53d;
   }
 
   .with-me.on {
@@ -297,6 +378,7 @@
   }
 
   .card {
+    position: relative;
     overflow: hidden;
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -384,7 +466,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    max-width: calc(100% - 1.1rem);
+    max-width: calc(100% - 3.6rem);
     overflow: hidden;
     padding: 0.2rem 0.55rem;
     border: 1px solid rgba(255, 255, 255, 0.1);

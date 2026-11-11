@@ -148,6 +148,18 @@
         if (!confirm('Revoke this invite?')) return;
         await api('DELETE', '/api/admin/invites/' + encodeURIComponent(row.dataset.code));
         row.remove();
+      } else if (action === 'favorite') {
+        var on = btn.getAttribute('aria-pressed') !== 'true';
+        await api(on ? 'PUT' : 'DELETE', '/api/clips/' + clipRow.dataset.clipId + '/favorite');
+        btn.setAttribute('aria-pressed', String(on));
+        btn.classList.toggle('on', on);
+        btn.textContent = on ? '★ Favorite' : '☆ Favorite';
+        toast(on ? 'Added to favorites' : 'Removed from favorites');
+      } else if (action === 'retry-transcode') {
+        btn.disabled = true;
+        await api('POST', '/api/admin/transcodes/' + encodeURIComponent(clipRow.dataset.clipId) + '/retry');
+        await refreshTranscodes();
+        toast('Back in the queue');
       } else if (action === 'toggle-user') {
         var u = btn.closest('[data-user-id]');
         var disable = btn.dataset.disabled !== 'true';
@@ -159,6 +171,39 @@
       toast(friendly(e));
     }
   });
+
+  // Admin page: the compression queue refreshes itself, every few seconds while something is
+  // compressing and every half minute otherwise (to notice new uploads). Not while the tab is hidden.
+  async function refreshTranscodes() {
+    var section = document.getElementById('transcodes');
+    if (!section) return;
+    var res = await fetch('/admin/transcodes', { credentials: 'same-origin', cache: 'no-store' });
+    // Logged out meanwhile: a redirect to the login page, which must not land inside the admin page.
+    if (!res.ok || res.redirected) return;
+    var holder = document.createElement('div');
+    holder.innerHTML = await res.text();
+    var fresh = holder.querySelector('#transcodes');
+    if (!fresh) return;
+    // Keep any error details the admin opened.
+    section.querySelectorAll('details[open]').forEach(function (d) {
+      var row = d.closest('[data-clip-id]');
+      var again = row && fresh.querySelector('[data-clip-id="' + row.dataset.clipId + '"] details');
+      if (again) again.open = true;
+    });
+    section.replaceWith(fresh);
+  }
+  if (document.getElementById('transcodes')) {
+    (function poll() {
+      var section = document.getElementById('transcodes');
+      var wait = section && section.dataset.busy === 'true' ? 3000 : 30000;
+      setTimeout(async function () {
+        if (!document.hidden) {
+          try { await refreshTranscodes(); } catch (e) { /* offline for a moment: try again next round */ }
+        }
+        poll();
+      }, wait);
+    })();
+  }
 
   // Share page: the first play counts as a view (the server counts each friend once).
   document.querySelectorAll('video[data-view-url]').forEach(function (video) {

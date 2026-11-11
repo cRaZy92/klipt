@@ -3,6 +3,7 @@
   import { menu } from "../lib/a11y";
   import { formatDuration, hueOf, relativeDate, viewsLabel } from "../lib/format";
   import Icon from "./Icon.svelte";
+  import ProcessingPill from "./ProcessingPill.svelte";
   import "./clip-card.css";
 
   // One of your uploads that isn't on this PC: it plays from the server and can be downloaded.
@@ -18,6 +19,7 @@
     onvisibility,
     ondownload,
     ondelete,
+    onfavorite,
   }: {
     upload: MyUpload;
     now: number;
@@ -31,6 +33,8 @@
     onvisibility: () => void;
     ondownload: () => void;
     ondelete: () => void;
+    /** Stars it on the server; missing for servers without favorites. */
+    onfavorite?: () => void;
   } = $props();
 
   let menuOpen = $state(false);
@@ -62,6 +66,19 @@
     <span class="badge badge-online" title="Uploaded; not on this computer">
       <Icon name="cloud" size={13} /> Online only
     </span>
+    <ProcessingPill state={upload.processing} />
+    {#if onfavorite}
+      <button
+        class="star"
+        class:on={upload.favorite}
+        onclick={onfavorite}
+        aria-pressed={!!upload.favorite}
+        aria-label={upload.favorite ? "Remove from favorites" : "Add to favorites"}
+        title={upload.favorite ? "In your favorites" : "Add to favorites"}
+      >
+        <Icon name={upload.favorite ? "starFilled" : "star"} size={16} />
+      </button>
+    {/if}
     <span class="duration">{upload.kind === "screenshot" ? "Screenshot" : formatDuration(upload.durationMs)}</span>
     {#if downloading}
       <div class="overlay">

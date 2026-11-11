@@ -10,6 +10,16 @@ describe('loadConfig', () => {
     expect(c.maxUploadBytes).toBe(2048 * 1024 * 1024);
     expect(c.secureCookies).toBe(true);
     expect(c.trustProxyHops).toBe(1);
+    expect(c.transcode).toEqual({ enabled: true, crf: 23, preset: 'medium', threads: 2 });
+  });
+
+  it('reads the compression settings and refuses bad ones', () => {
+    const base = { BASE_URL: 'http://localhost', DATABASE_URL: 'postgres://x' };
+    const c = loadConfig({ ...base, TRANSCODE: 'off', TRANSCODE_CRF: '26', TRANSCODE_PRESET: 'fast', TRANSCODE_THREADS: '1' });
+    expect(c.transcode).toEqual({ enabled: false, crf: 26, preset: 'fast', threads: 1 });
+    expect(() => loadConfig({ ...base, TRANSCODE_THREADS: '0' })).toThrow(/TRANSCODE_THREADS/);
+    expect(() => loadConfig({ ...base, TRANSCODE_PRESET: 'turbo' })).toThrow(/TRANSCODE_PRESET/);
+    expect(() => loadConfig({ ...base, TRANSCODE: 'yes' })).toThrow(/TRANSCODE/);
   });
 
   it('uses insecure cookies for http BASE_URL and reads overrides', () => {

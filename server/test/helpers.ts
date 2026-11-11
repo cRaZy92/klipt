@@ -20,13 +20,15 @@ export interface TestApp {
 }
 
 export async function makeTestApp(
-  opts: { maxUploadMb?: number; logStream?: { write(line: string): void } } = {},
+  opts: { maxUploadMb?: number; logStream?: { write(line: string): void }; transcode?: boolean } = {},
 ): Promise<TestApp> {
   const dataDir = await mkdtemp(join(tmpdir(), 'klipt-test-'));
   const env: Record<string, string> = {
     BASE_URL: 'http://localhost',
     DATABASE_URL: 'pglite://memory',
     DATA_DIR: dataDir,
+    // Off unless a test is about compression: a background ffmpeg would change clips under other tests.
+    TRANSCODE: opts.transcode ? 'on' : 'off',
   };
   if (opts.maxUploadMb !== undefined) env.MAX_UPLOAD_MB = String(opts.maxUploadMb);
   const config = loadConfig(env);

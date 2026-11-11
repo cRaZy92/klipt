@@ -10,6 +10,7 @@ pub mod feedback;
 pub mod ffmpeg;
 pub mod games;
 pub mod hotkey;
+pub mod import;
 #[cfg(target_os = "linux")]
 mod autostart_linux;
 pub mod library;
@@ -123,6 +124,10 @@ pub fn run() {
             server_clips::delete_upload,
             server_clips::download_upload,
             server_clips::record_view,
+            server_clips::set_server_favorite,
+            import::check_import,
+            import::import_folder,
+            import::cancel_import,
             feed_watch::feed_new_count,
             feed_watch::mark_feed_seen,
             server_clips::clip_viewers,

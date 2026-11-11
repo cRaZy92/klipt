@@ -10,6 +10,8 @@ name = "klipt_desktop_lib"
 crate-type = ["rlib"]
 
 [dependencies]
+# Real paths without Windows' `\\?\` prefix, for imported files stored in the library.
+dunce = "1.0.5"
 base64 = "0.23.1"
 dirs = "7.0.0"
 gethostname = "1.1.0"

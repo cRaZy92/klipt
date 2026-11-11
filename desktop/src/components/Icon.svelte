@@ -41,6 +41,8 @@
     globe:
       "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3.5 9h17M3.5 15h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18",
     play: "",
+    clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
+    spinner: "M12 3a9 9 0 1 0 9 9",
     // The app icon's glyph (src-tauri/icons/source.svg scaled 1/32 about its centre): frame brackets
     // here, the play triangle in FILLS. Put it on an accent tile, sized ~5/6 of the tile, to match.
     logo: "M5.375 5.375H3.5v13.25h1.875M18.625 5.375H20.5v13.25h-1.875",

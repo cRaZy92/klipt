@@ -248,6 +248,66 @@ export interface FeedClip {
   /** A video clip or a screenshot; missing from older servers (a clip). For a screenshot
    * `videoUrl` is the picture. */
   kind?: "clip" | "screenshot";
+  /** You starred it (on the server, so it follows you everywhere). Missing from older servers. */
+  favorite?: boolean;
+  /** The server is still compressing it (it plays meanwhile): waiting its turn, or being
+   * compressed. Null when done; missing from older servers. */
+  processing?: "queued" | "running" | null;
+}
+
+/** How an import from a folder went (`import-finished`). */
+export interface ImportSummary {
+  imported: number;
+  /** Of `imported`, how many got an H.264 copy (the originals were H.265/AV1, MKV…). */
+  converted: number;
+  alreadyThere: number;
+  skipped: { file: string; reason: string }[];
+  cancelled: boolean;
+  elapsedSecs: number;
+}
+
+/** What importing a checked folder will do, for the confirmation. */
+export interface ImportPreview {
+  folder: string;
+  files: number;
+  /** Imported as they are: instant. */
+  inPlace: number;
+  /** A quick container change. */
+  remux: number;
+  /** Encoded again to H.264: the slow part. */
+  reencode: number;
+  alreadyThere: number;
+  unsupported: number;
+  reencodeVideoMs: number;
+  /** Roughly how much disk the H.264 copies take, in `copiesDir`. */
+  copyBytes: number;
+  copiesDir: string;
+  estimateSecs: number;
+  /** "NVIDIA GPU", "CPU"…; null when nothing needs encoding. */
+  encoder: string | null;
+  /** No encoder works: files that need one will be skipped. */
+  noEncoder: boolean;
+}
+
+/** `import-progress`: where a running import is. */
+export interface ImportProgress {
+  done: number;
+  total: number;
+  current: string | null;
+  action: "importing" | "remuxing" | "converting" | null;
+  /** 0..1 through the current file's copy. */
+  fileFraction: number | null;
+  /** Times real time the current conversion runs. */
+  speed: number | null;
+  encoder: string | null;
+  imported: number;
+  converted: number;
+  skipped: number;
+  alreadyThere: number;
+  elapsedSecs: number;
+  etaSecs: number;
+  /** 0..1 of the whole import, by time. */
+  fraction: number;
 }
 
 /** A friend who watched one of your uploads. */
@@ -326,7 +386,18 @@ export const api = {
     search: string | null = null,
     withMe = false,
     kind: "clip" | "screenshot" | null = null,
-  ) => invoke<FeedPage>("feed_clips", { game, cursor, search, withMe, kind }),
+    favorites = false,
+  ) => invoke<FeedPage>("feed_clips", { game, cursor, search, withMe, kind, favorites }),
+  /** Looks at every file under `folder` (`import-check-progress`) and says what importing it
+   * would do; null when stopped or an import is already running. */
+  checkImport: (folder: string) => invoke<ImportPreview | null>("check_import", { folder }),
+  /** Imports the folder `checkImport` just looked at, in the background (`import-*` events);
+   * false when an import is already running. */
+  importFolder: (folder: string) => invoke<boolean>("import_folder", { folder }),
+  /** Stops checking, or stops the import (the file being converted is dropped). */
+  cancelImport: () => invoke<void>("cancel_import"),
+  /** Stars or unstars a server clip (yours or a friend's); kept on the server. */
+  setServerFavorite: (id: string, favorite: boolean) => invoke<void>("set_server_favorite", { id, favorite }),
   feedGames: () => invoke<FeedGame[]>("feed_games"),
   /** Friends' clips new since you last opened the Feed. */
   feedNewCount: () => invoke<number>("feed_new_count"),
@@ -355,6 +426,11 @@ export const api = {
 
 export interface Events {
   "clip-saved": ClipView;
+  /** A clip imported from a folder (no "saved" toast for these). */
+  "clip-imported": ClipView;
+  "import-check-progress": { checked: number; total: number };
+  "import-progress": ImportProgress;
+  "import-finished": ImportSummary;
   "save-busy": null;
   "recorder-error": AppError;
   "hotkey-bound": { display: string; screenshotDisplay: string | null; screenshotError: string | null };

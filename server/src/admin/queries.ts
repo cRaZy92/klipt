@@ -1,5 +1,6 @@
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
-import type { AdminStats, AdminUser, Invite } from '@klipt/shared';
+import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import type { AdminStats, AdminTranscodes, AdminUser, Invite, TranscodeJob } from '@klipt/shared';
+import { transcodeCounts, type Transcoder } from '../clips/transcoder.js';
 import type { Db } from '../db/client.js';
 import { clips, invites, users } from '../db/schema.js';
 
@@ -58,4 +59,51 @@ export async function getAdminStats(db: Db): Promise<AdminStats> {
     .select({ n: sql<number>`count(*)::int`, bytes: sql<number>`coalesce(sum(${clips.sizeBytes}), 0)::float8` })
     .from(clips);
   return { users: u!.n, clips: c!.n, storageBytes: Number(c!.bytes) };
+}
+
+const ACTIVE_LIMIT = 50;
+const RECENT_LIMIT = 30;
+
+/** The compression queue for the admin page: what's running, what waits, what finished lately. */
+export async function getTranscodes(db: Db, transcoder: Transcoder): Promise<AdminTranscodes> {
+  const counts = await transcodeCounts(db);
+  const job = {
+    clipId: clips.id,
+    title: clips.title,
+    owner: users.username,
+    state: clips.transcodeState,
+    durationMs: clips.durationMs,
+    sizeBytes: clips.sizeBytes,
+    originalBytes: clips.originalBytes,
+    error: clips.transcodeError,
+    startedAt: clips.transcodeStartedAt,
+    finishedAt: clips.transcodeFinishedAt,
+  };
+  const [active, recent] = await Promise.all([
+    db
+      .select(job)
+      .from(clips)
+      .innerJoin(users, eq(users.id, clips.userId))
+      .where(inArray(clips.transcodeState, ['running', 'queued']))
+      // The running one first, then the order the worker takes them (newest first).
+      .orderBy(sql`${clips.transcodeState} = 'running' desc`, desc(clips.createdAt), desc(clips.id))
+      .limit(ACTIVE_LIMIT),
+    db
+      .select(job)
+      .from(clips)
+      .innerJoin(users, eq(users.id, clips.userId))
+      .where(inArray(clips.transcodeState, ['done', 'skipped', 'failed']))
+      .orderBy(sql`${clips.transcodeFinishedAt} desc nulls last`, desc(clips.id))
+      .limit(RECENT_LIMIT),
+  ]);
+  const current = transcoder.status();
+  const toJob = (r: (typeof active)[number]): TranscodeJob => ({
+    ...r,
+    state: r.state!,
+    startedAt: r.startedAt?.toISOString() ?? null,
+    finishedAt: r.finishedAt?.toISOString() ?? null,
+    progress: r.state === 'running' ? (current?.clipId === r.clipId ? current.progress : 0) : null,
+  });
+  const { savedBytes, ...stateCounts } = counts;
+  return { enabled: transcoder.enabled, counts: stateCounts, savedBytes, active: active.map(toJob), recent: recent.map(toJob) };
 }

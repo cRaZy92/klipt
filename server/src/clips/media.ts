@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { setPriority } from 'node:os';
 
 export type MediaErrorCode = 'not_a_video' | 'unsupported_codec' | 'corrupt_video';
 
@@ -176,4 +177,79 @@ export async function probeImage(path: string): Promise<ImageInfo | null> {
 /** Writes `input`'s picture as a PNG. */
 export async function toPng(input: string, output: string): Promise<void> {
   await run(ffmpegBin(), ['-v', 'error', '-y', '-i', input, '-frames:v', '1', '-f', 'image2', '-c:v', 'png', output]);
+}
+
+export interface TranscodeOptions {
+  /** x264 quality: lower is better and bigger (23 is x264's default). */
+  crf: number;
+  /** x264 speed/size trade-off, e.g. `medium`. */
+  preset: string;
+  /** CPU threads for decoding and encoding, so compression leaves the rest of the server's cores alone. */
+  threads: number;
+  /** The input's length, for progress. */
+  durationMs: number;
+  /** Called with 0..1 as ffmpeg works through the clip. */
+  onProgress?: (fraction: number) => void;
+  /** Hands over the ffmpeg process, so a caller can stop it. */
+  onSpawn?: (child: ChildProcess) => void;
+}
+
+/**
+ * Re-encodes a clip's video to H.264 (yuv420p, plays everywhere, including older iPhones) at a
+ * constant quality, copying the audio and keeping faststart. ffmpeg runs at a lower CPU priority so
+ * the website stays responsive. Rejects like `run`: a MediaError when ffmpeg refuses the input,
+ * a plain Error for anything else (including being killed).
+ */
+export function transcodeH264(input: string, output: string, opts: TranscodeOptions): Promise<void> {
+  const args = [
+    '-v', 'error', '-y', '-nostdin',
+    '-threads', String(opts.threads),
+    '-i', input,
+    '-map', '0:v:0', '-map', '0:a?',
+    '-c:v', 'libx264', '-preset', opts.preset, '-crf', String(opts.crf), '-threads', String(opts.threads),
+    '-filter_threads', '1',
+    '-pix_fmt', 'yuv420p', '-profile:v', 'high',
+    '-c:a', 'copy',
+    '-movflags', '+faststart',
+    '-progress', 'pipe:1', '-nostats',
+    '-f', 'mp4',
+    output,
+  ];
+  // Generous: a slow server may encode a long 1440p clip at a fraction of real time.
+  const timeoutMs = Math.max(RUN_TIMEOUT_MS, opts.durationMs * 20);
+  return new Promise((resolve, reject) => {
+    const child = spawn(ffmpegBin(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      if (child.pid) setPriority(child.pid, 10);
+    } catch {
+      // Not allowed to lower it here: run at normal priority.
+    }
+    opts.onSpawn?.(child);
+    let stderr = '';
+    let pending = '';
+    child.stderr.on('data', (d: Buffer) => {
+      stderr = (stderr + d.toString()).slice(-4000);
+    });
+    child.stdout.on('data', (d: Buffer) => {
+      pending += d.toString();
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        const m = /^out_time_us=(\d+)/.exec(line);
+        if (m && opts.durationMs > 0) opts.onProgress?.(Math.min(1, Number(m[1]) / 1000 / opts.durationMs));
+      }
+    });
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new Error(`ffmpeg failed: ${err.message}`, { cause: err }));
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) return resolve();
+      const detail = `ffmpeg failed: ${stderr.trim() || (signal ? `killed (${signal})` : `exit ${code}`)}`;
+      if (code !== null && !SERVER_FAULT.test(stderr)) reject(new MediaError('corrupt_video', detail));
+      else reject(new Error(detail));
+    });
+  });
 }

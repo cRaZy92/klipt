@@ -2,9 +2,9 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import type { AdminStats, AdminUser, Invite } from '@klipt/shared';
-import { invites, users } from '../db/schema.js';
-import { getAdminStats, listActiveInvites, listAdminUsers, toInvite } from './queries.js';
+import type { AdminStats, AdminTranscodes, AdminUser, Invite } from '@klipt/shared';
+import { clips, invites, users } from '../db/schema.js';
+import { getAdminStats, getTranscodes, listActiveInvites, listAdminUsers, toInvite } from './queries.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { revokeAllForUser } from '../auth/sessions.js';
 
@@ -57,4 +57,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/api/admin/stats', opts, async (): Promise<AdminStats> => getAdminStats(db));
+
+  app.get('/api/admin/transcodes', opts, async (): Promise<AdminTranscodes> => getTranscodes(db, app.transcoder));
+
+  // A failed compression goes back in the queue.
+  app.post('/api/admin/transcodes/:id/retry', opts, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const res = await db
+      .update(clips)
+      .set({ transcodeState: 'queued', transcodeError: null, transcodeStartedAt: null, transcodeFinishedAt: null })
+      .where(and(eq(clips.id, id), eq(clips.transcodeState, 'failed')))
+      .returning({ id: clips.id });
+    if (res.length === 0) return reply.code(404).send({ error: 'not_found' });
+    app.transcoder.kick();
+    return reply.code(204).send();
+  });
 }

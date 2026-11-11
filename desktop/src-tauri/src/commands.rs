@@ -1176,8 +1176,12 @@ pub async fn feed_clips(
     search: Option<String>,
     with_me: Option<bool>,
     kind: Option<String>,
+    favorites: Option<bool>,
 ) -> Result<serde_json::Value> {
     let mut query = vec![("scope", "feed".to_string())];
+    if favorites == Some(true) {
+        query.push(("favorites", "1".to_string()));
+    }
     query.extend(kind.filter(|k| k == "clip" || k == "screenshot").map(|k| ("kind", k)));
     if with_me == Some(true) {
         query.push(("with", "me".to_string()));

@@ -4,12 +4,12 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { getAdminStats, isInviteActive, listActiveInvites, listAdminUsers } from '../admin/queries.js';
+import { getAdminStats, getTranscodes, isInviteActive, listActiveInvites, listAdminUsers } from '../admin/queries.js';
 import { toClip } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
 import { users } from '../db/schema.js';
 import { getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
-import { AdminPage } from './pages/admin.js';
+import { AdminPage, TranscodeSection } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
 import { InvitePage } from './pages/invite.js';
 import { LoginPage } from './pages/login.js';
@@ -69,9 +69,10 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   };
 
   const listQuery = (req: FastifyRequest) => {
-    const q = req.query as { game?: unknown; q?: unknown; with?: unknown; kind?: unknown; cursor?: unknown };
+    const q = req.query as { game?: unknown; q?: unknown; with?: unknown; kind?: unknown; fav?: unknown; cursor?: unknown };
     return {
       withMe: q.with === 'me',
+      favorites: q.fav === '1',
       kind: q.kind === 'clip' || q.kind === 'screenshot' ? (q.kind as 'clip' | 'screenshot') : undefined,
       game: typeof q.game === 'string' && q.game ? q.game.slice(0, 100) : undefined,
       search: typeof q.q === 'string' && q.q.trim() ? q.q.trim().slice(0, 100) : undefined,
@@ -82,13 +83,15 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   /** Shared list loading; an invalid cursor falls back to the first page. */
   async function load(req: FastifyRequest, scope: Scope, username?: string) {
     const { game, search, withMe, kind, cursor } = listQuery(req);
+    // Favorites is a feed filter only.
+    const favorites = scope === 'feed' && listQuery(req).favorites;
     const user = req.user!;
-    const run = (c?: string) => listClips(db, user, { scope, username, game, search, withMe, kind, cursor: c });
+    const run = (c?: string) => listClips(db, user, { scope, username, game, search, withMe, kind, favorites, cursor: c });
     const [page, games] = await Promise.all([
       run(cursor).catch((err) => (err instanceof InvalidCursorError ? run() : Promise.reject(err))),
       listGames(db, user, scope, username),
     ]);
-    return { ...page, games, game, search, withMe, kind };
+    return { ...page, games, game, search, withMe, kind, favorites };
   }
 
   app.get('/login', async (req, reply) => {
@@ -124,10 +127,10 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   // Public: the id is the secret (link-only clips are shareable too).
   app.get('/c/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const found = /^[A-Za-z0-9_-]{12}$/.test(id) ? await getClip(db, id) : null;
+    const found = /^[A-Za-z0-9_-]{12}$/.test(id) ? await getClip(db, id, req.user?.id) : null;
     if (!found) return html(reply, NotFoundPage({ user: req.user, message: "This clip doesn't exist or was deleted." }) as string, 404);
     const canDelete = !!req.user && (req.user.id === found.clip.userId || req.user.isAdmin);
-    const clip = toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged);
+    const clip = toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged, found.favorite);
     const viewers = req.user?.id === found.clip.userId ? (await listViewers(db, clip.id)).map((v) => v.username) : undefined;
     return html(reply, SharePage({ user: req.user, clip, canDelete, viewers }) as string);
   });
@@ -143,11 +146,23 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   app.get('/admin', async (req, reply) => {
     if (!guard(req, reply)) return reply;
     if (!req.user!.isAdmin) return notFound(req, reply);
-    const [stats, inviteList, userList] = await Promise.all([getAdminStats(db), listActiveInvites(db, config.baseUrl), listAdminUsers(db)]);
+    const [stats, inviteList, userList, transcodes] = await Promise.all([
+      getAdminStats(db),
+      listActiveInvites(db, config.baseUrl),
+      listAdminUsers(db),
+      getTranscodes(db, app.transcoder),
+    ]);
     return html(
       reply,
-      AdminPage({ user: req.user!, stats, invites: inviteList, users: userList }) as string,
+      AdminPage({ user: req.user!, stats, invites: inviteList, users: userList, transcodes }) as string,
     );
+  });
+
+  // Just the compression section, for the admin page's live refresh.
+  app.get('/admin/transcodes', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    if (!req.user!.isAdmin) return notFound(req, reply);
+    return html(reply, TranscodeSection({ data: await getTranscodes(db, app.transcoder) }) as string);
   });
 
   app.setNotFoundHandler((req, reply) => {

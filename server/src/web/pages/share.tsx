@@ -89,6 +89,13 @@ export function SharePage(props: {
         )}
         <div class="actions" data-clip-id={e(clip.id)}>
           <button type="button" class="btn" data-action="copy" data-url={e(clip.shareUrl)}>Copy link</button>
+          {props.user ? (
+            <button type="button" class={`btn fav${clip.favorite ? ' on' : ''}`} data-action="favorite" aria-pressed={String(clip.favorite)}>
+              {clip.favorite ? '★ Favorite' : '☆ Favorite'}
+            </button>
+          ) : (
+            ''
+          )}
           {props.viewers ? (
             <button type="button" class="btn" data-action="tag" data-tagged={e(clip.tagged.join(', '))}>Tag friends</button>
           ) : (

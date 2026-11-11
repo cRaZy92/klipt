@@ -50,6 +50,11 @@ const MIGRATIONS: &[&str] = &["
     ALTER TABLE clips ADD COLUMN master_volume REAL NOT NULL DEFAULT 1;
 ", "
     ALTER TABLE clips ADD COLUMN kind TEXT NOT NULL DEFAULT 'clip';
+", "
+    -- Imported from a folder: the original file (the clip's own path when imported in place,
+    -- else the file its H.264 copy was made from). NULL for clips Klipt recorded.
+    ALTER TABLE clips ADD COLUMN source_path TEXT NULL;
+    CREATE INDEX clips_source_path ON clips (source_path);
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
@@ -203,14 +208,31 @@ impl Library {
     }
 
     /// Clips the automatic cleanup may delete: saved before `before` (Unix ms), not starred, not
-    /// uploaded and with no upload in progress or paused. Oldest first.
+    /// uploaded, with no upload in progress or paused, and recorded by Klipt (imported clips are
+    /// the user's own files, or copies of them). Oldest first.
     pub fn cleanup_candidates(&self, before: i64) -> Result<Vec<Clip>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {COLUMNS} FROM clips WHERE created_at < ?1 AND favorite = 0 AND server_clip_id IS NULL
-             AND upload_id IS NULL ORDER BY created_at ASC"
+             AND upload_id IS NULL AND source_path IS NULL ORDER BY created_at ASC"
         ))?;
         let clips = stmt.query_map([before], row_to_clip)?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(clips)
+    }
+
+    /// Whether `file` is already in the library: as a clip's file, or as the original an imported
+    /// copy was made from.
+    pub fn contains_file(&self, file: &Path) -> Result<bool> {
+        let file = file.to_string_lossy();
+        let found: Option<i64> = self
+            .conn
+            .query_row("SELECT 1 FROM clips WHERE path = ?1 OR source_path = ?1 LIMIT 1", [file.as_ref()], |r| r.get(0))
+            .optional()?;
+        Ok(found.is_some())
+    }
+
+    /// Marks clip `id` as imported from `source` (see the `source_path` column).
+    pub fn set_source(&self, id: &str, source: &Path) -> Result<()> {
+        self.update(id, "UPDATE clips SET source_path = ?2 WHERE id = ?1", params![id, source.to_string_lossy()])
     }
 
     /// Where in the video the clip's thumbnail is taken (ms from the file's start); `None` is
@@ -576,8 +598,22 @@ mod tests {
         f.lib.mark_uploaded(&up.id, "srv", "https://k/c/srv", "feed").unwrap();
         let paused = f.add("paused.mp4", 100, None);
         f.lib.set_upload_progress(&paused.id, Some(("tus-1", 10))).unwrap();
+        let imported = f.add("imported.mp4", 100, None);
+        f.lib.set_source(&imported.id, &imported.path).unwrap();
         let ids: Vec<String> = f.lib.cleanup_candidates(500).unwrap().into_iter().map(|c| c.id).collect();
         assert_eq!(ids, vec![older.id, old.id]);
+    }
+
+    #[test]
+    fn contains_file_knows_clip_files_and_import_sources() {
+        let f = Fixture::new();
+        let in_place = f.add("a.mp4", 1, None);
+        let copy = f.add("copy.mp4", 2, None);
+        let original = f.dir.path().join("original.mkv");
+        f.lib.set_source(&copy.id, &original).unwrap();
+        assert!(f.lib.contains_file(&in_place.path).unwrap());
+        assert!(f.lib.contains_file(&original).unwrap());
+        assert!(!f.lib.contains_file(&f.dir.path().join("other.mp4")).unwrap());
     }
 
     #[test]

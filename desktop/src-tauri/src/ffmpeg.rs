@@ -97,6 +97,173 @@ pub fn probe(tools: &Tools, input: &Path) -> Result<Probe> {
     })
 }
 
+/// What an import needs to know about a file: whether it's a picture or a video, and its codecs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MediaInfo {
+    /// ffprobe's container name, e.g. `mov,mp4,m4a,3gp,3g2,mj2`, `matroska,webm`, `png_pipe`.
+    pub format_name: String,
+    pub video_codec: Option<String>,
+    pub pix_fmt: Option<String>,
+    /// Every audio track's codec, in order.
+    pub audio_codecs: Vec<String>,
+    pub duration_ms: u64,
+    pub width: u32,
+    pub height: u32,
+    /// Frames per second (0 when unknown).
+    pub fps: f64,
+}
+
+impl MediaInfo {
+    /// A still picture: ffmpeg reads those with `image2` or a `<codec>_pipe` demuxer.
+    pub fn is_image(&self) -> bool {
+        self.format_name == "image2" || self.format_name.ends_with("_pipe")
+    }
+}
+
+/// Probes `input` for importing. Fails when ffprobe can't read it (not a media file).
+pub fn inspect(tools: &Tools, input: &Path) -> Result<MediaInfo> {
+    #[derive(Deserialize)]
+    struct Output {
+        #[serde(default)]
+        streams: Vec<Stream>,
+        format: Option<Format>,
+    }
+    #[derive(Deserialize)]
+    struct Stream {
+        codec_type: Option<String>,
+        codec_name: Option<String>,
+        pix_fmt: Option<String>,
+        width: Option<u32>,
+        height: Option<u32>,
+        avg_frame_rate: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct Format {
+        format_name: Option<String>,
+        duration: Option<String>,
+    }
+    let mut args = os_args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"]);
+    args.push(input.into());
+    let output = run("ffprobe", &tools.ffprobe, &args)?;
+    let parsed: Output = serde_json::from_slice(&output.stdout)
+        .map_err(|e| AppError::ToolFailed { tool: "ffprobe", detail: format!("unexpected output: {e}") })?;
+    let video = parsed.streams.iter().find(|s| s.codec_type.as_deref() == Some("video"));
+    let format = parsed.format.as_ref();
+    let duration_ms = format
+        .and_then(|f| f.duration.as_deref())
+        .and_then(|d| d.parse::<f64>().ok())
+        .filter(|d| d.is_finite() && *d >= 0.0)
+        .map_or(0, |d| (d * 1000.0).round() as u64);
+    Ok(MediaInfo {
+        format_name: format.and_then(|f| f.format_name.clone()).unwrap_or_default(),
+        video_codec: video.and_then(|v| v.codec_name.clone()),
+        pix_fmt: video.and_then(|v| v.pix_fmt.clone()),
+        audio_codecs: parsed
+            .streams
+            .iter()
+            .filter(|s| s.codec_type.as_deref() == Some("audio"))
+            .map(|s| s.codec_name.clone().unwrap_or_default())
+            .collect(),
+        duration_ms,
+        width: video.and_then(|v| v.width).unwrap_or(0),
+        height: video.and_then(|v| v.height).unwrap_or(0),
+        fps: video.and_then(|v| v.avg_frame_rate.as_deref()).map_or(0.0, parse_rate),
+    })
+}
+
+/// `60/1`, `30000/1001` → frames per second; 0 for `0/0` or junk.
+pub fn parse_rate(rate: &str) -> f64 {
+    let (n, d) = rate.split_once('/').unwrap_or((rate, "1"));
+    match (n.trim().parse::<f64>(), d.trim().parse::<f64>()) {
+        (Ok(n), Ok(d)) if d > 0.0 && n.is_finite() && n > 0.0 => n / d,
+        _ => 0.0,
+    }
+}
+
+/// Like `write_mp4`, but reports 0..=1 through `progress` as ffmpeg works through
+/// `duration_ms` of input, and stops (with an error, leaving nothing behind) once `stop` is set.
+pub fn write_mp4_progress(
+    tools: &Tools,
+    args: &[String],
+    out: &Path,
+    duration_ms: u64,
+    stop: &std::sync::atomic::AtomicBool,
+    mut progress: impl FnMut(f64),
+) -> Result<()> {
+    use std::io::{BufRead, BufReader, Read};
+    use std::sync::atomic::Ordering;
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let temp = out.with_extension("tmp.mp4");
+    let mut command = Command::new(&tools.ffmpeg);
+    command.args(args).args(["-progress", "pipe:1", "-nostats"]).arg(&temp);
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| AppError::ToolFailed { tool: "ffmpeg", detail: format!("can't start {}: {e}", tools.ffmpeg.display()) })?;
+    // stderr on its own thread, so a chatty ffmpeg can't block on a full pipe.
+    let mut stderr = child.stderr.take().expect("piped");
+    let stderr_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
+    let mut stopped = false;
+    for line in BufReader::new(child.stdout.take().expect("piped")).lines().map_while(std::result::Result::ok) {
+        if stop.load(Ordering::SeqCst) {
+            stopped = true;
+            let _ = child.kill();
+            break;
+        }
+        if let Some(us) = line.strip_prefix("out_time_us=").and_then(|v| v.trim().parse::<u64>().ok()) {
+            if duration_ms > 0 {
+                progress((us as f64 / 1000.0 / duration_ms as f64).min(1.0));
+            }
+        }
+    }
+    let status = child.wait()?;
+    let stderr = stderr_reader.join().unwrap_or_default();
+    let written = fs::metadata(&temp).map(|m| m.len() > 0).unwrap_or(false);
+    if stopped || stop.load(Ordering::SeqCst) {
+        let _ = fs::remove_file(&temp);
+        return Err(AppError::ToolFailed { tool: "ffmpeg", detail: "stopped".into() });
+    }
+    if !status.success() || !written {
+        let _ = fs::remove_file(&temp);
+        let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
+        return Err(AppError::ToolFailed {
+            tool: "ffmpeg",
+            detail: format!("exited with {status}: {}", tail.into_iter().rev().collect::<Vec<_>>().join(" | ")),
+        });
+    }
+    fs::rename(&temp, out)?;
+    progress(1.0);
+    Ok(())
+}
+
+/// Whether ffmpeg can encode with `encoder_args` here (e.g. an NVIDIA encoder without an NVIDIA
+/// GPU fails): a fraction of a second of test picture, thrown away.
+pub fn can_encode(tools: &Tools, encoder_args: &[&str]) -> bool {
+    let mut args = os_args(["-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-t", "0.3"]);
+    args.extend(os_args(encoder_args.iter().copied()));
+    args.extend(os_args(["-pix_fmt", "yuv420p", "-f", "null", "-"]));
+    run("ffmpeg", &tools.ffmpeg, &args).is_ok()
+}
+
+/// Runs ffmpeg with `args` (everything but the output path) writing `out` atomically: a failed
+/// run leaves nothing behind. Used for import conversions.
+pub fn write_mp4(tools: &Tools, args: &[String], out: &Path) -> Result<()> {
+    let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+    write_via_temp(tools, args, out, "tmp.mp4", "ffmpeg wrote nothing")
+}
+
 /// Writes a JPEG frame from `at_ms` into `out` (480 px wide), replacing it atomically.
 pub fn thumbnail(tools: &Tools, input: &Path, out: &Path, at_ms: u64) -> Result<()> {
     let mut args = os_args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-ss"]);

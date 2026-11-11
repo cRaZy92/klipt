@@ -22,7 +22,9 @@ export function mergeClips(local: ClipView[], uploads: MyUpload[]): MyClip[] {
     const upload = clip.serverClipId ? online.get(clip.serverClipId) : undefined;
     if (upload && clip.fileMissing) continue; // shown as the online clip below
     if (upload) online.delete(upload.id);
-    items.push({ kind: "local", key: `l:${clip.id}`, clip, at: clip.createdAt, game: clip.gameName, steamAppId: clip.steamAppId });
+    // Starred here or on the server (e.g. on the website): either counts.
+    const shown = upload?.favorite && !clip.favorite ? { ...clip, favorite: true } : clip;
+    items.push({ kind: "local", key: `l:${clip.id}`, clip: shown, at: clip.createdAt, game: clip.gameName, steamAppId: clip.steamAppId });
   }
   for (const upload of online.values()) {
     items.push({
@@ -52,7 +54,7 @@ export function mediaKindOf(item: MyClip): "clip" | "screenshot" {
 export function matchesPlace(item: MyClip, place: Place): boolean {
   if (place === "local") return item.kind === "local";
   if (place === "uploaded") return isUploaded(item);
-  if (place === "favorites") return item.kind === "local" && item.clip.favorite;
+  if (place === "favorites") return item.kind === "local" ? item.clip.favorite : !!item.upload.favorite;
   return true;
 }
 

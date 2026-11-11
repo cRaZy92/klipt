@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, ilike, inArray, isNull, lt, or, sql, type SQ
 import type { GameCount, MyStorage } from '@klipt/shared';
 import type { AuthUser } from '../auth/sessions.js';
 import type { Db } from '../db/client.js';
-import { clipTags, clipViews, clips, users } from '../db/schema.js';
+import { clipFavorites, clipTags, clipViews, clips, users } from '../db/schema.js';
 
 export type ClipRow = typeof clips.$inferSelect;
 export type Scope = 'feed' | 'mine' | 'user';
@@ -13,10 +13,18 @@ export interface ClipWithOwner {
   views: number;
   /** Friends in the clip, by name. */
   tagged: string[];
+  /** Starred by the viewer. */
+  favorite: boolean;
 }
 
 /** The usernames tagged in a clip, alphabetically. */
 const taggedExpr = sql<string[]>`coalesce((select array_agg(tu.username order by tu.username_key) from ${clipTags} ct join ${users} tu on tu.id = ct.user_id where ct.clip_id = ${clips.id}), '{}')`;
+
+/** Whether `userId` starred the clip (false for a logged-out viewer). */
+function favoriteExpr(userId: string | null | undefined): SQL<boolean> {
+  if (!userId) return sql<boolean>`false`;
+  return sql<boolean>`exists (select 1 from ${clipFavorites} cf where cf.clip_id = ${clips.id} and cf.user_id = ${userId})`;
+}
 
 /** Clips `username` is tagged in. */
 function taggedIn(usernameKey: string): SQL {
@@ -79,10 +87,21 @@ export function searchCondition(text: string | undefined): SQL | undefined {
 export async function listClips(
   db: Db,
   viewer: AuthUser,
-  q: { scope: Scope; username?: string; game?: string; search?: string; withMe?: boolean; kind?: 'clip' | 'screenshot'; cursor?: string; limit?: number },
+  q: {
+    scope: Scope;
+    username?: string;
+    game?: string;
+    search?: string;
+    withMe?: boolean;
+    kind?: 'clip' | 'screenshot';
+    /** Only clips the viewer starred, wherever they are (link-only ones included: starring needed the link). */
+    favorites?: boolean;
+    cursor?: string;
+    limit?: number;
+  },
 ): Promise<{ items: ClipWithOwner[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(Math.trunc(q.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
-  const conds: (SQL | undefined)[] = [scopeCondition(viewer, q.scope, q.username)];
+  const conds: (SQL | undefined)[] = [q.favorites ? favoriteExpr(viewer.id) : scopeCondition(viewer, q.scope, q.username)];
   if (q.game) conds.push(eq(clips.gameName, q.game));
   conds.push(searchCondition(q.search));
   if (q.withMe) conds.push(taggedIn(viewer.username.toLowerCase()));
@@ -92,13 +111,13 @@ export async function listClips(
     conds.push(or(lt(clips.createdAt, c.createdAt), and(eq(clips.createdAt, c.createdAt), lt(clips.id, c.id))));
   }
   const rows = await db
-    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr, tagged: taggedExpr })
+    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr, tagged: taggedExpr, favorite: favoriteExpr(viewer.id) })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(and(...conds))
     .orderBy(desc(clips.createdAt), desc(clips.id))
     .limit(limit + 1);
-  const items = rows.slice(0, limit).map((r) => ({ ...r, views: Number(r.views), tagged: r.tagged ?? [] }));
+  const items = rows.slice(0, limit).map((r) => ({ ...r, views: Number(r.views), tagged: r.tagged ?? [], favorite: !!r.favorite }));
   const last = items[items.length - 1];
   const nextCursor = rows.length > limit && last ? encodeCursor(last.clip.createdAt, last.clip.id) : null;
   return { items, nextCursor };
@@ -220,11 +239,21 @@ export async function listUsernames(db: Db): Promise<{ username: string }[]> {
   return db.select({ username: users.username }).from(users).where(isNull(users.disabledAt)).orderBy(asc(users.usernameKey));
 }
 
-export async function getClip(db: Db, id: string): Promise<ClipWithOwner | null> {
+/** A clip; `favorite` says whether `viewerId` starred it. */
+export async function getClip(db: Db, id: string, viewerId?: string | null): Promise<ClipWithOwner | null> {
   const [row] = await db
-    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr, tagged: taggedExpr })
+    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr, tagged: taggedExpr, favorite: favoriteExpr(viewerId) })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(eq(clips.id, id));
-  return row ? { ...row, views: Number(row.views), tagged: row.tagged ?? [] } : null;
+  return row ? { ...row, views: Number(row.views), tagged: row.tagged ?? [], favorite: !!row.favorite } : null;
+}
+
+/** Stars or unstars `clipId` for `userId`. False when the clip doesn't exist. */
+export async function setFavorite(db: Db, clipId: string, userId: string, favorite: boolean): Promise<boolean> {
+  const [clip] = await db.select({ id: clips.id }).from(clips).where(eq(clips.id, clipId));
+  if (!clip) return false;
+  if (favorite) await db.insert(clipFavorites).values({ clipId, userId }).onConflictDoNothing();
+  else await db.delete(clipFavorites).where(and(eq(clipFavorites.clipId, clipId), eq(clipFavorites.userId, userId)));
+  return true;
 }

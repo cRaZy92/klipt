@@ -119,6 +119,17 @@ pub async fn delete_upload(app: AppHandle, id: String) -> Result<()> {
     Ok(())
 }
 
+/// Stars or unstars server clip `id` for you (any clip: yours or a friend's). Favorites live on
+/// the server, so they follow you to other PCs and the website.
+#[tauri::command]
+pub async fn set_server_favorite(app: AppHandle, id: String, favorite: bool) -> Result<()> {
+    let id = checked_id(&id)?;
+    let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
+    let path = format!("/api/clips/{id}/favorite");
+    let done = if favorite { client.put_empty(&saved.token, &path).await } else { client.delete(&saved.token, &path).await };
+    done.map_err(|e| failed(&data_dir, &saved, e))
+}
+
 /// Counts a play of server clip `id` (the server counts each friend once and never the owner).
 /// Best effort: a failure is only logged, the clip plays anyway.
 #[tauri::command]

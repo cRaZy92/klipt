@@ -47,8 +47,20 @@ pub fn on_supervisor_event(app: &AppHandle, event: &SupervisorEvent) {
             }
         }
         SupervisorEvent::SaveBusy if notification => notify(app, BUSY_TEXT, None),
+        // A press that saved nothing. The window is usually hidden in game, so the in-app toast
+        // goes unseen; say so even when "Clip saved" notifications are off.
+        SupervisorEvent::Error { code, message } if is_failed_save(code) => {
+            notify(app, NOT_SAVED_TEXT, Some(message));
+        }
         _ => {}
     }
+}
+
+pub const NOT_SAVED_TEXT: &str = "Clip not saved";
+
+/// Errors that answer a save request (hotkey or tray) with "nothing was saved".
+pub fn is_failed_save(code: &str) -> bool {
+    matches!(code, "recording_paused" | "not_recording" | "save_failed")
 }
 
 #[cfg(test)]
@@ -59,5 +71,15 @@ mod tests {
     fn saved_text_names_the_game_or_says_unknown() {
         assert_eq!(saved_text(Some("Active Matter")), "Clip saved — Active Matter");
         assert_eq!(saved_text(None), "Clip saved — Unknown game");
+    }
+
+    #[test]
+    fn failed_saves_are_told_apart_from_other_recorder_errors() {
+        for code in ["recording_paused", "not_recording", "save_failed"] {
+            assert!(is_failed_save(code), "{code}");
+        }
+        for code in ["recording_stopped", "recorder_crashed", "recorder_missing"] {
+            assert!(!is_failed_save(code), "{code}");
+        }
     }
 }

@@ -128,6 +128,9 @@ pub struct Supervisor {
     next_poll: Option<Duration>,
     /// Paused by the user: nothing starts until resumed.
     paused: bool,
+    /// The user was told the recorder program is missing. In game mode every game start tries
+    /// again, and the warning shouldn't repeat each time; new settings or a resume reset it.
+    missing_reported: bool,
     /// Where backend events are forwarded to (None in tests that feed events by hand).
     inputs: Option<Sender<Input>>,
 }
@@ -161,6 +164,7 @@ impl Supervisor {
             pending_save: None,
             next_poll: None,
             paused: false,
+            missing_reported: false,
             inputs: None,
         }
     }
@@ -202,6 +206,7 @@ impl Supervisor {
                 self.mode = mode;
                 self.state = State::Idle;
                 self.restarts = 0;
+                self.missing_reported = false;
                 self.begin();
             }
             Input::Shutdown => {
@@ -233,6 +238,7 @@ impl Supervisor {
                     self.paused = false;
                     self.state = State::Idle;
                     self.restarts = 0;
+                    self.missing_reported = false;
                     self.begin();
                 }
             }
@@ -279,14 +285,18 @@ impl Supervisor {
             Ok(()) => self.state = State::Running { since: self.now() },
             Err(e) => {
                 eprintln!("klipt: can't start recording: {e}");
-                // Tell the user why (e.g. "install GPU Screen Recorder").
-                self.emit(SupervisorEvent::Error { code: e.code().into(), message: e.user_message() });
                 if matches!(e, AppError::RecorderMissing(_)) {
-                    // Retrying can't bring back a missing program: that error is the final word.
+                    // Retrying can't bring back a missing program: that error is the final word,
+                    // said once (e.g. "install GPU Screen Recorder").
+                    if !self.missing_reported {
+                        self.missing_reported = true;
+                        self.emit(SupervisorEvent::Error { code: e.code().into(), message: e.user_message() });
+                    }
                     self.fail_pending_save();
                     self.state = State::Failed;
                 } else {
-                    self.on_failure();
+                    // Tell the user why, together with what happens next.
+                    self.on_failure(Some((e.code().into(), e.user_message())));
                 }
             }
         }
@@ -306,21 +316,33 @@ impl Supervisor {
         self.fail_pending_save();
     }
 
-    /// The helper died or never started: schedule a restart (telling the user exactly once per
-    /// failure), or give up after the last one.
-    fn on_failure(&mut self) {
+    /// The helper died or never started: schedule a restart, or give up after the last one.
+    /// The user gets exactly one message per failure; `cause` (code, friendly message) says why
+    /// when it's known, and is folded into that message.
+    fn on_failure(&mut self, cause: Option<(String, String)>) {
         self.fail_pending_save();
         match RESTART_BACKOFF.get(self.restarts) {
             Some(delay) => {
                 self.restarts += 1;
                 eprintln!("klipt: restarting the recorder in {delay:?} (attempt {})", self.restarts);
                 self.state = State::RestartPending { at: self.now() + *delay };
-                self.emit_error("recording_stopped");
+                match cause {
+                    Some((code, message)) => {
+                        self.emit(SupervisorEvent::Error { code, message: format!("{message} Retrying…") })
+                    }
+                    None => self.emit_error("recording_stopped"),
+                }
             }
             None => {
                 eprintln!("klipt: the recorder keeps failing; giving up");
                 self.state = State::Failed;
-                self.emit_error("recorder_crashed");
+                let message = match cause {
+                    Some((_, message)) => format!(
+                        "{message} Klipt couldn't restart recording. Check your recording settings or restart Klipt."
+                    ),
+                    None => friendly_message("recorder_crashed"),
+                };
+                self.emit(SupervisorEvent::Error { code: "recorder_crashed".into(), message });
             }
         }
     }
@@ -412,12 +434,12 @@ impl Supervisor {
                     // klipt-recorder exits right after this; the `Exited` that follows brings the
                     // one "restarting" notice, so this one isn't shown twice.
                 } else if START_FAILURE_CODES.contains(&code.as_str()) && self.is_recording() {
-                    self.emit_error(&code);
                     self.generation += 1;
                     if let Err(e) = self.backend.stop() {
                         eprintln!("klipt: can't stop recording: {e}");
                     }
-                    self.on_failure();
+                    let message = friendly_message(&code);
+                    self.on_failure(Some((code, message)));
                 } else if code != "not_recording" && code != "already_recording" {
                     self.emit_error(&code);
                 }
@@ -428,7 +450,7 @@ impl Supervisor {
                 if self.now().saturating_sub(since) >= STABLE_RUN {
                     self.restarts = 0;
                 }
-                self.on_failure();
+                self.on_failure(None);
             }
         }
     }
@@ -860,6 +882,7 @@ mod tests {
         s.begin();
         backend(&mut s, RecorderEvent::Error { code: "start_failed".into(), message: "x".into() });
         assert_eq!(w.stops(), 1, "the half-started helper is stopped");
+        assert_eq!(w.error_codes(), ["start_failed"], "one message");
         w.clock.advance(RESTART_BACKOFF[0]);
         s.handle(Input::Tick);
         assert_eq!(w.starts(), 2);
@@ -883,9 +906,12 @@ mod tests {
         w.calls.lock().unwrap().start_error = Some(|| AppError::RecorderFailed("spawn failed".into()));
         let mut s = w.supervisor(RecordingMode::Always);
         s.begin();
-        assert_eq!(w.error_codes(), ["recorder_failed", "recording_stopped"]);
+        assert_eq!(w.error_codes(), ["recorder_failed"], "one message, not cause + \"restarting\"");
         match &w.events()[0] {
-            SupervisorEvent::Error { message, .. } => assert_eq!(message, &AppError::RecorderFailed(String::new()).user_message()),
+            SupervisorEvent::Error { message, .. } => {
+                let cause = AppError::RecorderFailed(String::new()).user_message();
+                assert_eq!(message, &format!("{cause} Retrying…"));
+            }
             e => panic!("{e:?}"),
         }
         w.clock.advance(RESTART_BACKOFF[0]);
@@ -912,6 +938,41 @@ mod tests {
         s.handle(Input::Tick);
         assert_eq!(w.starts(), 1, "no retries");
         assert_eq!(w.error_codes(), ["recorder_missing"]);
+    }
+
+    #[test]
+    fn start_errors_that_exhaust_the_retries_end_in_one_crash_message() {
+        let w = World::new();
+        w.calls.lock().unwrap().start_error = Some(|| AppError::RecorderFailed("spawn failed".into()));
+        let mut s = w.supervisor(RecordingMode::Always);
+        s.begin();
+        for delay in RESTART_BACKOFF {
+            w.clock.advance(delay);
+            s.handle(Input::Tick);
+        }
+        let codes = w.error_codes();
+        assert_eq!(codes.len(), RESTART_BACKOFF.len() + 1, "{codes:?}");
+        assert_eq!(codes.last().map(String::as_str), Some("recorder_crashed"));
+        assert_eq!(s.next_deadline(), None);
+    }
+
+    #[test]
+    fn a_missing_recorder_is_not_reported_again_at_every_game_start() {
+        let w = World::new();
+        w.calls.lock().unwrap().start_error = Some(|| AppError::RecorderMissing("gpu-screen-recorder".into()));
+        let mut s = w.supervisor(RecordingMode::WhileGameRunning);
+        s.begin();
+        for running in [true, false, true, false, true] {
+            *w.game_running.lock().unwrap() = running;
+            w.clock.advance(GAME_POLL_INTERVAL);
+            s.handle(Input::Tick);
+        }
+        assert_eq!(w.starts(), 3, "each game start still tries (the program may be installed by now)");
+        assert_eq!(w.error_codes(), ["recorder_missing"]);
+
+        // New settings are a fresh attempt the user asked for: say it again if it still fails.
+        s.handle(Input::Configure(cfg(), RecordingMode::WhileGameRunning));
+        assert_eq!(w.error_codes(), ["recorder_missing", "recorder_missing"]);
     }
 
     #[test]

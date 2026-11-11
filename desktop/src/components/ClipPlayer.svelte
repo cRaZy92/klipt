@@ -1,12 +1,49 @@
 <script lang="ts">
   import { api, errorMessage, type FeedClip } from "../lib/api";
+  import { navKey } from "../lib/clipNav";
   import { hueOf, relativeDate } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
 
-  // Plays a clip from the server (the Feed, or your uploads in My clips) over the page.
-  let { clip, now, onclose }: { clip: FeedClip; now: number; onclose: () => void } = $props();
+  // Plays a clip from the server (the Feed, or your uploads in My clips) over the page. With
+  // `onnavigate`, ← / → and the header arrows move to `prev` / `next`, and when the clip ends the
+  // next one is offered (never played on its own).
+  let {
+    clip,
+    now,
+    onclose,
+    prev = null,
+    next = null,
+    onnavigate,
+  }: {
+    clip: FeedClip;
+    now: number;
+    onclose: () => void;
+    prev?: FeedClip | null;
+    next?: FeedClip | null;
+    onnavigate?: (clip: FeedClip) => void;
+  } = $props();
+
+  let video = $state<HTMLVideoElement>();
+  let ended = $state(false);
+
+  // A new clip starts fresh, without the previous one's "Up next".
+  $effect(() => {
+    void clip.id;
+    ended = false;
+  });
+
+  function go(target: FeedClip | null) {
+    if (target && onnavigate) onnavigate(target);
+  }
+
+  function replay() {
+    ended = false;
+    if (!video) return;
+    video.currentTime = 0;
+    void video.play();
+  }
 
   async function copyLink() {
     try {
@@ -22,7 +59,13 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") onclose();
+    if (e.key === "Escape") return onclose();
+    const dir = onnavigate ? navKey(e) : null;
+    const target = dir === "next" ? next : dir === "prev" ? prev : null;
+    if (!target) return;
+    // The video would seek on the same key.
+    e.preventDefault();
+    go(target);
   }
 </script>
 
@@ -45,13 +88,53 @@
         </div>
       </div>
       <div class="tools">
+        {#if onnavigate}
+          <button
+            class="btn btn-sm btn-ghost btn-icon"
+            aria-label="Previous clip"
+            title="Previous clip (←)"
+            disabled={!prev}
+            onclick={() => go(prev)}><Icon name="back" size={16} /></button>
+          <button
+            class="btn btn-sm btn-ghost btn-icon"
+            aria-label="Next clip"
+            title="Next clip (→)"
+            disabled={!next}
+            onclick={() => go(next)}><Icon name="forward" size={16} /></button>
+        {/if}
         <button class="btn btn-sm" onclick={copyLink}><Icon name="link" size={15} /> Copy link</button>
         <button class="btn btn-sm btn-ghost" onclick={openOnWeb}><Icon name="external" size={15} /> Open on web</button>
         <button class="btn btn-sm btn-ghost btn-icon" aria-label="Close" onclick={onclose}><Icon name="close" /></button>
       </div>
     </div>
     <!-- svelte-ignore a11y_media_has_caption -->
-    <video src={clip.videoUrl} poster={clip.thumbnailUrl} controls autoplay></video>
+    <div class="stage">
+      <video
+        bind:this={video}
+        src={clip.videoUrl}
+        poster={clip.thumbnailUrl}
+        controls
+        autoplay
+        onended={() => (ended = true)}
+        onplay={() => (ended = false)}
+      ></video>
+      {#if ended && next}
+        <div class="up-next" role="group" aria-label="Up next">
+          <span class="up-next-label">Up next</span>
+          <button class="next-card" onclick={() => go(next)}>
+            <img src={next.thumbnailUrl} alt="" />
+            <span class="next-text">
+              <span class="next-title">{next.title}</span>
+              <span class="next-meta">{next.owner.username}{next.gameName ? ` · ${next.gameName}` : ""}</span>
+            </span>
+          </button>
+          <div class="up-next-actions">
+            <button class="btn btn-primary" onclick={() => go(next)}><Icon name="play" size={15} /> Play next</button>
+            <button class="btn btn-ghost" onclick={replay}><Icon name="retry" size={15} /> Replay</button>
+          </div>
+        </div>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -144,10 +227,94 @@
     gap: 0.35rem;
   }
 
+  .stage {
+    position: relative;
+  }
+
   video {
+    display: block;
     width: 100%;
     max-height: calc(100vh - 12rem);
     background: #000;
     border-radius: var(--radius);
+  }
+
+  .up-next {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.9rem;
+    padding: 1rem;
+    border-radius: var(--radius);
+    background: rgba(5, 4, 10, 0.78);
+    backdrop-filter: blur(4px);
+    animation: fade 0.2s ease-out;
+  }
+
+  .up-next-label {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .next-card {
+    display: flex;
+    flex-direction: column;
+    width: min(22rem, 100%);
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+
+  .next-card:hover {
+    border-color: var(--accent);
+  }
+
+  .next-card img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    background: #000;
+  }
+
+  .next-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+    padding: 0.6rem 0.8rem 0.7rem;
+  }
+
+  .next-title {
+    overflow: hidden;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .next-meta {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.84rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .up-next-actions {
+    display: flex;
+    gap: 0.5rem;
   }
 </style>

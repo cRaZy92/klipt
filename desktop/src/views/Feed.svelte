@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { api, errorCode, errorMessage, type FeedClip, type GameCount } from "../lib/api";
+  import { neighbors } from "../lib/clipNav";
   import { formatDuration, groupByDay, hueOf, relativeDate } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "../components/Avatar.svelte";
@@ -28,6 +29,16 @@
   let now = $state(Date.now());
 
   const groups = $derived(groupByDay(clips, (c) => new Date(c.createdAt), now));
+  const around = $derived(playing ? neighbors(clips, playing.id) : { prev: null, next: null });
+
+  // Playing the last loaded clip fetches older ones, so "Up next" doesn't stop at a page break.
+  // Once per page: a failed fetch isn't retried in a loop.
+  let autoLoaded: string | null = null;
+  $effect(() => {
+    if (!playing || around.next || !cursor || loading || cursor === autoLoaded) return;
+    autoLoaded = cursor;
+    untrack(() => void load(true));
+  });
 
   // Bumped so answers to older requests are dropped when the filter changes quickly.
   let request = 0;
@@ -185,7 +196,14 @@
 </section>
 
 {#if playing}
-  <ClipPlayer clip={playing} {now} onclose={() => (playing = null)} />
+  <ClipPlayer
+    clip={playing}
+    {now}
+    prev={around.prev}
+    next={around.next}
+    onnavigate={(c) => (playing = c)}
+    onclose={() => (playing = null)}
+  />
 {/if}
 
 <style>

@@ -70,7 +70,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | Thumbnail handle           | A third handle in the editor's trim bar, dragged to any frame; that frame becomes the clip's thumbnail (Feed, website, Discord) |
 | Tag friends in a clip      | "With bob, alice": the clip shows on their profiles too, and the Feed gets an "I'm in it" filter  |
 | Next clip suggestion       | When a clip ends in the Feed, suggest the next one (no autoplay); arrow keys move between clips  |
-| Download on the share page | A download button for the clip's video                                                             |
+| Download on the share page | **Done.** A Download button saves the video as "<title>.mp4" (`/media/<id>.mp4?download=1`)       |
 | Screenshots                | A screenshot hotkey; screenshots live in the library next to clips, with a Clips / Screenshots filter (library, Feed, website) |
 | Profile stats              | Clips per game, total views, most-watched clip on each profile (builds on view counts)             |
 

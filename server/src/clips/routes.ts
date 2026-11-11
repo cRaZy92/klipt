@@ -46,6 +46,17 @@ const finalizeBody = z.object({
   visibility: z.enum(['feed', 'link']).optional(),
 });
 
+/**
+ * Content-Disposition for saving a clip as "<title>.mp4": characters that file systems reject
+ * become "_", with a plain-ASCII filename for old clients and the full UTF-8 name in filename*.
+ */
+export function downloadDisposition(title: string): string {
+  const name = title.replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, '_').trim().slice(0, 100) || 'klipt-clip';
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_');
+  const utf8 = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${ascii}.mp4"; filename*=UTF-8''${utf8}.mp4`;
+}
+
 const mediaMessages: Record<string, string> = {
   not_a_video: "That file isn't a video Klipt can play.",
   unsupported_codec: 'Klipt can only play H.264 video with AAC audio (or no audio).',
@@ -133,6 +144,11 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const { file } = req.params as { file: string };
     if (!/^[A-Za-z0-9_-]{12}\.(mp4|jpg)$/.test(file)) return reply.code(404).send({ error: 'not_found' });
     if (!(await stat(join(clipsDir, file)).catch(() => null))) return reply.code(404).send({ error: 'not_found' });
+    if (file.endsWith('.mp4') && (req.query as { download?: string }).download === '1') {
+      const found = await getClip(db, file.slice(0, 12));
+      if (!found) return reply.code(404).send({ error: 'not_found' });
+      reply.header('content-disposition', downloadDisposition(found.clip.title));
+    }
     reply.header('cache-control', 'public, max-age=31536000, immutable');
     return reply.sendFile(file, { cacheControl: false });
   });

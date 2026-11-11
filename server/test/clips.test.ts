@@ -163,6 +163,19 @@ describe('media serving', () => {
     expect(full.statusCode).toBe(200);
   });
 
+  it('sends the video as a download named after the clip title on ?download=1', async () => {
+    const id = await addClip(a.id, { title: 'Clutch 1v3 / ő "ace"' }, false);
+    await mkdir(join(t.dataDir, 'clips'), { recursive: true });
+    await writeFile(join(t.dataDir, 'clips', `${id}.mp4`), Buffer.alloc(64));
+    const res = await t.app.inject({ method: 'GET', url: `/media/${id}.mp4?download=1` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-disposition']).toBe(
+      `attachment; filename="Clutch 1v3 _ _ _ace_.mp4"; filename*=UTF-8''Clutch%201v3%20_%20%C5%91%20_ace_.mp4`,
+    );
+    const plain = await t.app.inject({ method: 'GET', url: `/media/${id}.mp4` });
+    expect(plain.headers['content-disposition']).toBeUndefined();
+  });
+
   it('404s for unknown, malformed, traversal and listing requests', async () => {
     const id = await addClip(a.id, {}, false);
     for (const u of ['/media/nope.mp4', `/media/${id}.mp4`, '/media/', '/media', '/media/..%2F..%2Fetc%2Fpasswd', '/media/%2e%2e%2fconfig.mp4', '/media/.abcdefghijk.mp4', `/media/${id}.mp4.tmp`]) {

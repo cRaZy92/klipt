@@ -48,6 +48,7 @@ export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete:
         </p>
         <div class="actions" data-clip-id={e(clip.id)}>
           <button type="button" class="btn" data-action="copy" data-url={e(clip.shareUrl)}>Copy link</button>
+          <a class="btn" href={e(`${clip.videoUrl}?download=1`)} download="">Download</a>
           {props.canDelete ? (
             <button type="button" class="btn danger" data-action="delete" data-redirect="/">Delete</button>
           ) : (

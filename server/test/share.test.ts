@@ -61,6 +61,13 @@ describe('share page', () => {
     }
   });
 
+  it('offers a download of the video', async () => {
+    const u = await createUser(t.db, { username: 'gina' });
+    await addClip(u.id, 'shareclip006');
+    const res = await get('/c/shareclip006');
+    expect(res.body).toMatch(/<a[^>]*class="btn"[^>]*href="http:\/\/localhost\/media\/shareclip006\.mp4\?download=1"[^>]*>Download<\/a>/);
+  });
+
   it('shows Delete to the owner and admins only', async () => {
     const owner = await createUser(t.db, { username: 'erin' });
     const admin = await createUser(t.db, { username: 'root', isAdmin: true });

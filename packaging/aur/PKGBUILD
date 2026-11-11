@@ -15,11 +15,13 @@ options=('!lto' '!debug')
 source=("klipt::git+${url}.git#branch=${KLIPT_BRANCH:-main}")
 sha256sums=('SKIP')
 
+# MAJOR.MINOR.<commits on main>, the same version the Windows release of this commit has
+# (.github/workflows/desktop-windows.yml).
 pkgver() {
   cd klipt
-  printf "%s.r%s.g%s" \
-    "$(sed -n 's/^  "version": "\(.*\)",$/\1/p' desktop/src-tauri/tauri.conf.json)" \
-    "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  printf "%s.%s" \
+    "$(sed -n 's/^  "version": "\([0-9]*\.[0-9]*\)\..*",$/\1/p' desktop/src-tauri/tauri.conf.json)" \
+    "$(git rev-list --count HEAD)"
 }
 
 build() {
@@ -29,7 +31,8 @@ build() {
   export KLIPT_COMMIT="$(git rev-parse HEAD)"
   pnpm install --frozen-lockfile
   cd desktop
-  pnpm tauri build --no-bundle
+  # The app shows (and reports) the package's version.
+  pnpm tauri build --no-bundle --config "{\"version\":\"$pkgver\"}"
 }
 
 package() {

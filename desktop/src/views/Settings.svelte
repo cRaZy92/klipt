@@ -583,6 +583,22 @@
         <button class="btn" onclick={onlogout}><Icon name="logout" size={16} /> Log out</button>
       </div>
     </section>
+
+    <section>
+      <h2>About</h2>
+      {#await api.appInfo() then info}
+        <p class="about">
+          {#if info.dev}
+            Klipt · development build
+          {:else}
+            Klipt <strong>{info.version}</strong>
+            {#if info.commit}
+              <span class="muted">· build <code>{info.commit}</code></span>
+            {/if}
+          {/if}
+        </p>
+      {/await}
+    </section>
     {/if}
   </div>
 </div></div>
@@ -721,6 +737,14 @@
     border-radius: var(--radius-lg);
     background: linear-gradient(180deg, var(--surface), rgba(21, 20, 29, 0.55));
     animation: rise 0.3s var(--ease-out) backwards;
+  }
+
+  .about {
+    color: var(--text-muted);
+  }
+
+  .about strong {
+    color: var(--text);
   }
 
   h2 {

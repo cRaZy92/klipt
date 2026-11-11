@@ -27,6 +27,9 @@ jobs:
       DEPS: ${{ github.workspace }}\..\klipt-deps
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The version counts main's commits (see docs/RELEASING.md): needs the whole history.
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -113,7 +116,8 @@ jobs:
         run: |
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "the TAURI_SIGNING_PRIVATE_KEY secret is missing" }
           $base = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version.Split('.')
-          $version = "$($base[0]).$($base[1]).${{ github.run_number }}"
+          # MAJOR.MINOR.<commits on main>: the same number the Linux package (PKGBUILD) computes.
+          $version = "$($base[0]).$($base[1]).$(git rev-list --count HEAD)"
           "KLIPT_VERSION=$version" >> $env:GITHUB_ENV
           @{ version = $version; bundle = @{ createUpdaterArtifacts = $true } } |
             ConvertTo-Json | Set-Content -Encoding utf8NoBOM src-tauri/tauri.release.conf.json

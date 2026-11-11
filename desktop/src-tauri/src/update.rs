@@ -156,6 +156,27 @@ pub(crate) async fn newer_release(api: &str, commit: &str) -> std::result::Resul
     Ok((cmp.ahead_by > 0).then(|| tag.trim_start_matches('v').to_string()))
 }
 
+/// Which Klipt this is, for Settings → About.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    /// `MAJOR.MINOR.<commits on main>` for releases and Linux packages.
+    version: String,
+    /// The commit a Linux package was built from (short), if stamped.
+    commit: Option<String>,
+    /// A `pnpm tauri dev` build: its version means nothing.
+    dev: bool,
+}
+
+#[tauri::command]
+pub fn app_info(app: AppHandle) -> AppInfo {
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        commit: option_env!("KLIPT_COMMIT").filter(|c| !c.is_empty()).map(|c| c.chars().take(7).collect()),
+        dev: cfg!(debug_assertions),
+    }
+}
+
 /// Starts the periodic update check (no-op on dev builds and other platforms).
 pub fn start(app: &AppHandle) {
     #[cfg(any(windows, target_os = "linux"))]

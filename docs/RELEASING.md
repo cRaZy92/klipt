@@ -23,8 +23,12 @@ The updater only installs builds signed with Klipt's updater key.
 There's nothing to do by hand: **every push to `main` that changes the desktop app is a release.**
 The `desktop-windows` workflow:
 
-1. Versions the build `MAJOR.MINOR.<run number>` (MAJOR.MINOR from `desktop/src-tauri/tauri.conf.json`,
-   currently 0.1), so each build is newer than the last.
+1. Versions the build `MAJOR.MINOR.<number of commits on main>` (MAJOR.MINOR from
+   `desktop/src-tauri/tauri.conf.json`, currently 0.1), so each build is newer than the last. The
+   Linux package (`packaging/aur/PKGBUILD`) computes the same number, so a Windows release and a
+   Linux build of the same commit have the same version. Settings → Account → About shows it.
+   (Releases up to v0.1.15 or so used the CI run number; the commit count is higher, so updates
+   still go forward.)
 2. Builds the installer signed with the updater key.
 3. Writes `latest.json` and publishes both as GitHub Release `v<version>` (marked latest).
 

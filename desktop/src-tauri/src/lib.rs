@@ -113,6 +113,7 @@ pub fn run() {
             server_clips::delete_upload,
             server_clips::download_upload,
             update::install_update,
+            update::app_info,
             commands::upload_clip,
             commands::open_editor,
             commands::save_edit,

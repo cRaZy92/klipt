@@ -249,6 +249,8 @@ export const api = {
   feedGames: () => invoke<FeedGame[]>("feed_games"),
   copyText: (text: string) => invoke<void>("copy_text_to_clipboard", { text }),
   /** Opens the Klipt website in the browser; `path` like `/me`. */
+  /** Downloads and installs the waiting update, then restarts Klipt. */
+  installUpdate: () => invoke<void>("install_update"),
   openWebsite: (path?: string) => invoke<void>("open_website", { path: path ?? null }),
   openEditor: (id: string) => invoke<EditorData>("open_editor", { id }),
   saveEdit: (id: string, edit: EditInput) => invoke<void>("save_edit", { id, ...edit }),
@@ -267,6 +269,8 @@ export interface Events {
   "upload-done": UploadDone;
   "upload-failed": UploadFailed;
   "export-progress": ExportProgress;
+  /** Windows: a newer signed release is ready to install. */
+  "update-available": { version: string };
 }
 
 /**

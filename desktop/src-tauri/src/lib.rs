@@ -10,6 +10,7 @@ pub mod games;
 pub mod hotkey;
 pub mod library;
 pub mod media_server;
+pub mod update;
 pub mod recorder;
 pub mod settings;
 pub mod sound;
@@ -33,7 +34,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])));
     #[cfg(windows)]
-    let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    let builder = builder
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build());
     builder
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -58,6 +61,7 @@ pub fn run() {
                 tray::show_main_window(app.handle());
             }
             app.manage(hotkey::start_for_app(app.handle(), settings.hotkey.clone()));
+            update::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -95,6 +99,7 @@ pub fn run() {
             commands::feed_clips,
             commands::feed_games,
             commands::open_website,
+            update::install_update,
             commands::upload_clip,
             commands::open_editor,
             commands::save_edit,

@@ -1,7 +1,9 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "resources": {
       "../../dist/klipt-recorder-windows/": "obs/",
       "../../dist/ffmpeg/ffmpeg.exe": "ffmpeg.exe",
@@ -10,6 +12,17 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1QjNBOTBEOEQ5ODU1NjQKUldSa1ZaaU5EYW16NWRXRE1vV1ErK0tKOXEyYklJQ0pjcytDaWRsZGhxOTVqalZHMzVoOGlQN2EK",
+      "endpoints": [
+        "https://github.com/cRaZy92/klipt/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -27,6 +27,8 @@
   /** The save-clip shortcut as the system reports it, or why it isn't working. */
   let hotkeyStatus = $state<HotkeyStatus>({ display: null, error: null, errorCode: null });
   let accountMenu = $state(false);
+  /** A newer version waiting to be installed (Windows). */
+  let update = $state<{ version: string; installing: boolean } | null>(null);
   /** The current screen (editor or settings) has unsaved changes. */
   let viewDirty = $state(false);
   let leaving = $state<Leaving | null>(null);
@@ -59,6 +61,7 @@
       }),
       on("hotkey-bound", ({ display }) => (hotkeyStatus = { display, error: null, errorCode: null })),
       on("clip-saved", () => toast("Clip saved", "success")),
+      on("update-available", ({ version }) => (update = { version, installing: false })),
       watchUploads({
         // The login expired mid-upload: log in again, then the upload carries on.
         unauthorized: () => {
@@ -71,6 +74,17 @@
     ];
     return () => stops.forEach((stop) => stop());
   });
+
+  async function installUpdate() {
+    if (!update) return;
+    update.installing = true;
+    try {
+      await api.installUpdate(); // restarts Klipt when it succeeds
+    } catch (e) {
+      update.installing = false;
+      toast(errorMessage(e), "error");
+    }
+  }
 
   function loggedIn(a: Account) {
     account = a;
@@ -192,6 +206,16 @@
       </div>
     </header>
 
+    {#if update}
+      <div class="update-bar" role="status">
+        <span>Update available: Klipt {update.version}</span>
+        <button class="btn btn-primary" onclick={installUpdate} disabled={update.installing}>
+          {#if update.installing}<span class="spinner"></span> Installing…{:else}Restart to install{/if}
+        </button>
+        <button class="btn btn-ghost" onclick={() => (update = null)} disabled={update.installing}>Later</button>
+      </div>
+    {/if}
+
     <main>
       {#if view.name === "library"}
         <Library
@@ -267,6 +291,21 @@
     padding: 0 1rem 0 1.25rem;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
+  }
+
+  .update-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: none;
+    padding: 0.5rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--accent-soft);
+  }
+
+  .update-bar span {
+    margin-right: auto;
+    font-weight: 600;
   }
 
   .tabs {

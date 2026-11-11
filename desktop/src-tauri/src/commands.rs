@@ -981,10 +981,35 @@ mod tests {
 
 const FEED_TIMEOUT: Duration = Duration::from_secs(20);
 
-async fn server_get(app: &AppHandle, path: &str, query: Vec<(&str, String)>) -> Result<serde_json::Value> {
-    let saved = auth::load(&app.state::<AppState>().data_dir).ok_or(AppError::Unauthorized)?;
+async fn server_get(app: &AppHandle, path: &str, query: Vec<(&str, String)>) -> Result<(serde_json::Value, ApiClient)> {
+    let data_dir = app.state::<AppState>().data_dir.clone();
+    let saved = auth::load(&data_dir).ok_or(AppError::Unauthorized)?;
     let client = ApiClient::with_timeout(&saved.server_url, FEED_TIMEOUT)?;
-    Ok(client.get_json(&saved.token, path, &query).await?)
+    match client.get_json(&saved.token, path, &query).await {
+        Ok(value) => Ok((value, client)),
+        Err(e) => {
+            let e = AppError::from(e);
+            if matches!(e, AppError::Unauthorized) {
+                // The token is dead: forget it, or the next launch would look logged in again.
+                if let Err(e) = clear_auth_if_current(&data_dir, &saved.token) {
+                    eprintln!("klipt: can't forget the expired login: {e}");
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
+/// Drops feed clips whose links or media aren't on the server itself. The page may load images
+/// and video from any http(s) address (CSP), so a server can't point them elsewhere this way.
+fn keep_own_media(page: &mut serde_json::Value, client: &ApiClient) {
+    if let Some(items) = page.get_mut("items").and_then(|v| v.as_array_mut()) {
+        items.retain(|clip| {
+            ["shareUrl", "videoUrl", "thumbnailUrl"]
+                .iter()
+                .all(|key| clip.get(key).and_then(|v| v.as_str()).is_some_and(|url| client.same_origin(url)))
+        });
+    }
 }
 
 /// One page of the shared feed: the server's `ClipList`.
@@ -993,23 +1018,73 @@ pub async fn feed_clips(app: AppHandle, game: Option<String>, cursor: Option<Str
     let mut query = vec![("scope", "feed".to_string())];
     query.extend(game.filter(|g| !g.is_empty()).map(|g| ("game", g)));
     query.extend(cursor.filter(|c| !c.is_empty()).map(|c| ("cursor", c)));
-    server_get(&app, "/api/clips", query).await
+    let (mut page, client) = server_get(&app, "/api/clips", query).await?;
+    keep_own_media(&mut page, &client);
+    Ok(page)
 }
 
 /// The feed's games with clip counts: the server's `GameCount[]`.
 #[tauri::command]
 pub async fn feed_games(app: AppHandle) -> Result<serde_json::Value> {
-    server_get(&app, "/api/games", vec![("scope", "feed".to_string())]).await
+    Ok(server_get(&app, "/api/games", vec![("scope", "feed".to_string())]).await?.0)
 }
 
-/// Opens the Klipt website (or one of its pages) in the browser.
+/// Opens the Klipt website in the browser: its home page, or `url` (e.g. a clip's share link),
+/// which must be on the server. A full URL rather than a path, so a server at a subpath
+/// (`https://example.com/klipt`) doesn't get its path twice.
 #[tauri::command]
-pub fn open_website(app: AppHandle, path: Option<String>) -> Result<()> {
+pub fn open_website(app: AppHandle, url: Option<String>) -> Result<()> {
     let saved = auth::load(&app.state::<AppState>().data_dir).ok_or(AppError::Unauthorized)?;
-    let path = path.unwrap_or_default();
-    if !path.is_empty() && !path.starts_with('/') {
-        return Err(AppError::InvalidInput("a website path starts with /".into()));
-    }
-    let url = format!("{}{}", saved.server_url.trim_end_matches('/'), path);
+    let url = website_url(&saved.server_url, url)?;
     app.opener().open_url(url, None::<&str>).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+}
+
+fn website_url(server_url: &str, url: Option<String>) -> Result<String> {
+    match url.filter(|u| !u.is_empty()) {
+        None => Ok(server_url.to_string()),
+        Some(url) => {
+            let client = ApiClient::new(server_url).map_err(|_| AppError::InvalidServerAddress)?;
+            if !client.same_origin(&url) {
+                return Err(AppError::InvalidInput("that link isn't on your Klipt server".into()));
+            }
+            Ok(url)
+        }
+    }
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::*;
+
+    #[test]
+    fn website_links_keep_a_subpath_once_and_stay_on_the_server() {
+        let base = "https://example.com/klipt";
+        assert_eq!(website_url(base, None).unwrap(), base);
+        assert_eq!(
+            website_url(base, Some("https://example.com/klipt/c/abc".into())).unwrap(),
+            "https://example.com/klipt/c/abc"
+        );
+        assert!(website_url(base, Some("https://evil.example/c/abc".into())).is_err());
+        assert!(website_url(base, Some("not a url".into())).is_err());
+    }
+
+    #[test]
+    fn feed_clips_with_media_elsewhere_are_dropped() {
+        let client = ApiClient::new("https://k.example").unwrap();
+        let clip = |thumb: &str| {
+            serde_json::json!({
+                "shareUrl": "https://k.example/c/a",
+                "videoUrl": "https://k.example/media/a.mp4",
+                "thumbnailUrl": thumb,
+            })
+        };
+        let mut page = serde_json::json!({
+            "items": [clip("https://k.example/media/a.jpg"), clip("https://tracker.example/pixel.gif")],
+            "nextCursor": null,
+        });
+        keep_own_media(&mut page, &client);
+        let items = page["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["thumbnailUrl"], "https://k.example/media/a.jpg");
+    }
 }

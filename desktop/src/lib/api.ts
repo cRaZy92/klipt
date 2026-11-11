@@ -251,7 +251,8 @@ export const api = {
   /** Opens the Klipt website in the browser; `path` like `/me`. */
   /** Downloads and installs the waiting update, then restarts Klipt. */
   installUpdate: () => invoke<void>("install_update"),
-  openWebsite: (path?: string) => invoke<void>("open_website", { path: path ?? null }),
+  /** The website's home page, or `url` (a link on the server, e.g. a clip's share link). */
+  openWebsite: (url?: string) => invoke<void>("open_website", { url: url ?? null }),
   openEditor: (id: string) => invoke<EditorData>("open_editor", { id }),
   saveEdit: (id: string, edit: EditInput) => invoke<void>("save_edit", { id, ...edit }),
   /** Resolves once the copy is written; progress arrives as `export-progress`. */

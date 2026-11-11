@@ -85,7 +85,7 @@
   }
 
   function openOnWeb(clip: FeedClip) {
-    api.openWebsite(new URL(clip.shareUrl).pathname).catch((e) => toast(errorMessage(e), "error"));
+    api.openWebsite(clip.shareUrl).catch((e) => toast(errorMessage(e), "error"));
   }
 
   function onkeydown(e: KeyboardEvent) {

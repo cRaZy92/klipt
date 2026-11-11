@@ -6,6 +6,7 @@ import {
   MediaError,
   assertPlayable,
   makeThumbnail,
+  thumbnailAtMs,
   probeVideo,
   remuxFaststart,
 } from '../src/clips/media.js';
@@ -112,5 +113,16 @@ describe('media', () => {
         else process.env[k] = v;
       }
     }
+  });
+});
+
+describe('thumbnailAtMs', () => {
+  it('uses the chosen frame inside the video, else 1 s in', () => {
+    expect(thumbnailAtMs(30_000)).toBe(1000);
+    expect(thumbnailAtMs(1_000)).toBe(500);
+    expect(thumbnailAtMs(30_000, 12_345)).toBe(12_345);
+    expect(thumbnailAtMs(30_000, null)).toBe(1000);
+    expect(thumbnailAtMs(30_000, 99_000)).toBe(29_900);
+    expect(thumbnailAtMs(30_000, -5)).toBe(0);
   });
 });

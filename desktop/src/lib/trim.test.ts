@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampTrim, formatClock, msToX, savedTrim, xToMs } from "./trim";
+import { clampThumb, clampTrim, defaultThumb, formatClock, msToX, savedTrim, xToMs } from "./trim";
 
 describe("clampTrim", () => {
   it("keeps a valid range as it is", () => {
@@ -105,5 +105,20 @@ describe("formatClock", () => {
   it("treats bad input as zero", () => {
     expect(formatClock(-1)).toBe("0:00.0");
     expect(formatClock(Number.NaN)).toBe("0:00.0");
+  });
+});
+
+describe("thumbnail frame", () => {
+  it("defaults to 1 s into the cut, or its middle when shorter", () => {
+    expect(defaultThumb({ start: 4000, end: 20000 })).toBe(5000);
+    expect(defaultThumb({ start: 0, end: 1200 })).toBe(600);
+  });
+
+  it("stays inside the cut", () => {
+    const cut = { start: 4000, end: 10000 };
+    expect(clampThumb(6000, cut)).toBe(6000);
+    expect(clampThumb(1000, cut)).toBe(4000);
+    expect(clampThumb(12000, cut)).toBe(9999);
+    expect(clampThumb(6000.6, cut)).toBe(6001);
   });
 });

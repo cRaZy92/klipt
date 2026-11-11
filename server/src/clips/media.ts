@@ -119,12 +119,19 @@ export async function remuxFaststart(input: string, output: string): Promise<voi
   ]);
 }
 
+/** Where the thumbnail is taken: the uploader's frame kept inside the video, else 1 s in (or the middle of a shorter clip). */
+export function thumbnailAtMs(durationMs: number, requestedMs?: number | null): number {
+  if (requestedMs == null) return Math.min(1000, durationMs / 2);
+  return Math.min(Math.max(0, requestedMs), Math.max(0, durationMs - 100));
+}
+
 export async function makeThumbnail(
   input: string,
   output: string,
   durationMs: number,
+  requestedMs?: number | null,
 ): Promise<void> {
-  const atMs = Math.min(1000, durationMs / 2);
+  const atMs = thumbnailAtMs(durationMs, requestedMs);
   await run(ffmpegBin(), [
     '-v', 'error', '-y',
     '-ss', (atMs / 1000).toFixed(3),

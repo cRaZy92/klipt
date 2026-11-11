@@ -41,11 +41,13 @@ const MIGRATIONS: &[&str] = &["
     CREATE INDEX clips_game_name ON clips (game_name);
 ", "
     ALTER TABLE clips ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+", "
+    ALTER TABLE clips ADD COLUMN thumbnail_ms INTEGER NULL;
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
-                       visibility, upload_id, upload_offset, favorite";
+                       visibility, upload_id, upload_offset, favorite, thumbnail_ms";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -70,6 +72,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         upload_id: row.get(18)?,
         upload_offset: row.get(19)?,
         favorite: row.get(20)?,
+        thumbnail_ms: row.get(21)?,
     })
 }
 
@@ -194,6 +197,12 @@ impl Library {
         ))?;
         let clips = stmt.query_map([before], row_to_clip)?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(clips)
+    }
+
+    /// Where in the video the clip's thumbnail is taken (ms from the file's start); `None` is
+    /// the automatic frame.
+    pub fn set_thumbnail(&self, id: &str, at_ms: Option<u64>) -> Result<()> {
+        self.update(id, "UPDATE clips SET thumbnail_ms = ?2 WHERE id = ?1", params![id, at_ms])
     }
 
     /// Stars or unstars a clip. Favorites are never deleted by the automatic cleanup.
@@ -553,6 +562,17 @@ mod tests {
         f.lib.set_upload_progress(&paused.id, Some(("tus-1", 10))).unwrap();
         let ids: Vec<String> = f.lib.cleanup_candidates(500).unwrap().into_iter().map(|c| c.id).collect();
         assert_eq!(ids, vec![older.id, old.id]);
+    }
+
+    #[test]
+    fn thumbnail_frame_is_stored() {
+        let f = Fixture::new();
+        let c = f.add("t.mp4", 1, None);
+        assert_eq!(c.thumbnail_ms, None);
+        f.lib.set_thumbnail(&c.id, Some(4_200)).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().thumbnail_ms, Some(4_200));
+        f.lib.set_thumbnail(&c.id, None).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().thumbnail_ms, None);
     }
 }
 

@@ -30,6 +30,8 @@ export interface ClipView {
   uploadOffset: number | null;
   /** Starred; the automatic cleanup never deletes it. */
   favorite: boolean;
+  /** The thumbnail's frame (ms into the video); null = automatic. */
+  thumbnailMs: number | null;
   fileMissing: boolean;
   thumbPath: string | null;
 }
@@ -305,7 +307,9 @@ export const api = {
   /** The website's home page, or `url` (a link on the server, e.g. a clip's share link). */
   openWebsite: (url?: string) => invoke<void>("open_website", { url: url ?? null }),
   openEditor: (id: string) => invoke<EditorData>("open_editor", { id }),
-  saveEdit: (id: string, edit: EditInput) => invoke<void>("save_edit", { id, ...edit }),
+  /** Saves the trim and volumes, and the thumbnail frame (null = automatic). */
+  saveEdit: (id: string, edit: EditInput, thumbnailMs: number | null) =>
+    invoke<void>("save_edit", { id, ...edit, thumbnailMs }),
   /** Resolves once the copy is written; progress arrives as `export-progress`. */
   exportCopy: (id: string, destPath: string, edit: EditInput) =>
     invoke<void>("export_copy", { id, destPath, ...edit }),
@@ -323,6 +327,8 @@ export interface Events {
   "export-progress": ExportProgress;
   /** The number of friends' clips you haven't seen changed. */
   "feed-new": { count: number };
+  /** A clip's thumbnail was made again (the editor picked a new frame). */
+  "thumbnail-changed": { id: string };
   /** The automatic cleanup deleted old clips. */
   "clips-cleaned": { deleted: number; freedBytes: number };
   /**

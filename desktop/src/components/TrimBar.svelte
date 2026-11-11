@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { clampTrim, formatClock, MIN_TRIM_MS, msToX, xToMs } from "../lib/trim";
+  import { clampThumb, clampTrim, defaultThumb, formatClock, MIN_TRIM_MS, msToX, xToMs } from "../lib/trim";
+  import Icon from "./Icon.svelte";
 
-  type Handle = "start" | "end";
+  type Handle = "start" | "end" | "thumb";
 
   let {
     duration,
     start = $bindable(),
     end = $bindable(),
+    thumb = $bindable(null),
     position,
     onseek,
     onhandlemove,
@@ -17,6 +19,8 @@
     start: number;
     /** Trim end in ms. */
     end: number;
+    /** The thumbnail's frame in ms; null = automatic (shown where it would be taken). */
+    thumb?: number | null;
     /** The playhead in ms. */
     position: number;
     /** The user clicked or dragged on the bar to jump to `ms`. */
@@ -29,6 +33,7 @@
   let dragging = $state<Handle | "playhead" | null>(null);
 
   const pct = (ms: number) => msToX(ms, duration, 100);
+  const thumbAt = $derived(thumb === null ? defaultThumb({ start, end }) : clampThumb(thumb, { start, end }));
 
   function msAt(e: PointerEvent): number {
     const rect = track!.getBoundingClientRect();
@@ -37,6 +42,13 @@
 
   /** Moves one handle, keeping the other in place and the cut at least MIN_TRIM_MS long. */
   function moveHandle(handle: Handle, ms: number) {
+    if (handle === "thumb") {
+      const at = clampThumb(ms, { start, end });
+      if (at === thumbAt && thumb !== null) return;
+      thumb = at;
+      onhandlemove?.("thumb", at);
+      return;
+    }
     const next =
       handle === "start"
         ? clampTrim(ms, end, duration, MIN_TRIM_MS, "end")
@@ -44,6 +56,8 @@
     if (next.start === start && next.end === end) return;
     start = next.start;
     end = next.end;
+    // A picked frame stays inside the cut.
+    if (thumb !== null) thumb = clampThumb(thumb, next);
     onhandlemove?.(handle, handle === "start" ? next.start : next.end);
   }
 
@@ -75,7 +89,7 @@
 
   function onkeydown(e: KeyboardEvent, handle: Handle) {
     const step = e.shiftKey ? 1000 : 100;
-    const current = handle === "start" ? start : end;
+    const current = handle === "start" ? start : handle === "end" ? end : thumbAt;
     let next: number;
     switch (e.key) {
       case "ArrowLeft":
@@ -93,10 +107,10 @@
         next = current + 1000;
         break;
       case "Home":
-        next = 0;
+        next = handle === "thumb" ? start : 0;
         break;
       case "End":
-        next = duration;
+        next = handle === "thumb" ? end : duration;
         break;
       default:
         return;
@@ -145,6 +159,28 @@
         <span class="grip"></span>
       </div>
     {/each}
+
+    <div
+      class="thumb-mark"
+      class:picked={thumb !== null}
+      style:left="{pct(thumbAt)}%"
+      role="slider"
+      tabindex="0"
+      aria-label="Thumbnail frame"
+      title="Thumbnail: drag to the frame you want"
+      aria-orientation="horizontal"
+      aria-valuemin={start}
+      aria-valuemax={end}
+      aria-valuenow={thumbAt}
+      aria-valuetext={formatClock(thumbAt)}
+      onpointerdown={(e) => grabHandle(e, "thumb")}
+      onpointermove={move}
+      onpointerup={release}
+      onpointercancel={release}
+      onkeydown={(e) => onkeydown(e, "thumb")}
+    >
+      <Icon name="image" size={13} />
+    </div>
   </div>
 
   <div class="labels">
@@ -159,7 +195,48 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    padding-top: 1.6rem;
     user-select: none;
+  }
+
+  /* The thumbnail marker: a tab above the bar with a line down to its frame. */
+  .thumb-mark {
+    position: absolute;
+    top: -1.65rem;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: 1.6rem;
+    height: 1.25rem;
+    margin-left: -0.8rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--surface-3, var(--surface-2));
+    color: var(--text-muted);
+    cursor: ew-resize;
+    touch-action: none;
+    transition:
+      color 0.15s,
+      border-color 0.15s;
+  }
+
+  .thumb-mark::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    width: 0;
+    height: calc(3.5rem + 0.3rem);
+    border-left: 1px dashed currentColor;
+    opacity: 0.7;
+    pointer-events: none;
+  }
+
+  .thumb-mark.picked,
+  .thumb-mark:hover,
+  .thumb-mark:focus-visible {
+    border-color: #ffc53d;
+    color: #ffc53d;
   }
 
   .track {

@@ -34,8 +34,11 @@
   let trim = $state<TrimRange>({ start: 0, end: 0 });
   let gameVolume = $state(100);
   let micVolume = $state(100);
+  /** The thumbnail's frame; null = automatic. */
+  let thumb = $state<number | null>(null);
   /** The edit as last loaded or saved; `dirty` compares against it. */
   let stored = $state<EditInput | null>(null);
+  let storedThumb = $state<number | null>(null);
 
   let video = $state<HTMLVideoElement>();
   let gameAudio = $state<HTMLAudioElement>();
@@ -63,7 +66,8 @@
       (edit.trimStartMs !== stored.trimStartMs ||
         edit.trimEndMs !== stored.trimEndMs ||
         edit.gameVolume !== stored.gameVolume ||
-        edit.micVolume !== stored.micVolume),
+        edit.micVolume !== stored.micVolume ||
+        thumb !== storedThumb),
   );
 
   $effect(() => {
@@ -83,9 +87,11 @@
       trim = clampTrim(d.clip.trimStartMs ?? 0, d.clip.trimEndMs ?? d.durationMs, d.durationMs);
       gameVolume = percent(d.clip.gameVolume);
       micVolume = percent(d.clip.micVolume);
+      thumb = d.clip.thumbnailMs;
       position = trim.start;
       data = d;
       stored = edit;
+      storedThumb = thumb;
     } catch (e) {
       loadError = errorMessage(e);
     }
@@ -242,7 +248,7 @@
     video?.play().catch(() => {});
   }
 
-  function onhandlemove(_handle: "start" | "end", ms: number) {
+  function onhandlemove(_handle: "start" | "end" | "thumb", ms: number) {
     // Show the frame under the handle while paused; while playing, the loop takes care of it.
     if (video?.paused) seek(ms);
   }
@@ -260,12 +266,15 @@
     if (!stored || !changed) return true;
     saving = true;
     const next = edit;
+    const nextThumb = thumb;
     try {
-      await api.saveEdit(clip.id, next);
+      await api.saveEdit(clip.id, next, nextThumb);
       stored = next;
+      storedThumb = nextThumb;
       if (data) {
         data.clip = {
           ...data.clip,
+          thumbnailMs: nextThumb,
           trimStartMs: next.trimStartMs,
           trimEndMs: next.trimEndMs,
           gameVolume: next.gameVolume,
@@ -404,7 +413,15 @@
         </button>
         <span class="clock"><strong>{formatClock(position)}</strong> / {formatClock(duration)}</span>
       </div>
-      <TrimBar {duration} bind:start={trim.start} bind:end={trim.end} {position} onseek={seek} {onhandlemove} />
+      <TrimBar
+        {duration}
+        bind:start={trim.start}
+        bind:end={trim.end}
+        bind:thumb
+        {position}
+        onseek={seek}
+        {onhandlemove}
+      />
     </div>
 
     <div class="panel">

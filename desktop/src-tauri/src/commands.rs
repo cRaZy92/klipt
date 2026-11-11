@@ -39,6 +39,8 @@ pub mod events {
     pub const UPLOAD_FAILED: &str = "upload-failed";
     /// Payload: `{ id, progress }`, progress 0..=1 of an "Export copy…".
     pub const EXPORT_PROGRESS: &str = "export-progress";
+    /// Payload: `{ id }`: the clip's thumbnail was made again (the editor picked a frame).
+    pub const THUMBNAIL_CHANGED: &str = "thumbnail-changed";
 }
 
 /// Server titles are 1–100 characters.
@@ -620,6 +622,14 @@ fn progress(app: &AppHandle, id: &str, phase: &'static str, sent: u64, total: u6
     emit(app, events::UPLOAD_PROGRESS, ProgressEvent { id, sent, total, phase });
 }
 
+/// The chosen thumbnail frame as a time in the uploaded, trimmed video (kept inside the cut).
+pub(crate) fn upload_thumbnail_ms(clip: &Clip) -> Option<u64> {
+    let at = clip.thumbnail_ms?;
+    let start = clip.trim_start_ms.unwrap_or(0);
+    let end = clip.trim_end_ms.unwrap_or(clip.duration_ms).max(start);
+    Some(at.clamp(start, end.saturating_sub(1).max(start)) - start)
+}
+
 async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
     let clip = &job.clip;
     let id = clip.id.as_str();
@@ -669,6 +679,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
         game_name: clip.game_name.clone(),
         steam_app_id: clip.steam_app_id,
         visibility: job.visibility,
+        thumbnail_ms: upload_thumbnail_ms(clip),
     };
     let server_clip = client.finalize(token, &request).await?;
     let visibility = match server_clip.visibility {
@@ -781,10 +792,32 @@ pub fn save_edit(
     trim_end_ms: Option<u64>,
     game_volume: f32,
     mic_volume: f32,
+    thumbnail_ms: Option<u64>,
 ) -> Result<()> {
     let cache_dir = cache_dir(&app)?;
     let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume);
-    editor::save_edit(&lock(&state.library), &uploads, &cache_dir, &id, edit).map(|_| ())
+    let clip = {
+        let library = lock(&state.library);
+        editor::save_edit(&library, &uploads, &cache_dir, &id, edit)?;
+        let clip = library.get(&id)?;
+        if clip.thumbnail_ms == thumbnail_ms {
+            return Ok(());
+        }
+        library.set_thumbnail(&id, thumbnail_ms)?;
+        library.get(&id)?
+    };
+    // The library's thumbnail follows; ffmpeg runs off the UI thread.
+    let (thumb, tools) = (lock(&state.library).thumb_path(&id), state.tools.clone());
+    if let Some(tools) = tools {
+        std::thread::spawn(move || {
+            let at = clip.thumbnail_ms.unwrap_or_else(|| crate::recorder::thumbnail_at_ms(clip.duration_ms));
+            if let Err(e) = crate::ffmpeg::thumbnail(&tools, &clip.path, &thumb, at) {
+                eprintln!("klipt: can't redo the thumbnail of {}: {e}", clip.path.display());
+            }
+            emit(&app, events::THUMBNAIL_CHANGED, serde_json::json!({ "id": clip.id }));
+        });
+    }
+    Ok(())
 }
 
 #[derive(Clone, Serialize)]
@@ -938,7 +971,24 @@ mod tests {
             upload_id: None,
             upload_offset: None,
             favorite: false,
+            thumbnail_ms: None,
         }
+    }
+
+    #[test]
+    fn upload_thumbnail_is_relative_to_the_cut_and_inside_it() {
+        let mut c = clip(None, None, None);
+        c.duration_ms = 30_000;
+        assert_eq!(upload_thumbnail_ms(&c), None);
+        c.thumbnail_ms = Some(5_000);
+        assert_eq!(upload_thumbnail_ms(&c), Some(5_000));
+        c.trim_start_ms = Some(4_000);
+        c.trim_end_ms = Some(10_000);
+        assert_eq!(upload_thumbnail_ms(&c), Some(1_000));
+        c.thumbnail_ms = Some(2_000);
+        assert_eq!(upload_thumbnail_ms(&c), Some(0), "before the cut: its first frame");
+        c.thumbnail_ms = Some(20_000);
+        assert_eq!(upload_thumbnail_ms(&c), Some(5_999), "after the cut: its last frame");
     }
 
     #[test]

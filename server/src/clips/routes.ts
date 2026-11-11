@@ -45,6 +45,8 @@ const finalizeBody = z.object({
   gameName: z.string().trim().min(1).max(100).nullish(),
   steamAppId: z.number().int().positive().nullish(),
   visibility: z.enum(['feed', 'link']).optional(),
+  /** The frame (ms into the uploaded video) to use as the thumbnail. */
+  thumbnailMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).nullish(),
 });
 
 /**
@@ -239,7 +241,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       const info = await probeVideo(source);
       assertPlayable(info);
       await remuxFaststart(source, tmpVideo);
-      await makeThumbnail(tmpVideo, tmpThumb, info.durationMs);
+      await makeThumbnail(tmpVideo, tmpThumb, info.durationMs, body.thumbnailMs);
       const { size } = await stat(tmpVideo);
       await rename(tmpVideo, videoPath);
       await rename(tmpThumb, thumbPath);

@@ -53,6 +53,9 @@ pub struct FinalizeRequest {
     pub game_name: Option<String>,
     pub steam_app_id: Option<u32>,
     pub visibility: Visibility,
+    /// The thumbnail's frame in the uploaded (trimmed) video; `None` lets the server pick.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_ms: Option<u64>,
 }
 
 /// The server's `Clip`.

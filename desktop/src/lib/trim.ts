@@ -63,3 +63,13 @@ export function formatClock(ms: number): string {
   const seconds = Math.floor((tenths % 600) / 10);
   return `${minutes}:${String(seconds).padStart(2, "0")}.${tenths % 10}`;
 }
+
+/** Where the thumbnail is taken when none was picked: 1 s into the cut, or its middle if shorter. */
+export function defaultThumb(trim: TrimRange): number {
+  return trim.start + Math.min(1000, Math.floor((trim.end - trim.start) / 2));
+}
+
+/** A thumbnail frame kept inside the cut (its last frame at most), in whole milliseconds. */
+export function clampThumb(ms: number, trim: TrimRange): number {
+  return clamp(Math.round(ms), trim.start, Math.max(trim.start, trim.end - 1));
+}

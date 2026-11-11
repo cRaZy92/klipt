@@ -58,6 +58,7 @@ fn req() -> FinalizeRequest {
         game_name: Some("".into()),
         steam_app_id: None,
         visibility: Visibility::Feed,
+        thumbnail_ms: None,
     }
 }
 

@@ -18,6 +18,7 @@
     onshowfolder,
     oncopy,
     onfavorite,
+    thumbVersion = 0,
   }: {
     clip: ClipView;
     /** The time relative dates are counted from (ticks once a minute). */
@@ -34,6 +35,8 @@
     oncopy: () => void;
     /** Stars or unstars the clip; without it there's no star. */
     onfavorite?: () => void;
+    /** Changes when the thumbnail file is rewritten, so the cached picture isn't shown. */
+    thumbVersion?: number;
   } = $props();
 
   let menuOpen = $state(false);
@@ -43,7 +46,11 @@
   const job = $derived(uploads[clip.id]);
   const busy = $derived(isBusy(job));
   const uploaded = $derived(!!clip.shareUrl);
-  const thumb = $derived(!clip.fileMissing && clip.thumbPath && !thumbFailed ? fileUrl(clip.thumbPath) : null);
+  const thumb = $derived(
+    !clip.fileMissing && clip.thumbPath && !thumbFailed
+      ? `${fileUrl(clip.thumbPath)}${thumbVersion ? `?v=${thumbVersion}` : ""}`
+      : null,
+  );
   const progress = $derived(job ? fraction(job) : null);
 
   function closeMenuOutside(e: MouseEvent) {

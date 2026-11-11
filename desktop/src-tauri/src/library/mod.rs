@@ -51,6 +51,8 @@ pub struct Clip {
     pub upload_offset: Option<u64>,
     /// Starred: shown under Favorites and never deleted by the automatic cleanup.
     pub favorite: bool,
+    /// The thumbnail's frame (ms into the video file); `None` = automatic.
+    pub thumbnail_ms: Option<u64>,
 }
 
 /// A clip as the library screen shows it.

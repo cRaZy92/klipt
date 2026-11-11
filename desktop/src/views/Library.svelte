@@ -46,6 +46,8 @@
   let playing = $state<MyUpload | null>(null);
   let downloading = $state<Set<string>>(new Set());
   let saving = $state(false);
+  /** Bumped when a clip's thumbnail file is made again, so its picture reloads. */
+  let thumbVersion = $state<Record<string, number>>({});
 
   const items = $derived(mergeClips(local, uploads ?? []));
   const games = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
@@ -101,6 +103,7 @@
         local = [clip, ...local.filter((c) => c.id !== clip.id)];
       }),
       on("upload-done", load),
+      on("thumbnail-changed", ({ id }) => (thumbVersion = { ...thumbVersion, [id]: Date.now() })),
       on("clips-cleaned", ({ deleted }) => {
         void loadLocal();
         toast(`Cleanup deleted ${deleted === 1 ? "1 old clip" : `${deleted} old clips`}.`, "info");
@@ -324,6 +327,7 @@
                   onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
                   onremove={() => (removing = { clip, deleteFile: false })}
                   onfavorite={() => toggleFavorite(clip)}
+                  thumbVersion={thumbVersion[clip.id] ?? clip.thumbnailMs ?? 0}
                   onshowfolder={() => act(() => api.showInFolder(clip.id))}
                   oncopy={() => copyLink(clip)}
                 />

@@ -74,6 +74,8 @@ export interface FinalizeRequest {
   gameName?: string | null;
   steamAppId?: number | null;
   visibility?: Visibility;
+  /** The frame (ms into the uploaded video) to use as the thumbnail; omitted = automatic. */
+  thumbnailMs?: number | null;
 }
 
 export interface Clip {

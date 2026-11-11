@@ -10,7 +10,24 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// The longest a request's line and headers may be. The editor's requests are a few hundred bytes.
+const MAX_HEAD_BYTES: u64 = 8 * 1024;
+/// More connections than the editor ever opens at once (a video and two audio tracks).
+const MAX_CONNECTIONS: usize = 32;
+/// A client that sends nothing for this long is dropped.
+const READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// A client that stops reading for this long is dropped. Generous: a paused player may stop
+/// reading for a while; if it's dropped, it asks again with a Range when it resumes.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Origins of Klipt's own window (Linux, Windows, `pnpm tauri dev`). The editor's `<video>` loads
+/// with `crossorigin` (its frame is drawn on a canvas), so these get CORS; other web pages don't.
+const APP_ORIGINS: &[&str] =
+    &["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420"];
 
 #[derive(Clone)]
 pub struct MediaServer {
@@ -25,14 +42,21 @@ impl MediaServer {
         let port = listener.local_addr()?.port();
         let files: Arc<Mutex<HashMap<String, PathBuf>>> = Arc::default();
         let shared = files.clone();
+        let open = Arc::new(AtomicUsize::new(0));
         std::thread::Builder::new().name("klipt-media".into()).spawn(move || {
             for stream in listener.incoming().flatten() {
-                let files = shared.clone();
-                let _ = std::thread::Builder::new()
-                    .name("klipt-media-conn".into())
-                    .spawn(move || {
-                        let _ = handle(stream, &files);
-                    });
+                if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                    open.fetch_sub(1, Ordering::SeqCst);
+                    continue; // dropping the stream closes it
+                }
+                let (files, open) = (shared.clone(), open.clone());
+                let spawned = std::thread::Builder::new().name("klipt-media-conn".into()).spawn(move || {
+                    let _ = handle(stream, &files);
+                    open.fetch_sub(1, Ordering::SeqCst);
+                });
+                if spawned.is_err() {
+                    eprintln!("klipt: can't start a media connection thread");
+                }
             }
         })?;
         Ok(MediaServer { port, files })
@@ -55,7 +79,10 @@ impl MediaServer {
 }
 
 fn handle(stream: TcpStream, files: &Mutex<HashMap<String, PathBuf>>) -> io::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
+    stream.set_read_timeout(Some(READ_TIMEOUT))?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    // A head longer than the limit reads as cut short, so it never grows without bound.
+    let mut reader = BufReader::new(stream.try_clone()?.take(MAX_HEAD_BYTES));
     let mut out = stream;
     let mut line = String::new();
     reader.read_line(&mut line)?;
@@ -63,6 +90,7 @@ fn handle(stream: TcpStream, files: &Mutex<HashMap<String, PathBuf>>) -> io::Res
     let method = parts.next().unwrap_or("").to_string();
     let target = parts.next().unwrap_or("").to_string();
     let mut range: Option<String> = None;
+    let mut origin: Option<String> = None;
     loop {
         let mut h = String::new();
         if reader.read_line(&mut h)? == 0 || h == "\r\n" || h == "\n" {
@@ -71,6 +99,8 @@ fn handle(stream: TcpStream, files: &Mutex<HashMap<String, PathBuf>>) -> io::Res
         if let Some((k, v)) = h.split_once(':') {
             if k.trim().eq_ignore_ascii_case("range") {
                 range = Some(v.trim().to_string());
+            } else if k.trim().eq_ignore_ascii_case("origin") {
+                origin = Some(v.trim().to_string());
             }
         }
     }
@@ -99,8 +129,11 @@ fn handle(stream: TcpStream, files: &Mutex<HashMap<String, PathBuf>>) -> io::Res
     };
     let len = if size == 0 { 0 } else { end - start + 1 };
     let mut head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nAccept-Ranges: bytes\r\nContent-Length: {len}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n"
+        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nAccept-Ranges: bytes\r\nContent-Length: {len}\r\nConnection: close\r\nVary: Origin\r\n"
     );
+    if let Some(origin) = origin.filter(|o| APP_ORIGINS.contains(&o.as_str())) {
+        head.push_str(&format!("Access-Control-Allow-Origin: {origin}\r\n"));
+    }
     if status.starts_with("206") {
         head.push_str(&format!("Content-Range: bytes {start}-{end}/{size}\r\n"));
     }
@@ -179,5 +212,27 @@ mod tests {
         assert!(part.contains("Content-Range: bytes 2-4/10"));
         assert!(part.ends_with("234"));
         assert!(get("/nope", "").starts_with("HTTP/1.1 404"));
+
+        // CORS only for Klipt's own window, never for any web page.
+        assert!(!full.contains("Access-Control-Allow-Origin"), "{full}");
+        let app = get(&path, "Origin: tauri://localhost\r\n");
+        assert!(app.contains("Access-Control-Allow-Origin: tauri://localhost\r\n"), "{app}");
+        let web = get(&path, "Origin: https://evil.example\r\n");
+        assert!(!web.contains("Access-Control-Allow-Origin"), "{web}");
+    }
+
+    #[test]
+    fn an_endless_header_line_is_cut_off() {
+        let server = MediaServer::start().unwrap();
+        let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+        // Far past the limit, with no newline: the server stops reading and answers.
+        let junk = vec![b'a'; 64 * 1024];
+        let _ = s.write_all(b"GET /");
+        let _ = s.write_all(&junk);
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut reply = Vec::new();
+        let _ = s.read_to_end(&mut reply);
+        let reply = String::from_utf8_lossy(&reply);
+        assert!(reply.starts_with("HTTP/1.1 404"), "{reply}");
     }
 }

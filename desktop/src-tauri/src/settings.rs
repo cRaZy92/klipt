@@ -75,6 +75,8 @@ pub struct Settings {
     /// Delete clips older than `cleanup_days` from this PC (uploaded and favorite clips are kept).
     pub cleanup_enabled: bool,
     pub cleanup_days: u32,
+    /// A system notification when a friend uploads a clip.
+    pub friend_notifications: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -120,6 +122,7 @@ impl Default for Settings {
             server_url: None,
             cleanup_enabled: false,
             cleanup_days: 30,
+            friend_notifications: true,
         }
     }
 }

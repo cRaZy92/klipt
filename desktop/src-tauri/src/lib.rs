@@ -5,6 +5,7 @@ pub mod commands;
 pub mod editor;
 pub mod errors;
 pub mod export;
+pub mod feed_watch;
 pub mod feedback;
 pub mod ffmpeg;
 pub mod games;
@@ -73,6 +74,7 @@ pub fn run() {
             app.manage(hotkey::start_for_app(app.handle(), settings.hotkey.clone()));
             update::start(app.handle());
             cleanup::start(app.handle());
+            feed_watch::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -118,6 +120,8 @@ pub fn run() {
             server_clips::delete_upload,
             server_clips::download_upload,
             server_clips::record_view,
+            feed_watch::feed_new_count,
+            feed_watch::mark_feed_seen,
             server_clips::clip_viewers,
             update::install_update,
             update::app_info,

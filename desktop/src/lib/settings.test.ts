@@ -21,6 +21,7 @@ const defaults: Settings = {
   serverUrl: null,
   cleanupEnabled: false,
   cleanupDays: 30,
+  friendNotifications: true,
 };
 
 const fields = (patch: Partial<Settings>) => validateSettings({ ...defaults, ...patch }).map((e) => e.field);

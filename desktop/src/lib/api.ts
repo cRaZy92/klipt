@@ -74,6 +74,8 @@ export interface Settings {
   /** Delete clips older than `cleanupDays` from this PC; uploaded and favorite clips are kept. */
   cleanupEnabled: boolean;
   cleanupDays: number;
+  /** A system notification when a friend shares a clip. */
+  friendNotifications: boolean;
 }
 
 export interface FieldError {
@@ -286,6 +288,10 @@ export const api = {
   feedClips: (game: string | null, cursor: string | null, search: string | null = null) =>
     invoke<FeedPage>("feed_clips", { game, cursor, search }),
   feedGames: () => invoke<FeedGame[]>("feed_games"),
+  /** Friends' clips new since you last opened the Feed. */
+  feedNewCount: () => invoke<number>("feed_new_count"),
+  /** You've seen the feed up to the clip created at `newest`. */
+  markFeedSeen: (newest: string) => invoke<void>("mark_feed_seen", { newest }),
   /** Counts a play of a server clip (best effort). */
   recordView: (id: string) => invoke<void>("record_view", { id }),
   /** Friends who watched your upload, first viewer first. */
@@ -315,6 +321,8 @@ export interface Events {
   "upload-done": UploadDone;
   "upload-failed": UploadFailed;
   "export-progress": ExportProgress;
+  /** The number of friends' clips you haven't seen changed. */
+  "feed-new": { count: number };
   /** The automatic cleanup deleted old clips. */
   "clips-cleaned": { deleted: number; freedBytes: number };
   /**

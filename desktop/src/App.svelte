@@ -33,6 +33,8 @@
   let update = $state<{ version: string; command: string | null; installing: boolean } | null>(null);
   /** The current screen (editor or settings) has unsaved changes. */
   let viewDirty = $state(false);
+  /** Friends' clips you haven't seen (the Feed tab's badge). */
+  let feedNew = $state(0);
   let leaving = $state<Leaving | null>(null);
 
   const hotkey = $derived(hotkeyStatus.display ?? (settings ? hotkeyLabel(settings.hotkey) : ""));
@@ -54,6 +56,7 @@
 
   onMount(() => {
     void start();
+    api.feedNewCount().then((n) => (feedNew = n)).catch(() => {});
     const stops = [
       on("save-busy", () => toast("Already saving a clip…")),
       on("recorder-error", (e) => toast(e.message, "error")),
@@ -64,6 +67,7 @@
       on("hotkey-bound", ({ display }) => (hotkeyStatus = { display, error: null, errorCode: null })),
       on("clip-saved", () => toast("Clip saved", "success")),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
+      on("feed-new", ({ count }) => (feedNew = count)),
       watchUploads({
         // The login expired mid-upload: log in again, then the upload carries on.
         unauthorized: () => {
@@ -211,8 +215,12 @@
           class:active={view.name === "feed"}
           aria-current={view.name === "feed" ? "page" : undefined}
           onclick={() => go({ name: "feed" })}
+          aria-label={feedNew > 0 ? `Feed, ${feedNew} new` : undefined}
         >
-          <span class="item-icon"><Icon name="users" size={20} /></span>
+          <span class="item-icon">
+            <Icon name="users" size={20} />
+            {#if feedNew > 0}<span class="new-count" aria-hidden="true">{feedNew > 9 ? "9+" : feedNew}</span>{/if}
+          </span>
           Feed
         </button>
       </div>
@@ -421,6 +429,29 @@
 
   .item:hover {
     color: var(--text);
+  }
+
+  .item-icon {
+    position: relative;
+  }
+
+  .new-count {
+    position: absolute;
+    top: -0.2rem;
+    right: 0.1rem;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.3rem;
+    border: 2px solid var(--bg, #0b0a10);
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.66rem;
+    font-weight: 750;
+    line-height: 0.75rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    box-sizing: content-box;
   }
 
   .item:hover .item-icon {

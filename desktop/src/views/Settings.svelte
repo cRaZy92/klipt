@@ -262,6 +262,7 @@
     startWithOs: "general",
     saveSound: "general",
     saveNotification: "general",
+    friendNotifications: "general",
   };
   const tabOf = (field: string): Tab => FIELD_TAB[field] ?? "recording";
   const tabsWithErrors = $derived(new Set(Object.keys(fieldErrors).map(tabOf)));
@@ -609,6 +610,11 @@
         <input type="checkbox" role="switch" bind:checked={draft.saveNotification} />
         <span class="switch" aria-hidden="true"></span>
         <span><strong>Show a notification when a clip is saved</strong></span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" role="switch" bind:checked={draft.friendNotifications} />
+        <span class="switch" aria-hidden="true"></span>
+        <span><strong>Notify me when a friend shares a clip</strong><small>Klipt checks the feed every few minutes.</small></span>
       </label>
     </section>
 

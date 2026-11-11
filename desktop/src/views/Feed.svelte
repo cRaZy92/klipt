@@ -59,6 +59,8 @@
       if (id !== request) return;
       clips = more ? [...clips, ...page.items] : page.items;
       cursor = page.nextCursor;
+      // The unfiltered first page is the whole feed's newest end: you've now seen it.
+      if (!more && !game && !search.trim() && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
       now = Date.now();
       loaded = true;
     } catch (e) {

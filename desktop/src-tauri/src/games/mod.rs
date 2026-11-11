@@ -111,6 +111,27 @@ mod tests {
         assert_eq!(identify_exe_path(path, &manifests, dir.path()), None);
     }
 
+    #[test]
+    fn background_steam_tools_dont_count_as_a_running_game() {
+        // Wallpaper Engine runs all day from steamapps\common: it mustn't keep game mode recording.
+        let manifests = vec![
+            AppManifest { appid: 431960, name: "Wallpaper Engine".into(), installdir: "wallpaper_engine".into() },
+            AppManifest {
+                appid: 228980,
+                name: "Steamworks Common Redistributables".into(),
+                installdir: "Steamworks Shared".into(),
+            },
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        for path in [
+            r"C:\Steam\steamapps\common\wallpaper_engine\wallpaper64.exe",
+            r"C:\Steam\steamapps\common\wallpaper_engine\bin\webwallpaper32.exe",
+            r"C:\Steam\steamapps\common\Steamworks Shared\_CommonRedist\vcredist\2022\VC_redist.x64.exe",
+        ] {
+            assert_eq!(identify_exe_path(path, &manifests, dir.path()), None, "{path}");
+        }
+    }
+
     fn active_matter() -> Vec<AppManifest> {
         vec![AppManifest { appid: 2887580, name: "Active Matter".into(), installdir: "ActiveMatter".into() }]
     }

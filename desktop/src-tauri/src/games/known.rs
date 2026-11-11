@@ -61,6 +61,9 @@ const IDLE_APP_IDS: &[u32] = &[
     431960,  // Wallpaper Engine
     993090,  // Lossless Scaling
     629520,  // Soundpad
+    228980,  // Steamworks Common Redistributables (installers Steam runs before a game)
+    1905180, // OBS Studio
+    3301060, // Desktop Mate
 ];
 
 pub fn is_idle_app(app_id: u32) -> bool {

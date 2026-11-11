@@ -49,9 +49,50 @@ pub struct SteamProcess {
     pub exe: Option<String>,
 }
 
+/// Programs that run a game rather than being it: Steam's launch helpers, the Steam Runtime
+/// container, Proton/Wine, shells and wrappers from launch options. Every game of their kind runs
+/// under the same ones, so a clip tagged or a mapping keyed with one would apply to all of them.
+const WRAPPERS: &[&str] = &[
+    "reaper", "steam-launch-wrapper", "steam-runtime-launch-client", "steam-runtime-launcher-service",
+    "pressure-vessel-wrap", "pressure-vessel-adverb", "pv-bwrap", "srt-bwrap", "bwrap", "proton",
+    "wine", "wine64", "wine-preloader", "wine64-preloader", "wineserver", "gamemoderun", "gamescope",
+    "mangohud", "sh", "bash", "dash", "python", "python3", "steam", "steam.exe",
+];
+
+/// The game's executable name for one process, or None for a wrapper. Proton games run as
+/// `wine64-preloader` with the Windows path (`Z:\...\Game.exe`) as the first argument, so that
+/// path wins when it names an `.exe`; Wine's own Windows programs (`C:\windows\...`) are wrappers.
+pub fn game_exe(exe_link: Option<&str>, argv0: Option<&str>) -> Option<String> {
+    if let Some(arg) = argv0.filter(|a| a.to_ascii_lowercase().ends_with(".exe")) {
+        if arg.to_ascii_lowercase().replace('/', "\\").contains("\\windows\\") {
+            return None;
+        }
+        let name = arg.rsplit(['\\', '/']).next()?;
+        return (!name.is_empty() && !is_wrapper(name)).then(|| name.to_string());
+    }
+    let name = exe_link?.rsplit('/').next()?;
+    (!name.is_empty() && !is_wrapper(name)).then(|| name.to_string())
+}
+
+fn is_wrapper(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    // python3.12, pressure-vessel-launch, ... count as their family.
+    WRAPPERS.iter().any(|w| name == *w || name.strip_prefix(w).is_some_and(|rest| rest.starts_with(['.', '-'])))
+}
+
+/// Resident memory in pages, for picking the game among its helpers (the game is the big one).
+fn resident_pages(pid: u32) -> u64 {
+    fs::read_to_string(format!("/proc/{pid}/statm"))
+        .ok()
+        .and_then(|s| s.split_whitespace().nth(1)?.parse().ok())
+        .unwrap_or(0)
+}
+
 pub fn find_steam_game() -> Option<SteamProcess> {
     let ours = std::process::id();
     let mut parents = HashMap::new();
+    // The first app id found, and the biggest non-wrapper process of it so far.
+    let mut found: Option<(u32, Option<(u64, String)>)> = None;
     for entry in fs::read_dir("/proc").ok()?.flatten() {
         let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
         if in_our_tree(pid, ours, &mut parents) {
@@ -60,14 +101,22 @@ pub fn find_steam_game() -> Option<SteamProcess> {
         // Other users' processes are unreadable; skip them quietly.
         let Ok(environ) = fs::read(format!("/proc/{pid}/environ")) else { continue };
         // Idle/overlay apps (Bongo Cat, Wallpaper Engine…) also carry a SteamAppId: keep looking.
-        if let Some(app_id) = parse_environ(&environ).filter(|id| !super::known::is_idle_app(*id)) {
-            let exe = fs::read_link(format!("/proc/{pid}/exe"))
-                .ok()
-                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
-            return Some(SteamProcess { app_id, exe });
+        let Some(app_id) = parse_environ(&environ).filter(|id| !super::known::is_idle_app(*id)) else { continue };
+        let (game_id, best) = found.get_or_insert((app_id, None));
+        if *game_id != app_id {
+            continue;
+        }
+        let exe_link = fs::read_link(format!("/proc/{pid}/exe")).ok();
+        let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        let argv0 = cmdline.split(|&b| b == 0).next().map(String::from_utf8_lossy);
+        let Some(exe) = game_exe(exe_link.as_deref().and_then(|p| p.to_str()), argv0.as_deref()) else { continue };
+        let pages = resident_pages(pid);
+        if best.as_ref().is_none_or(|(most, _)| pages > *most) {
+            *best = Some((pages, exe));
         }
     }
-    None
+    let (app_id, best) = found?;
+    Some(SteamProcess { app_id, exe: best.map(|(_, exe)| exe) })
 }
 
 #[cfg(test)]
@@ -95,6 +144,38 @@ mod tests {
     fn ignores_lookalikes_and_garbage() {
         assert_eq!(parse_environ(b"XSteamAppId=5\0SteamAppIdent=6\0SteamAppId=abc\0"), None);
         assert_eq!(parse_environ(b""), None);
+    }
+
+    #[test]
+    fn steam_and_proton_wrappers_are_not_the_game() {
+        let home = "/home/a/.local/share/Steam";
+        for (link, argv0) in [
+            (format!("{home}/steamrt64/reaper"), format!("{home}/steamrt64/reaper")),
+            ("/usr/bin/steam-runtime-launch-client".into(), "steam-runtime-launch-client".into()),
+            ("/usr/lib/pressure-vessel/from-host/bin/pressure-vessel-adverb".into(), "pressure-vessel-adverb".into()),
+            ("/usr/bin/python3.12".into(), "python3".into()),
+            ("/proton/files/bin/wineserver".into(), "wineserver".into()),
+            ("/proton/files/bin/wine64-preloader".into(), r"C:\windows\system32\services.exe".into()),
+            ("/proton/files/bin/wine64-preloader".into(), r"c:\windows\system32\steam.exe".into()),
+        ] {
+            assert_eq!(game_exe(Some(&link), Some(&argv0)), None, "{link} {argv0}");
+        }
+    }
+
+    #[test]
+    fn the_game_exe_is_found_behind_wrappers() {
+        assert_eq!(
+            game_exe(Some("/proton/files/bin/wine64-preloader"), Some(r"Z:\games\ActiveMatter\Game\AM.exe")),
+            Some("AM.exe".into()),
+            "Proton: the Windows exe in argv[0]"
+        );
+        assert_eq!(
+            game_exe(Some("/lib/steamapps/common/BongoCat/BongoCat.x86_64"), Some("/lib/steamapps/common/BongoCat/BongoCat.x86_64")),
+            Some("BongoCat.x86_64".into()),
+            "native game"
+        );
+        assert_eq!(game_exe(Some("/x/cs2"), None), Some("cs2".into()));
+        assert_eq!(game_exe(None, None), None);
     }
 
     #[test]

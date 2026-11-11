@@ -168,3 +168,13 @@ describe('web pages', () => {
     expect((await get('/api/nothing')).headers['content-type']).toContain('json');
   });
 });
+
+describe('skDate', () => {
+  it('formats dates the Slovak way, in Slovak time', async () => {
+    const { skDate } = await import('../src/web/components.js');
+    expect(skDate(new Date(Date.UTC(2026, 10, 10, 12)))).toBe('10. 11. 2026');
+    // 23:30 UTC on 10 Nov is already 11 Nov in Bratislava (UTC+1).
+    expect(skDate('2026-11-10T23:30:00Z')).toBe('11. 11. 2026');
+    expect(skDate(new Date(Date.UTC(2026, 0, 5, 12)))).toBe('5. 1. 2026');
+  });
+});

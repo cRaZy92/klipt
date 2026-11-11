@@ -1,6 +1,6 @@
 import type { AdminStats, AdminUser, Invite } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
-import { formatGB, relativeDate } from '../components.js';
+import { formatGB, relativeDate, skDate } from '../components.js';
 import { Layout } from '../layout.js';
 
 import { esc as e } from '../escape.js';
@@ -23,7 +23,7 @@ export function AdminPage(props: { user: AuthUser; stats: AdminStats; invites: I
           <li class="row" data-code={e(i.code)}>
             <div class="row-main">
               <code class="url">{e(i.url)}</code>
-              <div class="meta"><span>Expires {e(new Date(i.expiresAt).toISOString().slice(0, 10))}</span></div>
+              <div class="meta"><span>Expires {skDate(i.expiresAt)}</span></div>
             </div>
             <button type="button" class="btn small" data-action="copy" data-url={e(i.url)}>Copy</button>
             <button type="button" class="btn small danger" data-action="revoke-invite">Revoke</button>

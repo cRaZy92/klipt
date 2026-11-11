@@ -2,6 +2,7 @@ import type { Clip } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import { esc as e } from '../escape.js';
 import { Layout } from '../layout.js';
+import { skDate } from '../components.js';
 
 function meta(attr: 'property' | 'name', key: string, value: string | number): string {
   return `<meta ${attr}="${key}" content="${e(String(value))}" />`;
@@ -43,7 +44,7 @@ export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete:
         <p class="meta">
           <a href={`/u/${encodeURIComponent(clip.owner.username)}`}>{e(clip.owner.username)}</a>
           {clip.gameName ? <span> · {e(clip.gameName)}</span> : ''}
-          <span> · {clip.createdAt.slice(0, 10)}</span>
+          <span> · {skDate(clip.createdAt)}</span>
         </p>
         <div class="actions" data-clip-id={e(clip.id)}>
           <button type="button" class="btn" data-action="copy" data-url={e(clip.shareUrl)}>Copy link</button>

@@ -8,6 +8,20 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+const SK_DATE = new Intl.DateTimeFormat('sk-SK', {
+  timeZone: 'Europe/Bratislava',
+  day: 'numeric',
+  month: 'numeric',
+  year: 'numeric',
+});
+
+/** Slovak date, e.g. "10. 11. 2026" (in Slovak time, so late-night clips keep their day). */
+export function skDate(date: Date | string): string {
+  const parts = SK_DATE.formatToParts(new Date(date));
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${part('day')}. ${part('month')}. ${part('year')}`;
+}
+
 export function relativeDate(date: Date, now = new Date()): string {
   const sec = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 1000));
   const units: [number, string][] = [

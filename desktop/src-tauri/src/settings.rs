@@ -72,6 +72,9 @@ pub struct Settings {
     pub save_sound: bool,
     pub save_notification: bool,
     pub server_url: Option<String>,
+    /// Delete clips older than `cleanup_days` from this PC (uploaded and favorite clips are kept).
+    pub cleanup_enabled: bool,
+    pub cleanup_days: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -86,6 +89,7 @@ pub const DEFAULT_HOTKEY: &str = "Alt+Backquote";
 pub const BUFFER_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
 pub const BITRATE_KBPS_RANGE: std::ops::RangeInclusive<u32> = 2_000..=80_000;
 pub const FPS_CHOICES: [u32; 2] = [30, 60];
+pub const CLEANUP_DAYS_RANGE: std::ops::RangeInclusive<u32> = 1..=365;
 
 /// `<Videos>/Klipt`.
 pub fn default_output_dir() -> PathBuf {
@@ -114,6 +118,8 @@ impl Default for Settings {
             save_sound: true,
             save_notification: true,
             server_url: None,
+            cleanup_enabled: false,
+            cleanup_days: 30,
         }
     }
 }
@@ -203,6 +209,9 @@ impl Settings {
         if self.output_dir.as_os_str().is_empty() {
             fail("outputDir", "Choose a folder for your clips.");
         }
+        if !CLEANUP_DAYS_RANGE.contains(&self.cleanup_days) {
+            fail("cleanupDays", "Keep clips for 1 to 365 days.");
+        }
         errors
     }
 
@@ -222,6 +231,7 @@ impl Settings {
                 "bufferSeconds" => self.buffer_seconds = defaults.buffer_seconds,
                 "hotkey" => self.hotkey = defaults.hotkey.clone(),
                 "outputDir" => self.output_dir = defaults.output_dir.clone(),
+                "cleanupDays" => self.cleanup_days = defaults.cleanup_days,
                 other => debug_assert!(false, "validate() returned a field this function doesn't reset: {other}"),
             }
         }
@@ -441,5 +451,21 @@ mod tests {
         assert_eq!(fields(Settings { output_dir: PathBuf::new(), ..Settings::default() }), ["outputDir"]);
         let messages = Settings { fps: 45, ..Settings::default() }.validate();
         assert!(messages[0].message.contains("30 or 60"), "{}", messages[0].message);
+    }
+
+    #[test]
+    fn cleanup_is_off_by_default_and_days_must_be_in_range() {
+        let defaults = Settings::default();
+        assert!(!defaults.cleanup_enabled);
+        assert_eq!(defaults.cleanup_days, 30);
+        for (days, ok) in [(0, false), (1, true), (365, true), (366, false)] {
+            let s = Settings { cleanup_days: days, ..Settings::default() };
+            assert_eq!(s.validate().iter().all(|e| e.field != "cleanupDays"), ok, "{days} days");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(FILE_NAME), r#"{"cleanupEnabled": true, "cleanupDays": 0}"#).unwrap();
+        let loaded = Settings::load(dir.path());
+        assert!(loaded.cleanup_enabled);
+        assert_eq!(loaded.cleanup_days, 30);
     }
 }

@@ -21,6 +21,8 @@
     BITRATE_KBPS_MIN,
     BUFFER_SECONDS_MAX,
     BUFFER_SECONDS_MIN,
+    CLEANUP_DAYS_MAX,
+    CLEANUP_DAYS_MIN,
     PRESET_KBPS,
     bitrateKbps,
     estimateRamMb,
@@ -256,6 +258,7 @@
     micDeviceId: "audio",
     hotkey: "hotkey",
     outputDir: "clips",
+    cleanupDays: "clips",
     startWithOs: "general",
     saveSound: "general",
     saveNotification: "general",
@@ -548,6 +551,45 @@
         </button>
       </div>
       {#if fieldErrors.outputDir}<small class="error">{fieldErrors.outputDir}</small>{/if}
+      {#if draft.outputDir === settings.outputDir}
+        <p class="muted folder-size">
+          {#await api.clipsFolderSize()}
+            Measuring the folder…
+          {:then bytes}
+            The folder takes <strong>{formatSize(bytes)}</strong>.
+          {:catch}
+            Can't measure the folder.
+          {/await}
+        </p>
+      {/if}
+    </section>
+
+    <section>
+      <h2>Cleanup</h2>
+      <label class="toggle">
+        <input type="checkbox" role="switch" bind:checked={draft.cleanupEnabled} />
+        <span class="switch" aria-hidden="true"></span>
+        <span>
+          <strong>Delete old clips from this PC</strong>
+          <small>Uploaded and favorite clips are always kept. Deleted clips can't be recovered.</small>
+        </span>
+      </label>
+      <div class="row">
+        <label class="label" for="cleanup-days">Delete clips older than</label>
+        <div class="days">
+          <input
+            id="cleanup-days"
+            class="input seconds"
+            type="number"
+            min={CLEANUP_DAYS_MIN}
+            max={CLEANUP_DAYS_MAX}
+            bind:value={draft.cleanupDays}
+            aria-invalid={!!fieldErrors.cleanupDays}
+          />
+          <span class="muted">days</span>
+        </div>
+        {#if fieldErrors.cleanupDays}<small class="error">{fieldErrors.cleanupDays}</small>{/if}
+      </div>
     </section>
 
     {:else if tab === "general"}
@@ -1018,6 +1060,17 @@
     50% {
       border-color: transparent;
     }
+  }
+
+  .folder-size {
+    margin: 0.75rem 0 0;
+    font-size: 0.9rem;
+  }
+
+  .days {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
   }
 
   .folder {

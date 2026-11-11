@@ -19,6 +19,8 @@ const defaults: Settings = {
   saveSound: true,
   saveNotification: true,
   serverUrl: null,
+  cleanupEnabled: false,
+  cleanupDays: 30,
 };
 
 const fields = (patch: Partial<Settings>) => validateSettings({ ...defaults, ...patch }).map((e) => e.field);
@@ -99,5 +101,15 @@ describe("sameSettings", () => {
     expect(sameSettings(defaults, { ...defaults })).toBe(true);
     expect(sameSettings(defaults, { ...defaults, fps: 30 })).toBe(false);
     expect(sameSettings(defaults, { ...defaults, displayId: "DP-1" })).toBe(false);
+  });
+});
+
+describe("cleanup days", () => {
+  it("must be a whole number from 1 to 365", () => {
+    expect(fields({ cleanupDays: 1 })).toEqual([]);
+    expect(fields({ cleanupDays: 365 })).toEqual([]);
+    expect(fields({ cleanupDays: 0 })).toEqual(["cleanupDays"]);
+    expect(fields({ cleanupDays: 366 })).toEqual(["cleanupDays"]);
+    expect(fields({ cleanupDays: 2.5 })).toEqual(["cleanupDays"]);
   });
 });

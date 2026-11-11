@@ -101,6 +101,10 @@
         local = [clip, ...local.filter((c) => c.id !== clip.id)];
       }),
       on("upload-done", load),
+      on("clips-cleaned", ({ deleted }) => {
+        void loadLocal();
+        toast(`Cleanup deleted ${deleted === 1 ? "1 old clip" : `${deleted} old clips`}.`, "info");
+      }),
     ];
     return () => {
       clearInterval(timer);

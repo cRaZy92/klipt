@@ -185,6 +185,17 @@ impl Library {
         self.update(id, "UPDATE clips SET title = ?2 WHERE id = ?1", params![id, title])
     }
 
+    /// Clips the automatic cleanup may delete: saved before `before` (Unix ms), not starred, not
+    /// uploaded and with no upload in progress or paused. Oldest first.
+    pub fn cleanup_candidates(&self, before: i64) -> Result<Vec<Clip>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM clips WHERE created_at < ?1 AND favorite = 0 AND server_clip_id IS NULL
+             AND upload_id IS NULL ORDER BY created_at ASC"
+        ))?;
+        let clips = stmt.query_map([before], row_to_clip)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(clips)
+    }
+
     /// Stars or unstars a clip. Favorites are never deleted by the automatic cleanup.
     pub fn set_favorite(&self, id: &str, favorite: bool) -> Result<()> {
         self.update(id, "UPDATE clips SET favorite = ?2 WHERE id = ?1", params![id, favorite])
@@ -526,6 +537,22 @@ mod tests {
         }
         let lib = Library::open(&path).unwrap();
         assert!(!lib.get("old").unwrap().favorite);
+    }
+
+    #[test]
+    fn cleanup_keeps_new_favorite_uploaded_and_uploading_clips() {
+        let f = Fixture::new();
+        let old = f.add("old.mp4", 100, None);
+        let older = f.add("older.mp4", 50, None);
+        f.add("new.mp4", 1_000, None);
+        let fav = f.add("fav.mp4", 100, None);
+        f.lib.set_favorite(&fav.id, true).unwrap();
+        let up = f.add("up.mp4", 100, None);
+        f.lib.mark_uploaded(&up.id, "srv", "https://k/c/srv", "feed").unwrap();
+        let paused = f.add("paused.mp4", 100, None);
+        f.lib.set_upload_progress(&paused.id, Some(("tus-1", 10))).unwrap();
+        let ids: Vec<String> = f.lib.cleanup_candidates(500).unwrap().into_iter().map(|c| c.id).collect();
+        assert_eq!(ids, vec![older.id, old.id]);
     }
 }
 

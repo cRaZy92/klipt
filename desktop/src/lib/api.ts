@@ -71,6 +71,9 @@ export interface Settings {
   saveSound: boolean;
   saveNotification: boolean;
   serverUrl: string | null;
+  /** Delete clips older than `cleanupDays` from this PC; uploaded and favorite clips are kept. */
+  cleanupEnabled: boolean;
+  cleanupDays: number;
 }
 
 export interface FieldError {
@@ -242,6 +245,8 @@ export const api = {
   /** Microphones (inputs only). */
   listAudioDevices: () => invoke<AudioDevice[]>("list_audio_devices"),
   openClipsFolder: () => invoke<void>("open_clips_folder"),
+  /** Bytes the clips folder takes on disk. */
+  clipsFolderSize: () => invoke<number>("clips_folder_size"),
   getAccount: () => invoke<Account | null>("get_account"),
   checkServer: (serverUrl: string) => invoke<string>("check_server", { serverUrl }),
   login: (serverUrl: string, username: string, password: string) =>
@@ -298,6 +303,8 @@ export interface Events {
   "upload-done": UploadDone;
   "upload-failed": UploadFailed;
   "export-progress": ExportProgress;
+  /** The automatic cleanup deleted old clips. */
+  "clips-cleaned": { deleted: number; freedBytes: number };
   /**
    * A newer release is out. Windows installs it itself (`installUpdate`); on Linux `command` is
    * what the user runs in a terminal to install it.

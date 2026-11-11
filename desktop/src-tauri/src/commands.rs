@@ -266,6 +266,11 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
     if effects.autostart {
         crate::apply_autostart(&app, new.start_with_os);
     }
+    if new.cleanup_enabled {
+        // Turned on or shortened: delete what's now too old without waiting for the next run.
+        let handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::cleanup::run_now(&handle));
+    }
     // While paused nothing restarts: the new settings apply on resume.
     let paused = app.try_state::<crate::tray::Tray>().is_some_and(|t| t.is_paused());
     Ok(SettingsSaved { settings: new, recorder_restarted: effects.restart_recorder && !paused, hotkey_display })
@@ -310,6 +315,15 @@ pub fn open_clips_folder(app: AppHandle, state: State<'_, AppState>) -> Result<(
     app.opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
         .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+}
+
+/// How many bytes the clips folder (with its subfolders) takes on disk.
+#[tauri::command]
+pub async fn clips_folder_size(app: AppHandle) -> Result<u64> {
+    let dir = lock(&app.state::<AppState>().settings).output_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::cleanup::folder_size(&dir))
+        .await
+        .map_err(|e| AppError::Internal(format!("folder size failed: {e}")))
 }
 
 /// Lets the UI load files from the clips folder through the asset protocol. Not recursive: clips

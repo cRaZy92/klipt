@@ -1,5 +1,6 @@
 //! Klipt desktop app core. All logic lives here; the Svelte UI talks to it through Tauri commands.
 
+pub mod cleanup;
 pub mod commands;
 pub mod editor;
 pub mod errors;
@@ -71,6 +72,7 @@ pub fn run() {
             }
             app.manage(hotkey::start_for_app(app.handle(), settings.hotkey.clone()));
             update::start(app.handle());
+            cleanup::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -96,6 +98,7 @@ pub fn run() {
             commands::list_displays,
             commands::list_audio_devices,
             commands::open_clips_folder,
+            commands::clips_folder_size,
             commands::save_clip_now,
             commands::list_clips,
             commands::list_games,

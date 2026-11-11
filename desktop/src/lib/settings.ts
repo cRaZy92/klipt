@@ -8,6 +8,8 @@ export const BUFFER_SECONDS_MAX = 600;
 export const BITRATE_KBPS_MIN = 2000;
 export const BITRATE_KBPS_MAX = 80000;
 export const FPS_CHOICES = [30, 60] as const;
+export const CLEANUP_DAYS_MIN = 1;
+export const CLEANUP_DAYS_MAX = 365;
 
 /** The bitrate each quality preset stands for (`Quality::preset_kbps`). */
 export const PRESET_KBPS: Record<Exclude<Quality, "custom">, number> = {
@@ -42,6 +44,7 @@ export function validateSettings(s: Settings): FieldError[] {
   }
   if (!s.hotkey.trim()) fail("hotkey", "Choose a shortcut for saving clips.");
   if (!s.outputDir) fail("outputDir", "Choose a folder for your clips.");
+  if (!inRange(s.cleanupDays, CLEANUP_DAYS_MIN, CLEANUP_DAYS_MAX)) fail("cleanupDays", "Keep clips for 1 to 365 days.");
   return errors;
 }
 

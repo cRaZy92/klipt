@@ -56,8 +56,30 @@ export function statusLabel(job: UploadJob): string {
 /** What each clip was last asked to upload as, so events for it can always be shown. */
 const requested: Record<string, { title: string; visibility: Visibility }> = {};
 
+/**
+ * Uploads stopped because the user logged out. The core only notices at its next request (a 401),
+ * so events for these are ignored until the user starts the upload again.
+ */
+const stoppedByLogout = new Set<string>();
+
+export const LOGGED_OUT_MESSAGE = "Stopped because you logged out. Try again to upload it.";
+
+/**
+ * Called when the user logs out: unfinished uploads stop and wait for "Try again" instead of
+ * reporting an expired session and carrying on under whoever logs in next.
+ */
+export function stopUploadsForLogout() {
+  for (const job of Object.values(uploads)) {
+    if (isBusy(job) || job.status === "needsLogin") {
+      stoppedByLogout.add(job.id);
+      uploads[job.id] = { ...job, status: "failed", message: LOGGED_OUT_MESSAGE };
+    }
+  }
+}
+
 /** Starts (or retries, resuming where it stopped) an upload. */
 export async function startUpload(id: string, title: string, visibility: Visibility) {
+  stoppedByLogout.delete(id);
   requested[id] = { title, visibility };
   const previous = uploads[id];
   try {
@@ -113,9 +135,12 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
   onUnauthorized = handlers.unauthorized;
   const stops = [
     on("upload-progress", ({ id, sent, total, phase }) => {
+      if (stoppedByLogout.has(id)) return;
       uploads[id] = { ...jobFor(id), status: phase, sent, total };
     }),
     on("upload-done", ({ id, shareUrl, copied }) => {
+      // It finished before the logout reached the server: it's uploaded after all.
+      stoppedByLogout.delete(id);
       const job = uploads[id];
       if (job) uploads[id] = { ...job, status: "done", shareUrl, copied };
       handlers.done(shareUrl, copied);
@@ -123,6 +148,11 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
     on("upload-failed", ({ id, code, message, stale }) => {
       const job = uploads[id];
       if (!job) return;
+      if (stoppedByLogout.has(id)) {
+        // Already shown as stopped. A 401 here is the logout itself; anything else, show it.
+        if (code !== "unauthorized") uploads[id] = { ...job, status: "failed", message };
+        return;
+      }
       if (code === "unauthorized" && stale) {
         // This upload used a login that was already replaced: retry with the current one.
         // With no current login, `upload_clip` refuses and that sends the user to log in.

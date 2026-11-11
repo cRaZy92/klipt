@@ -2,6 +2,7 @@
   import { fileUrl, type ClipView } from "../lib/api";
   import { formatDuration, hueOf, relativeDate } from "../lib/format";
   import { forgetUpload, fraction, isBusy, retryUpload, statusLabel, uploads } from "../lib/uploads.svelte";
+  import { menu } from "../lib/a11y";
   import Icon from "./Icon.svelte";
 
   let {
@@ -136,7 +137,7 @@
           <Icon name="more" />
         </button>
         {#if menuOpen}
-          <div class="menu" role="menu">
+          <div class="menu" role="menu" use:menu={{ close: () => (menuOpen = false) }}>
             <button role="menuitem" onclick={() => pick(onrename)}><Icon name="rename" size={16} /> Rename</button>
             <button role="menuitem" onclick={() => pick(onsetgame)}><Icon name="tag" size={16} /> Set game</button>
             <button role="menuitem" onclick={() => pick(onshowfolder)}>

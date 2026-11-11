@@ -210,6 +210,9 @@
   // only resumes once the video landed, so the tracks don't drift apart on every jump.
   function onplay() {
     playing = true;
+    // Play right after a seek (e.g. from the trim start): the audio starts in `onseeked`, once
+    // the video landed. Starting it here too gave a short blip from the old position.
+    if (video?.seeking) return;
     syncAudio();
     playAudio();
   }

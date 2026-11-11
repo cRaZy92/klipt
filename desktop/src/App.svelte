@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, errorMessage, on, type Account, type ClipView, type HotkeyStatus, type Settings } from "./lib/api";
+  import { menu } from "./lib/a11y";
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
-  import { resumeAfterLogin, watchUploads } from "./lib/uploads.svelte";
+  import { resumeAfterLogin, stopUploadsForLogout, watchUploads } from "./lib/uploads.svelte";
   import Avatar from "./components/Avatar.svelte";
   import Icon from "./components/Icon.svelte";
   import Toast from "./components/Toast.svelte";
@@ -117,6 +118,7 @@
 
   async function logout() {
     accountMenu = false;
+    stopUploadsForLogout();
     try {
       await api.logout();
     } catch (e) {
@@ -237,7 +239,7 @@
             <Avatar name={account.username} size={36} />
           </button>
           {#if accountMenu}
-            <div class="menu" role="menu">
+            <div class="menu" role="menu" use:menu={{ close: () => (accountMenu = false) }}>
               <div class="who">
                 <Avatar name={account.username} size={38} />
                 <div>

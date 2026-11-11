@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import Icon from "./Icon.svelte";
+  import { trapFocus } from "../lib/a11y";
 
   let {
     title,
@@ -19,7 +20,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="modal" role="dialog" aria-modal="true" aria-label={title} style:width>
+  <div class="modal" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" style:width use:trapFocus>
     <header>
       <h2>{title}</h2>
       <button class="btn btn-ghost btn-icon" aria-label="Close" onclick={onclose}><Icon name="close" /></button>

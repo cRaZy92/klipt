@@ -1,27 +1,51 @@
 :root {
-  --bg: #0f1115;
-  --surface: #171a21;
-  --surface-2: #1e222b;
-  --surface-3: #272c37;
-  --border: #2a2f3a;
-  --text: #e8eaf0;
-  --text-muted: #9aa1b2;
-  --text-faint: #6b7283;
+  /* Surfaces: near-black with a violet tint, so the greys belong to the brand purple. */
+  --bg: #0b0a10;
+  --bg-2: #100f17;
+  --surface: #15141d;
+  --surface-2: #1c1a27;
+  --surface-3: #262333;
+  --border: #272436;
+  --border-strong: #3a3550;
+  --text: #eeedf5;
+  --text-muted: #a5a1b8;
+  --text-faint: #7f7a96;
+
+  /* The app icon's purple. */
   --accent: #7c5cff;
-  --accent-hover: #8f74ff;
+  --accent-hover: #9076ff;
+  --accent-text: #c4b6ff;
   --accent-soft: rgba(124, 92, 255, 0.16);
+  --accent-softer: rgba(124, 92, 255, 0.08);
+  --accent-glow: rgba(124, 92, 255, 0.45);
+
+  /* Recording red, used only for capture. */
+  --rec: #ff4d6d;
+  --rec-soft: rgba(255, 77, 109, 0.14);
+
   --success: #3ccf8e;
   --success-soft: rgba(60, 207, 142, 0.14);
   --danger: #ff5d6c;
   --danger-soft: rgba(255, 93, 108, 0.14);
+  --danger-text: #ffb3ba;
   --warning: #ffb547;
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --warning-soft: rgba(255, 181, 71, 0.14);
+
+  --radius-lg: 18px;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --font: "Segoe UI Variable Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Segoe UI Variable Display", system-ui, sans-serif;
+
   color-scheme: dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font);
   font-size: 15px;
   line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
@@ -51,6 +75,12 @@ p {
   margin: 0;
 }
 
+h1,
+h2 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
 button,
 input,
 select {
@@ -58,9 +88,37 @@ select {
   color: inherit;
 }
 
+::selection {
+  background: var(--accent-glow);
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Thin scrollbars that sit on the dark surfaces instead of the system's grey ones. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-3) padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-strong);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Buttons */
@@ -78,13 +136,21 @@ select {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background 0.12s,
-    border-color 0.12s,
-    opacity 0.12s;
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s,
+    transform 0.1s,
+    opacity 0.15s;
 }
 
 .btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
   background: var(--surface-3);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .btn:disabled {
@@ -93,33 +159,70 @@ select {
 }
 
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  border-color: transparent;
+  background: linear-gradient(180deg, #8a6dff, #7152f5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 14px -4px var(--accent-glow);
   color: #fff;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  border-color: transparent;
+  background: linear-gradient(180deg, #9a81ff, #7c5cff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 6px 20px -4px var(--accent-glow);
+}
+
+/* A quieter accent button, for actions repeated on every card. */
+.btn-soft {
+  border-color: transparent;
+  background: rgba(124, 92, 255, 0.2);
+  color: #d2c8ff;
+}
+
+.btn-soft:hover:not(:disabled) {
+  border-color: transparent;
+  background: rgba(124, 92, 255, 0.26);
+  color: #fff;
 }
 
 .btn-ghost {
-  background: transparent;
   border-color: transparent;
+  background: transparent;
   color: var(--text-muted);
 }
 
 .btn-ghost:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-2);
   color: var(--text);
 }
 
 .btn-danger {
+  border-color: transparent;
   background: var(--danger);
-  border-color: var(--danger);
   color: #fff;
 }
 
 .btn-danger:hover:not(:disabled) {
+  border-color: transparent;
   background: #ff7381;
+}
+
+/* "Save clip now": a record button. The dot is drawn by `.rec-dot`. */
+.btn-rec:hover:not(:disabled) {
+  border-color: rgba(255, 77, 109, 0.45);
+  background: var(--rec-soft);
+}
+
+.rec-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--rec);
+  box-shadow: 0 0 0 3px var(--rec-soft);
 }
 
 .btn-sm {
@@ -129,9 +232,12 @@ select {
 }
 
 .btn-icon {
-  width: 2.2rem;
-  height: 2.2rem;
+  width: 2.4rem;
   padding: 0;
+}
+
+.btn-sm.btn-icon {
+  width: 2rem;
 }
 
 .btn-block {
@@ -158,23 +264,90 @@ select {
   border-radius: var(--radius-sm);
   background: var(--bg);
   outline: none;
-  transition: border-color 0.12s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.input:hover:not(:disabled) {
+  border-color: var(--border-strong);
 }
 
 .input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+select.input {
+  padding-right: 2.2rem;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a5a1b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 0.7rem center;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+select.input option {
+  background: var(--surface-2);
 }
 
 .form-error {
   padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(255, 93, 108, 0.25);
   border-radius: var(--radius-sm);
   background: var(--danger-soft);
-  color: #ffb3ba;
+  color: var(--danger-text);
   font-size: 0.9rem;
 }
 
 .muted {
   color: var(--text-muted);
+}
+
+/* Range slider: set --fill (e.g. 40%) for the coloured part of the track. */
+.range {
+  height: 1.25rem;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
+}
+
+.range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 0 3px var(--accent),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+  transition: box-shadow 0.15s;
+  -webkit-appearance: none;
+}
+
+.range:hover::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 3px var(--accent),
+    0 0 0 8px var(--accent-soft);
+}
+
+.range:focus-visible {
+  outline: none;
+}
+
+.range:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 3px var(--accent),
+    0 0 0 7px var(--accent-glow);
 }
 
 /* Progress bar: set --value (0..1); without it the bar is indeterminate. */
@@ -191,7 +364,8 @@ select {
   inset: 0 auto 0 0;
   width: calc(var(--value, 0.35) * 100%);
   border-radius: inherit;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--accent), #b18cff);
+  box-shadow: 0 0 12px var(--accent-glow);
   transition: width 0.25s ease;
 }
 
@@ -223,11 +397,153 @@ select {
   }
 }
 
+/* Placeholder blocks while something loads. */
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface) 0%, var(--surface-2) 40%, var(--surface) 80%) 0 0 / 300% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* The library and feed pages */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.75rem 2rem 3rem;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.page-head h1 {
+  font-size: 1.85rem;
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.page-head .subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.page-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.clip-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+.group-label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.group-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
+}
+
+.clip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1.1rem;
+}
+
+/* Cards appear with a short rise, staggered by --i. */
+.rise {
+  /* Backwards, not both: a held end state would override hover transforms. */
+  animation: rise 0.35s var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 12) * 30ms);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* Empty and error states */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 4.5rem 1rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty h2 {
+  color: var(--text);
+  font-size: 1.35rem;
+}
+
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 4rem;
+  height: 4rem;
+  margin-bottom: 0.25rem;
+  border-radius: 18px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.empty-icon.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     transition: none !important;
   }
+}
+
+/* A game's colour (set --hue with hueOf). */
+.game-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: hsl(var(--hue, 255) 80% 66%);
+  box-shadow: 0 0 8px hsl(var(--hue, 255) 80% 60% / 0.6);
 }

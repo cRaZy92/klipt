@@ -46,6 +46,89 @@ export function relativeDate(value: Date | number, now: Date | number): string {
   return date.getFullYear() === current.getFullYear() ? dayMonth : `${dayMonth} ${date.getFullYear()}`;
 }
 
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/**
+ * The heading a clip is listed under: "Today", "Yesterday", "Last 7 days", "Earlier this month",
+ * then the month ("October"), with the year when it isn't this year ("October 2025").
+ */
+export function dayGroup(value: Date | number, now: Date | number): string {
+  const date = toDate(value);
+  const current = toDate(now);
+  // Rounded, so a day with a daylight-saving change still counts as one day.
+  const days = Math.round((startOfDay(current) - startOfDay(date)) / DAY);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return "Last 7 days";
+  const sameYear = date.getFullYear() === current.getFullYear();
+  if (sameYear && date.getMonth() === current.getMonth()) return "Earlier this month";
+  const month = MONTH_NAMES[date.getMonth()];
+  return sameYear ? month : `${month} ${date.getFullYear()}`;
+}
+
+export interface DayGroup<T> {
+  /** Unique within one list, for keyed blocks. */
+  key: string;
+  label: string;
+  items: T[];
+}
+
+/**
+ * Splits an already sorted list into runs that share a `dayGroup` heading, keeping the order.
+ * Keys are the labels (stable when a group before them goes away); a label that comes back
+ * in an unsorted list gets a suffix.
+ */
+export function groupByDay<T>(items: T[], dateOf: (item: T) => Date | number, now: Date | number): DayGroup<T>[] {
+  const groups: DayGroup<T>[] = [];
+  const seen = new Map<string, number>();
+  for (const item of items) {
+    const label = dayGroup(dateOf(item), now);
+    const last = groups.at(-1);
+    if (last?.label === label) {
+      last.items.push(item);
+      continue;
+    }
+    const times = seen.get(label) ?? 0;
+    seen.set(label, times + 1);
+    groups.push({ key: times === 0 ? label : `${label}#${times}`, label, items: [item] });
+  }
+  return groups;
+}
+
+// Hues far enough apart to tell at a glance; red is left out, it means danger.
+const HUES = [262, 212, 188, 158, 122, 84, 46, 24, 336, 298];
+
+/** A stable hue (0–359) for a name, so a game or a friend has the same colour everywhere. */
+export function hueOf(name: string): number {
+  let hash = 0;
+  for (const ch of name.trim().toLowerCase()) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
+  return HUES[hash % HUES.length];
+}
+
+/** A shortcut as separate keys for keycaps: "Alt + `" → ["Alt", "`"]. A "+" key is kept. */
+export function hotkeyKeys(label: string): string[] {
+  const text = label.trim();
+  const keys = text
+    .split("+")
+    .map((key) => key.trim())
+    .filter(Boolean);
+  if (/(^|\+)\s*\+$/.test(text)) keys.push("+");
+  return keys;
+}
+
 /** The upload title suggestion: "Active Matter — 9 Nov 2026", or "Clip — 9 Nov 2026". */
 export function defaultTitle(game: string | null | undefined, date: Date | number): string {
   const name = game?.trim() || "Clip";

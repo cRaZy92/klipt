@@ -1,12 +1,13 @@
 <script lang="ts">
   import { fileUrl, type ClipView } from "../lib/api";
-  import { formatDuration, relativeDate } from "../lib/format";
+  import { formatDuration, hueOf, relativeDate } from "../lib/format";
   import { forgetUpload, fraction, isBusy, retryUpload, statusLabel, uploads } from "../lib/uploads.svelte";
   import Icon from "./Icon.svelte";
 
   let {
     clip,
     now,
+    index = 0,
     onupload,
     onedit,
     onrename,
@@ -18,6 +19,8 @@
     clip: ClipView;
     /** The time relative dates are counted from (ticks once a minute). */
     now: number;
+    /** Position in its group, to stagger the cards' entrance. */
+    index?: number;
     onupload: () => void;
     /** The editor (Task 11). The Edit action is hidden until it's wired. */
     onedit?: () => void;
@@ -50,15 +53,21 @@
 
 <svelte:window onclick={closeMenuOutside} />
 
-<article class="card" class:missing={clip.fileMissing}>
+<article class="card rise" class:missing={clip.fileMissing} class:menu-open={menuOpen} style:--i={index}>
   <div class="thumb">
     {#if thumb}
       <img src={thumb} alt="" loading="lazy" onerror={() => (thumbFailed = true)} />
     {:else}
       <div class="placeholder"><Icon name={clip.fileMissing ? "alert" : "film"} size={30} /></div>
     {/if}
+    {#if onedit && !clip.fileMissing}
+      <!-- The whole picture opens the editor, which is also where the clip plays. -->
+      <button class="open" onclick={onedit} disabled={busy} aria-label="Edit {clip.title}">
+        <span class="open-pill"><Icon name="scissors" size={15} /> Edit</span>
+      </button>
+    {/if}
     {#if clip.fileMissing}
-      <span class="badge badge-missing">File missing</span>
+      <span class="badge badge-missing"><Icon name="alert" size={13} /> File missing</span>
     {:else if uploaded}
       <span class="badge badge-uploaded"><Icon name="check" size={13} /> Uploaded</span>
     {/if}
@@ -86,9 +95,10 @@
   <div class="info">
     <h3 title={clip.title}>{clip.title}</h3>
     <p class="meta">
-      <span class:unknown={!clip.gameName}>{clip.gameName ?? "Unknown game"}</span>
+      {#if clip.gameName}<span class="game-dot" style:--hue={hueOf(clip.gameName)}></span>{/if}
+      <span class="game" class:unknown={!clip.gameName}>{clip.gameName ?? "Unknown game"}</span>
       <span aria-hidden="true">·</span>
-      <span>{relativeDate(clip.createdAt, now)}</span>
+      <span class="when">{relativeDate(clip.createdAt, now)}</span>
     </p>
   </div>
 
@@ -96,22 +106,28 @@
     {#if clip.fileMissing}
       {#if uploaded}
         <button class="btn btn-sm grow" onclick={oncopy}><Icon name="link" size={15} /> Copy link</button>
+        <button class="btn btn-sm btn-ghost btn-icon" onclick={onremove} aria-label="Remove from library" title="Remove from library">
+          <Icon name="trash" size={16} />
+        </button>
+      {:else}
+        <button class="btn btn-sm grow" onclick={onremove}><Icon name="trash" size={15} /> Remove from library</button>
       {/if}
-      <button class="btn btn-sm grow" onclick={onremove}><Icon name="trash" size={15} /> Remove from library</button>
     {:else}
       {#if uploaded}
         <button class="btn btn-sm grow" onclick={oncopy}><Icon name="link" size={15} /> Copy link</button>
       {:else}
-        <button class="btn btn-sm btn-primary grow" onclick={onupload} disabled={busy}>
+        <button class="btn btn-sm btn-soft grow" onclick={onupload} disabled={busy}>
           <Icon name="upload" size={15} /> Upload
         </button>
       {/if}
       {#if onedit}
-        <button class="btn btn-sm" onclick={onedit} disabled={busy}><Icon name="scissors" size={15} /> Edit</button>
+        <button class="btn btn-sm btn-ghost btn-icon" onclick={onedit} disabled={busy} aria-label="Edit" title="Trim and volume">
+          <Icon name="scissors" size={16} />
+        </button>
       {/if}
       <div class="menu-wrap" bind:this={menuWrap}>
         <button
-          class="btn btn-sm btn-icon"
+          class="btn btn-sm btn-ghost btn-icon"
           aria-label="More actions"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
@@ -144,26 +160,45 @@
 
 <style>
   .card {
+    position: relative;
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface);
     transition:
-      border-color 0.15s,
-      transform 0.15s;
+      border-color 0.2s,
+      box-shadow 0.2s,
+      transform 0.2s var(--ease-out);
   }
 
   .card:hover {
-    border-color: #3a4150;
+    border-color: var(--border-strong);
+    box-shadow: 0 16px 36px -18px rgba(0, 0, 0, 0.8);
+    transform: translateY(-2px);
+  }
+
+  /* Its menu must draw over the neighbouring cards. */
+  .card.menu-open {
+    z-index: 5;
   }
 
   .thumb {
     position: relative;
     aspect-ratio: 16 / 9;
     overflow: hidden;
-    border-radius: var(--radius) var(--radius) 0 0;
+    border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
     background: var(--surface-2);
+  }
+
+  /* Darkens the bottom so the duration stays readable on bright frames. */
+  .thumb::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0;
+    height: 45%;
+    background: linear-gradient(transparent, rgba(5, 4, 10, 0.55));
+    pointer-events: none;
   }
 
   img {
@@ -171,65 +206,133 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transition: transform 0.45s var(--ease-out);
+  }
+
+  .card:hover img {
+    transform: scale(1.05);
   }
 
   .placeholder {
     display: grid;
     place-items: center;
     height: 100%;
+    background:
+      radial-gradient(circle at 50% 40%, rgba(124, 92, 255, 0.12), transparent 60%),
+      var(--surface-2);
     color: var(--text-faint);
   }
 
   .missing .placeholder {
+    background: var(--surface-2);
     color: var(--warning);
+  }
+
+  .open {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .open:hover:not(:disabled),
+  .open:focus-visible {
+    background: rgba(8, 7, 14, 0.35);
+  }
+
+  .open:disabled {
+    cursor: default;
+  }
+
+  .open:focus-visible {
+    outline-offset: -3px;
+    border-radius: inherit;
+  }
+
+  .open-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(15, 13, 24, 0.72);
+    backdrop-filter: blur(8px);
+    font-size: 0.88rem;
+    font-weight: 650;
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+    transition:
+      opacity 0.2s,
+      transform 0.2s var(--ease-out);
+  }
+
+  .open:hover:not(:disabled) .open-pill,
+  .open:focus-visible .open-pill {
+    opacity: 1;
+    transform: none;
   }
 
   .badge {
     position: absolute;
-    top: 0.5rem;
-    left: 0.5rem;
+    top: 0.55rem;
+    left: 0.55rem;
+    z-index: 2;
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    padding: 0.2rem 0.5rem;
-    border-radius: 6px;
-    font-size: 0.75rem;
+    gap: 0.3rem;
+    padding: 0.22rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.74rem;
     font-weight: 700;
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(8px);
+    pointer-events: none;
   }
 
   .badge-uploaded {
-    background: rgba(16, 40, 30, 0.85);
+    border: 1px solid rgba(60, 207, 142, 0.3);
+    background: rgba(8, 28, 20, 0.78);
     color: var(--success);
   }
 
   .badge-missing {
-    background: rgba(48, 34, 10, 0.88);
+    border: 1px solid rgba(255, 181, 71, 0.3);
+    background: rgba(40, 28, 8, 0.82);
     color: var(--warning);
   }
 
   .duration {
     position: absolute;
-    right: 0.5rem;
+    right: 0.55rem;
     bottom: 0.5rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 5px;
-    background: rgba(0, 0, 0, 0.72);
+    z-index: 2;
+    padding: 0.1rem 0.45rem;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.6);
     font-size: 0.78rem;
-    font-weight: 600;
+    font-weight: 650;
     font-variant-numeric: tabular-nums;
+    pointer-events: none;
   }
 
   .overlay {
     position: absolute;
     inset: 0;
+    z-index: 3;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: stretch;
-    gap: 0.6rem;
+    gap: 0.65rem;
     padding: 1rem 1.25rem;
-    background: rgba(10, 11, 15, 0.8);
+    background: rgba(9, 8, 15, 0.78);
+    backdrop-filter: blur(3px);
     text-align: center;
   }
 
@@ -241,25 +344,25 @@
 
   .status {
     font-size: 0.88rem;
-    font-weight: 600;
+    font-weight: 650;
   }
 
   .status.failed {
-    color: #ffb3ba;
+    color: var(--danger-text);
     font-weight: 500;
   }
 
   .info {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
-    padding: 0.75rem 0.85rem 0.5rem;
+    gap: 0.25rem;
+    padding: 0.8rem 0.9rem 0.55rem;
     min-width: 0;
   }
 
   h3 {
     overflow: hidden;
-    font-size: 0.97rem;
+    font-size: 0.98rem;
     font-weight: 650;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -267,16 +370,21 @@
 
   .meta {
     display: flex;
-    gap: 0.35rem;
+    align-items: center;
+    gap: 0.4rem;
     overflow: hidden;
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.84rem;
     white-space: nowrap;
   }
 
-  .meta span:first-child {
+  .game {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .when {
+    flex: none;
   }
 
   .unknown {
@@ -285,10 +393,9 @@
 
   .actions {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    padding: 0.35rem 0.85rem 0.85rem;
+    gap: 0.3rem;
     margin-top: auto;
+    padding: 0.3rem 0.6rem 0.75rem 0.9rem;
   }
 
   .grow {
@@ -302,26 +409,35 @@
   .menu {
     position: absolute;
     right: 0;
-    bottom: calc(100% + 0.35rem);
+    bottom: calc(100% + 0.4rem);
     z-index: 20;
     display: flex;
     flex-direction: column;
-    min-width: 11rem;
-    padding: 0.3rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    min-width: 11.5rem;
+    padding: 0.35rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
     background: var(--surface-2);
     box-shadow: var(--shadow);
+    animation: menu-in 0.15s var(--ease-out);
+  }
+
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
   }
 
   .menu button {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.6rem;
     padding: 0.5rem 0.6rem;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     background: none;
+    color: var(--text-muted);
     font-size: 0.9rem;
     text-align: left;
     cursor: pointer;
@@ -329,6 +445,7 @@
 
   .menu button:hover:not(:disabled) {
     background: var(--surface-3);
+    color: var(--text);
   }
 
   .menu button:disabled {
@@ -337,6 +454,11 @@
   }
 
   .menu .danger {
+    color: var(--danger);
+  }
+
+  .menu .danger:hover:not(:disabled) {
+    background: var(--danger-soft);
     color: var(--danger);
   }
 

@@ -1,12 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, errorCode, errorMessage, type FeedClip, type GameCount } from "../lib/api";
-  import { formatDuration, relativeDate } from "../lib/format";
+  import { formatDuration, groupByDay, hueOf, relativeDate } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
+  import Avatar from "../components/Avatar.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import Icon from "../components/Icon.svelte";
 
-  let { onunauthorized }: { onunauthorized: () => void } = $props();
+  let {
+    server = null,
+    onunauthorized,
+  }: {
+    /** The server's host name, shown under the heading. */
+    server?: string | null;
+    onunauthorized: () => void;
+  } = $props();
 
   let clips = $state<FeedClip[]>([]);
   let games = $state<GameCount[]>([]);
@@ -17,6 +25,8 @@
   let loadError = $state<string | null>(null);
   let playing = $state<FeedClip | null>(null);
   let now = $state(Date.now());
+
+  const groups = $derived(groupByDay(clips, (c) => new Date(c.createdAt), now));
 
   // Bumped so answers to older requests are dropped when the filter changes quickly.
   let request = 0;
@@ -87,18 +97,21 @@
 
 <svelte:window {onkeydown} />
 
-<section class="feed">
-  <div class="toolbar">
-    <h1>Feed</h1>
-    <div class="tools">
+<section class="page">
+  <header class="page-head">
+    <div>
+      <h1>Feed</h1>
+      <p class="subtitle">Clips your friends shared{server ? ` on ${server}` : ""}.</p>
+    </div>
+    <div class="page-tools">
       <button class="btn btn-ghost" onclick={() => api.openWebsite().catch((e) => toast(errorMessage(e), "error"))}>
-        <Icon name="link" size={16} /> Open website
+        <Icon name="external" size={16} /> Open website
       </button>
       <button class="btn" onclick={refresh} disabled={loading}>
-        <Icon name="retry" size={16} /> Refresh
+        <span class="refresh-icon" class:spinning={loading}><Icon name="retry" size={16} /></span> Refresh
       </button>
     </div>
-  </div>
+  </header>
 
   {#if games.length > 0}
     <GameFilter {games} selected={game} onselect={selectGame} />
@@ -106,40 +119,75 @@
 
   {#if loadError}
     <div class="empty">
-      <Icon name="alert" size={32} />
+      <div class="empty-icon error"><Icon name="alert" size={28} /></div>
       <p>{loadError}</p>
       <button class="btn" onclick={refresh}><Icon name="retry" size={16} /> Try again</button>
     </div>
   {:else if !loaded}
-    <div class="empty"><span class="spinner"></span></div>
-  {:else if clips.length === 0}
-    <div class="empty">
-      <Icon name="film" size={30} />
-      <p>{game ? "No clips for this game yet." : "Nobody has shared a clip yet. Upload one from your library!"}</p>
-    </div>
-  {:else}
-    <div class="grid">
-      {#each clips as clip (clip.id)}
-        <article class="card">
-          <button class="thumb" onclick={() => (playing = clip)} aria-label={`Play ${clip.title}`}>
-            <img src={clip.thumbnailUrl} alt="" loading="lazy" />
-            <span class="play"><Icon name="film" size={22} /></span>
-            <span class="dur">{formatDuration(clip.durationMs)}</span>
-          </button>
+    <div class="clip-grid" aria-busy="true" aria-label="Loading the feed">
+      {#each { length: 8 }, i (i)}
+        <div class="card ghost">
+          <div class="skeleton thumb-ghost"></div>
           <div class="body">
-            <div class="title" title={clip.title}>{clip.title}</div>
-            <div class="meta">
-              <span>{clip.owner.username}</span>
-              {#if clip.gameName}<span>{clip.gameName}</span>{/if}
-              <span>{relativeDate(new Date(clip.createdAt), now)}</span>
+            <div class="skeleton dot"></div>
+            <div class="lines">
+              <div class="skeleton line"></div>
+              <div class="skeleton line short"></div>
             </div>
           </div>
-        </article>
+        </div>
+      {/each}
+    </div>
+  {:else if clips.length === 0}
+    <div class="empty">
+      <div class="empty-icon"><Icon name="users" size={28} /></div>
+      {#if game}
+        <p>No clips for this game yet.</p>
+      {:else}
+        <h2>Nothing shared yet</h2>
+        <p>Upload a clip from My clips and it shows up here for everyone.</p>
+      {/if}
+    </div>
+  {:else}
+    <div class="clip-groups">
+      {#each groups as group (group.key)}
+        <section aria-label={group.label}>
+          <h2 class="group-label">{group.label}</h2>
+          <div class="clip-grid">
+            {#each group.items as clip, i (clip.id)}
+              <article class="card rise" style:--i={i}>
+                <button class="thumb" onclick={() => (playing = clip)} aria-label={`Play ${clip.title}`}>
+                  <img src={clip.thumbnailUrl} alt="" loading="lazy" />
+                  <span class="play"><Icon name="play" size={22} /></span>
+                  {#if clip.gameName}
+                    <span class="game-tag" style:--hue={hueOf(clip.gameName)}>
+                      <span class="game-dot"></span>{clip.gameName}
+                    </span>
+                  {/if}
+                  <span class="dur">{formatDuration(clip.durationMs)}</span>
+                </button>
+                <div class="body">
+                  <Avatar name={clip.owner.username} size={32} />
+                  <div class="text">
+                    <div class="title" title={clip.title}>{clip.title}</div>
+                    <div class="meta">
+                      <span class="who">{clip.owner.username}</span>
+                      <span aria-hidden="true">·</span>
+                      <span>{relativeDate(new Date(clip.createdAt), now)}</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            {/each}
+          </div>
+        </section>
       {/each}
     </div>
     {#if cursor}
       <div class="more">
-        <button class="btn" onclick={() => load(true)} disabled={loading}>Load older clips</button>
+        <button class="btn" onclick={() => load(true)} disabled={loading}>
+          {#if loading}<span class="spinner"></span>{/if} Load older clips
+        </button>
       </div>
     {/if}
   {/if}
@@ -149,20 +197,27 @@
   <div class="backdrop" onclick={(e) => e.target === e.currentTarget && (playing = null)} role="presentation">
     <div class="player" role="dialog" aria-modal="true" aria-label={playing.title}>
       <div class="player-head">
-        <div>
+        <Avatar name={playing.owner.username} size={38} />
+        <div class="text">
           <div class="title">{playing.title}</div>
           <div class="meta">
-            <span>{playing.owner.username}</span>
-            {#if playing.gameName}<span>{playing.gameName}</span>{/if}
+            <span class="who">{playing.owner.username}</span>
+            {#if playing.gameName}
+              <span aria-hidden="true">·</span>
+              <span class="game"><span class="game-dot" style:--hue={hueOf(playing.gameName)}></span>{playing.gameName}</span>
+            {/if}
+            <span aria-hidden="true">·</span>
             <span>{relativeDate(new Date(playing.createdAt), now)}</span>
           </div>
         </div>
         <div class="tools">
-          <button class="btn btn-ghost" onclick={() => playing && copyLink(playing)}>
-            <Icon name="link" size={16} /> Copy link
+          <button class="btn btn-sm" onclick={() => playing && copyLink(playing)}>
+            <Icon name="link" size={15} /> Copy link
           </button>
-          <button class="btn btn-ghost" onclick={() => playing && openOnWeb(playing)}>Open on web</button>
-          <button class="btn btn-ghost btn-icon" aria-label="Close" onclick={() => (playing = null)}>
+          <button class="btn btn-sm btn-ghost" onclick={() => playing && openOnWeb(playing)}>
+            <Icon name="external" size={15} /> Open on web
+          </button>
+          <button class="btn btn-sm btn-ghost btn-icon" aria-label="Close" onclick={() => (playing = null)}>
             <Icon name="close" />
           </button>
         </div>
@@ -174,47 +229,28 @@
 {/if}
 
 <style>
-  .feed {
-    display: flex;
-    flex-direction: column;
-    gap: 1.1rem;
-    padding: 1.5rem 1.75rem 2.5rem;
+  .refresh-icon {
+    display: inline-grid;
   }
 
-  .toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  .tools {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  h1 {
-    font-size: 1.5rem;
-    letter-spacing: -0.02em;
-  }
-
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 1rem;
+  .spinning {
+    animation: spin 0.9s linear infinite;
   }
 
   .card {
     overflow: hidden;
-    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    transition: border-color 0.12s, transform 0.12s;
+    background: var(--surface);
+    transition:
+      border-color 0.2s,
+      box-shadow 0.2s,
+      transform 0.2s var(--ease-out);
   }
 
-  .card:hover {
-    border-color: var(--accent);
+  .card:not(.ghost):hover {
+    border-color: var(--border-strong);
+    box-shadow: 0 16px 36px -18px rgba(0, 0, 0, 0.8);
     transform: translateY(-2px);
   }
 
@@ -223,10 +259,23 @@
     display: block;
     width: 100%;
     aspect-ratio: 16 / 9;
+    overflow: hidden;
     padding: 0;
     border: 0;
     background: #000;
     cursor: pointer;
+  }
+
+  .thumb::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(rgba(5, 4, 10, 0.4), transparent 35%, transparent 60%, rgba(5, 4, 10, 0.5));
+    pointer-events: none;
+  }
+
+  .thumb:focus-visible {
+    outline-offset: -3px;
   }
 
   .thumb img {
@@ -234,38 +283,86 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transition: transform 0.45s var(--ease-out);
+  }
+
+  .card:hover .thumb img {
+    transform: scale(1.05);
   }
 
   .play {
     position: absolute;
-    inset: 0;
+    top: 50%;
+    left: 50%;
+    z-index: 1;
     display: grid;
     place-items: center;
+    width: 3.25rem;
+    height: 3.25rem;
+    padding-left: 3px;
+    border-radius: 50%;
+    background: rgba(124, 92, 255, 0.9);
+    box-shadow: 0 8px 26px -4px var(--accent-glow);
     color: #fff;
-    background: rgba(0, 0, 0, 0.35);
     opacity: 0;
-    transition: opacity 0.12s;
+    transform: translate(-50%, -50%) scale(0.85);
+    transition:
+      opacity 0.2s,
+      transform 0.2s var(--ease-out);
   }
 
   .thumb:hover .play,
   .thumb:focus-visible .play {
     opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+
+  .game-tag {
+    position: absolute;
+    top: 0.55rem;
+    left: 0.55rem;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    max-width: calc(100% - 1.1rem);
+    overflow: hidden;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    background: rgba(12, 10, 20, 0.7);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    font-size: 0.74rem;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .dur {
     position: absolute;
-    right: 6px;
-    bottom: 6px;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.75);
+    right: 0.55rem;
+    bottom: 0.5rem;
+    z-index: 1;
+    padding: 0.1rem 0.45rem;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.6);
     color: #fff;
     font-size: 0.78rem;
+    font-weight: 650;
     font-variant-numeric: tabular-nums;
   }
 
   .body {
-    padding: 0.6rem 0.75rem 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.75rem 0.9rem 0.85rem;
+  }
+
+  .text {
+    flex: 1;
+    min-width: 0;
   }
 
   .title {
@@ -278,25 +375,56 @@
   .meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem 0.75rem;
-    margin-top: 0.15rem;
+    align-items: center;
+    gap: 0.1rem 0.4rem;
+    margin-top: 0.1rem;
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.84rem;
+  }
+
+  .who {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .game {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  /* Loading placeholders */
+  .thumb-ghost {
+    aspect-ratio: 16 / 9;
+    border-radius: 0;
+  }
+
+  .dot {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+  }
+
+  .lines {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .line {
+    height: 0.75rem;
+    border-radius: 4px;
+  }
+
+  .line.short {
+    width: 55%;
   }
 
   .more {
     display: flex;
     justify-content: center;
-  }
-
-  .empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 5rem 1rem;
-    color: var(--text-muted);
-    text-align: center;
   }
 
   .backdrop {
@@ -306,37 +434,62 @@
     display: grid;
     place-items: center;
     padding: 2rem;
-    background: rgba(0, 0, 0, 0.75);
+    background: rgba(5, 4, 10, 0.82);
+    backdrop-filter: blur(6px);
+    animation: fade 0.18s ease-out;
+  }
+
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
   }
 
   .player {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.85rem;
     width: min(1100px, 100%);
-    padding: 1rem;
+    padding: 0.9rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
     box-shadow: var(--shadow);
+    animation: pop 0.22s var(--ease-out);
+  }
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: scale(0.97);
+    }
   }
 
   .player-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+    gap: 0.75rem;
     min-width: 0;
+    padding: 0 0.15rem;
   }
 
-  .player-head > div:first-child {
-    min-width: 0;
+  .player-head .title {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  .tools {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 0.35rem;
   }
 
   video {
     width: 100%;
     max-height: calc(100vh - 12rem);
     background: #000;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
   }
 </style>

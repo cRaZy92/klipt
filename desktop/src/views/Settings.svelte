@@ -29,6 +29,7 @@
   } from "../lib/settings";
   import { toast } from "../lib/toasts.svelte";
   import Icon from "../components/Icon.svelte";
+  import Keys from "../components/Keys.svelte";
 
   let {
     settings,
@@ -36,7 +37,6 @@
     hotkeyStatus,
     onsaved,
     onlogout,
-    onclose,
     dirty = $bindable(false),
   }: {
     /** The saved settings. */
@@ -48,8 +48,6 @@
     onsaved: (settings: Settings, hotkeyDisplay: string | null) => void;
     /** Log out (the app asks about unsaved changes first). */
     onlogout: () => void;
-    /** Back to the library (the app asks about unsaved changes). */
-    onclose: () => void;
     /** Whether there are unsaved changes, for the app's "Discard changes?" guard. */
     dirty?: boolean;
   } = $props();
@@ -109,6 +107,10 @@
   });
 
   const ramMb = $derived(estimateRamMb(bitrateKbps(draft), draft.bufferSeconds || 0));
+  /** How far along its track the buffer slider is, 0–100. */
+  const bufferFill = $derived(
+    Math.min(100, Math.max(0, (((draft.bufferSeconds || 0) - BUFFER_SECONDS_MIN) / (BUFFER_SECONDS_MAX - BUFFER_SECONDS_MIN)) * 100)),
+  );
 
   /** The shortcut as shown: what the system reports, unless the user picked a new one. */
   const hotkeyChanged = $derived(draft.hotkey !== settings.hotkey);
@@ -239,12 +241,12 @@
   }
 
   const TABS = [
-    { id: "recording", label: "Recording" },
-    { id: "audio", label: "Audio" },
-    { id: "hotkey", label: "Hotkey" },
-    { id: "clips", label: "Clips folder" },
-    { id: "general", label: "General" },
-    { id: "account", label: "Account" },
+    { id: "recording", label: "Recording", icon: "record" },
+    { id: "audio", label: "Audio", icon: "mic" },
+    { id: "hotkey", label: "Hotkey", icon: "keyboard" },
+    { id: "clips", label: "Clips folder", icon: "folder" },
+    { id: "general", label: "General", icon: "sliders" },
+    { id: "account", label: "Account", icon: "user" },
   ] as const;
   type Tab = (typeof TABS)[number]["id"];
   let tab = $state<Tab>("recording");
@@ -262,7 +264,7 @@
   const tabsWithErrors = $derived(new Set(Object.keys(fieldErrors).map(tabOf)));
 
   function onTabKey(e: KeyboardEvent, i: number) {
-    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    const step = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
     if (!step) return;
     e.preventDefault();
     tab = TABS[(i + step + TABS.length) % TABS.length].id;
@@ -279,9 +281,7 @@
 </script>
 
 <div class="settings">
-  <div class="head"><div class="inner">
   <header class="bar">
-    <button class="btn btn-ghost back" onclick={onclose}><Icon name="back" size={18} /> Clips</button>
     <h1>Settings</h1>
     {#if dirty}
       <span class="unsaved">Unsaved changes</span>
@@ -294,11 +294,9 @@
     {/if}
   </header>
 
-  {#if Object.keys(fieldErrors).length > 0}
-    <p class="form-error top-error" role="alert">Some settings need fixing before they can be saved.</p>
-  {/if}
-
-  <div class="tabs" role="tablist" aria-label="Settings sections">
+  <!-- The header and section list stay put; only the section's content scrolls. -->
+  <div class="body">
+  <div class="tabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
     {#each TABS as t, i (t.id)}
       <button
         id="tab-{t.id}"
@@ -310,14 +308,17 @@
         onclick={() => (tab = t.id)}
         onkeydown={(e) => onTabKey(e, i)}
       >
+        <Icon name={t.icon} size={18} />
         {t.label}
         {#if tabsWithErrors.has(t.id)}<span class="tab-dot" aria-label="needs fixing"></span>{/if}
       </button>
     {/each}
   </div>
-  </div></div>
 
   <div class="scroll"><div class="inner">
+  {#if Object.keys(fieldErrors).length > 0}
+    <p class="form-error top-error" role="alert">Some settings need fixing before they can be saved.</p>
+  {/if}
   <div class="sections" role="tabpanel" aria-labelledby="tab-{tab}">
     {#if tab === "recording"}
     <section>
@@ -422,11 +423,13 @@
         <label class="label" for="buffer-seconds">Clip length (buffer)</label>
         <div class="buffer">
           <input
+            class="range"
             type="range"
             min={BUFFER_SECONDS_MIN}
             max={BUFFER_SECONDS_MAX}
             step="5"
             bind:value={draft.bufferSeconds}
+            style:--fill="{bufferFill}%"
             aria-label="Clip length in seconds"
           />
           <input
@@ -514,7 +517,7 @@
           </div>
           <button class="btn" onmousedown={(e) => e.preventDefault()} onclick={stopCapture}>Cancel</button>
         {:else}
-          <kbd class="keycap">{hotkeyShown}</kbd>
+          <span class="keycaps"><Keys shortcut={hotkeyShown} size="lg" /></span>
           <button class="btn" onclick={startCapture}>Change</button>
         {/if}
       </div>
@@ -584,9 +587,9 @@
   </div>
 </div></div>
 </div>
+</div>
 
 <style>
-  /* The header and tabs stay put; only the content below them scrolls. */
   .settings {
     position: relative;
     display: flex;
@@ -595,101 +598,108 @@
     min-height: 0;
   }
 
-  .head {
-    flex: none;
-    background: var(--bg);
-  }
-
-  .scroll {
-    /* Contains the hidden screen-reader text, which would otherwise poke out below. */
-    position: relative;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  .inner {
-    max-width: 46rem;
-    margin: 0 auto;
-    padding: 0 1.75rem;
-  }
-
-  .scroll .inner {
-    padding-bottom: 2.5rem;
-  }
-
   .bar {
     display: flex;
+    flex: none;
     align-items: center;
-    gap: 0.75rem;
-    min-height: 3.75rem;
-    background: var(--bg);
-  }
-
-  .back {
-    padding-left: 0.5rem;
-  }
-
-  .tabs {
-    display: flex;
-    gap: 0.25rem;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-    margin-bottom: 1.25rem;
-    border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-    background: var(--bg);
-  }
-
-  .tab {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.7rem 0.9rem;
-    border: 0;
-    background: none;
-    color: var(--text-muted, #9aa0aa);
-    font: inherit;
-    font-weight: 500;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-
-  .tab:hover {
-    color: var(--text, #fff);
-  }
-
-  .tab.active {
-    color: var(--text, #fff);
-    box-shadow: inset 0 -2px 0 var(--accent, #7c5cff);
-  }
-
-  .tab-dot {
-    width: 0.45rem;
-    height: 0.45rem;
-    border-radius: 50%;
-    background: var(--danger, #ef4444);
+    gap: 0.85rem;
+    min-height: 2.6rem;
+    margin: 1.75rem 2rem 1.25rem;
   }
 
   h1 {
-    font-size: 1.25rem;
-    letter-spacing: -0.01em;
+    font-size: 1.85rem;
+    font-weight: 750;
+    line-height: 1.1;
   }
 
   .unsaved {
-    padding: 0.2rem 0.6rem;
+    padding: 0.2rem 0.65rem;
     border-radius: 999px;
-    background: rgba(255, 181, 71, 0.14);
+    background: var(--warning-soft);
     color: var(--warning);
     font-size: 0.8rem;
     font-weight: 650;
+    animation: rise 0.25s var(--ease-out);
   }
 
   .actions {
     display: flex;
     gap: 0.5rem;
     margin-left: auto;
+    animation: rise 0.25s var(--ease-out);
+  }
+
+  .body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .tabs {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 13.5rem;
+    padding: 0 0.75rem 1.5rem 2rem;
+    overflow-y: auto;
+  }
+
+  .tab {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.6rem 0.75rem;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
+
+  .tab:hover {
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .tab.active {
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+
+  .tab.active :global(svg) {
+    color: var(--accent-text);
+  }
+
+  .tab-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-left: auto;
+    border-radius: 50%;
+    background: var(--danger);
+    box-shadow: 0 0 8px var(--danger);
+  }
+
+  .scroll {
+    /* Contains the hidden screen-reader text, which would otherwise poke out below. */
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+  }
+
+  .inner {
+    max-width: 46rem;
+    padding: 0 2rem 3rem 1rem;
   }
 
   .top-error {
@@ -705,19 +715,21 @@
   section {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    padding: 1.25rem 1.4rem 1.4rem;
+    gap: 1.1rem;
+    padding: 1.4rem 1.5rem 1.5rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(180deg, var(--surface), rgba(21, 20, 29, 0.55));
+    animation: rise 0.3s var(--ease-out) backwards;
   }
 
   h2 {
-    font-size: 1.02rem;
+    font-size: 1.2rem;
+    font-weight: 700;
   }
 
   .intro {
-    margin-top: -0.6rem;
+    margin-top: -0.65rem;
     font-size: 0.9rem;
   }
 
@@ -753,10 +765,6 @@
     gap: 1rem;
   }
 
-  select.input {
-    padding-right: 0.5rem;
-  }
-
   .input:disabled {
     opacity: 0.55;
   }
@@ -775,7 +783,7 @@
   }
 
   .error {
-    color: #ffb3ba;
+    color: var(--danger-text);
     font-size: 0.84rem;
   }
 
@@ -788,17 +796,26 @@
   .choice {
     display: flex;
     align-items: flex-start;
-    gap: 0.65rem;
-    padding: 0.75rem 0.85rem;
+    gap: 0.7rem;
+    padding: 0.8rem 0.9rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface-2);
+    border-radius: 12px;
+    background: var(--bg);
     cursor: pointer;
+    transition:
+      border-color 0.15s,
+      background 0.15s,
+      box-shadow 0.15s;
+  }
+
+  .choice:hover:not(.disabled) {
+    border-color: var(--border-strong);
   }
 
   .choice:has(input:checked) {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    border-color: rgba(124, 92, 255, 0.7);
+    background: var(--accent-softer);
+    box-shadow: 0 0 0 3px var(--accent-softer);
   }
 
   .choice.disabled {
@@ -831,7 +848,7 @@
 
   .segmented {
     display: inline-flex;
-    padding: 0.2rem;
+    padding: 0.22rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg);
@@ -845,15 +862,24 @@
     font-weight: 600;
     color: var(--text-muted);
     cursor: pointer;
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
+
+  .segmented label:hover {
+    color: var(--text);
   }
 
   .segmented label.active {
-    background: var(--surface-3);
-    color: var(--text);
+    background: var(--accent);
+    box-shadow: 0 4px 12px -4px var(--accent-glow);
+    color: #fff;
   }
 
   .segmented label:has(input:focus-visible) {
     outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .segmented input,
@@ -866,13 +892,11 @@
   .buffer {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.9rem;
   }
 
-  .buffer input[type="range"] {
+  .buffer .range {
     flex: 1;
-    accent-color: var(--accent);
-    cursor: pointer;
   }
 
   .seconds {
@@ -883,18 +907,23 @@
     position: relative;
     display: flex;
     align-items: center;
-    gap: 0.85rem;
+    gap: 0.9rem;
+    padding: 0.2rem 0;
     cursor: pointer;
   }
 
   .switch {
     position: relative;
     flex: none;
-    width: 2.5rem;
-    height: 1.4rem;
+    width: 2.6rem;
+    height: 1.5rem;
+    border: 1px solid var(--border-strong);
     border-radius: 999px;
     background: var(--surface-3);
-    transition: background 0.15s;
+    transition:
+      background 0.2s,
+      border-color 0.2s,
+      box-shadow 0.2s;
   }
 
   .switch::after {
@@ -907,12 +936,14 @@
     border-radius: 50%;
     background: var(--text-muted);
     transition:
-      transform 0.15s,
-      background 0.15s;
+      transform 0.2s var(--ease-out),
+      background 0.2s;
   }
 
   .toggle input:checked + .switch {
+    border-color: transparent;
     background: var(--accent);
+    box-shadow: 0 0 14px -2px var(--accent-glow);
   }
 
   .toggle input:checked + .switch::after {
@@ -928,30 +959,23 @@
   .hotkey {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 1.25rem;
+    min-height: 4rem;
   }
 
-  .keycap {
-    min-width: 6rem;
-    padding: 0.45rem 0.9rem;
-    border: 1px solid var(--border);
-    border-bottom-width: 3px;
-    border-radius: var(--radius-sm);
-    background: var(--surface-2);
-    font-family: inherit;
-    font-size: 1rem;
-    font-weight: 700;
-    text-align: center;
+  .keycaps {
+    font-size: 0.85rem;
   }
 
   .capture {
     flex: 1;
     max-width: 20rem;
-    padding: 0.55rem 0.9rem;
+    padding: 0.7rem 1rem;
     border: 1px dashed var(--accent);
-    border-radius: var(--radius-sm);
+    border-radius: 12px;
     background: var(--accent-soft);
     color: var(--text);
+    font-weight: 600;
     outline: none;
     animation: pulse 1.4s ease-in-out infinite;
   }
@@ -973,7 +997,7 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    padding: 0.55rem 0.8rem;
+    padding: 0.6rem 0.8rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg);
@@ -985,7 +1009,7 @@
   .account {
     display: grid;
     grid-template-columns: max-content 1fr;
-    gap: 0.5rem 1.5rem;
+    gap: 0.6rem 1.5rem;
     margin: 0;
   }
 

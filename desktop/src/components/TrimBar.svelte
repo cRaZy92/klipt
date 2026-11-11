@@ -158,18 +158,19 @@
   .trimbar {
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
+    gap: 0.5rem;
     user-select: none;
   }
 
   .track {
     position: relative;
-    height: 3.25rem;
+    height: 3.5rem;
     margin: 0 0.9rem;
     border-radius: var(--radius-sm);
     background:
-      repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(255, 255, 255, 0.05) calc(10% - 1px) 10%),
-      var(--surface-2);
+      repeating-linear-gradient(90deg, transparent 0 calc(5% - 1px), rgba(255, 255, 255, 0.045) calc(5% - 1px) 5%),
+      linear-gradient(180deg, var(--surface-2), var(--surface));
+    box-shadow: inset 0 0 0 1px var(--border);
     cursor: pointer;
     touch-action: none;
   }
@@ -178,7 +179,7 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    background: rgba(5, 6, 9, 0.55);
+    background: rgba(5, 4, 10, 0.6);
     pointer-events: none;
   }
 
@@ -192,20 +193,38 @@
     bottom: 0;
     border-top: 2px solid var(--accent);
     border-bottom: 2px solid var(--accent);
-    background: var(--accent-soft);
+    background: linear-gradient(180deg, rgba(124, 92, 255, 0.24), rgba(124, 92, 255, 0.08));
+    box-shadow: 0 0 24px -8px var(--accent-glow);
     pointer-events: none;
   }
 
   .playhead {
     position: absolute;
-    top: -0.3rem;
-    bottom: -0.3rem;
+    top: -0.35rem;
+    bottom: -0.35rem;
+    z-index: 2;
     width: 2px;
     margin-left: -1px;
     border-radius: 1px;
     background: #fff;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
     pointer-events: none;
+  }
+
+  /* A knob on top, so the playhead is easy to find. */
+  .playhead::before {
+    content: "";
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow:
+      0 0 0 2px rgba(0, 0, 0, 0.35),
+      0 0 10px rgba(255, 255, 255, 0.45);
+    transform: translateX(-50%);
   }
 
   .handle {
@@ -216,9 +235,10 @@
     display: grid;
     place-items: center;
     width: 0.9rem;
-    background: var(--accent);
+    background: linear-gradient(180deg, #9479ff, #6d4ff2);
     cursor: ew-resize;
     touch-action: none;
+    transition: filter 0.15s;
   }
 
   .handle.start {
@@ -232,7 +252,7 @@
 
   .handle:hover,
   .handle:focus-visible {
-    background: var(--accent-hover);
+    filter: brightness(1.18);
   }
 
   .handle:focus-visible {
@@ -241,9 +261,10 @@
 
   .grip {
     width: 2px;
-    height: 1.1rem;
+    height: 1.2rem;
     border-radius: 1px;
-    background: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 3px 0 0 -0.5px rgba(255, 255, 255, 0.35);
   }
 
   .labels {
@@ -253,6 +274,12 @@
     color: var(--text-muted);
     font-size: 0.82rem;
     font-variant-numeric: tabular-nums;
+  }
+
+  .length {
+    padding: 0.05rem 0.55rem;
+    border-radius: 999px;
+    background: var(--accent-softer);
   }
 
   .length strong {

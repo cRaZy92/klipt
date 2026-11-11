@@ -1,10 +1,11 @@
 <script lang="ts">
   import { api, errorMessage, on, type ClipView, type GameCount, type Sort } from "../lib/api";
-  import { bufferLabel } from "../lib/format";
+  import { bufferLabel, groupByDay } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import Icon from "../components/Icon.svelte";
+  import Keys from "../components/Keys.svelte";
   import Modal from "../components/Modal.svelte";
   import UploadDialog from "../components/UploadDialog.svelte";
 
@@ -33,6 +34,8 @@
   let tagging = $state<{ clip: ClipView; value: string } | null>(null);
   let removing = $state<{ clip: ClipView; deleteFile: boolean } | null>(null);
   let saving = $state(false);
+
+  const groups = $derived(groupByDay(clips, (c) => c.createdAt, now));
 
   // Bumped to drop answers from older requests when the filter changes quickly.
   let request = 0;
@@ -132,13 +135,15 @@
   }
 </script>
 
-<section class="library">
-  <div class="toolbar">
-    <div class="heading">
-      <h1>Clips</h1>
-      {#if loaded && clips.length > 0}<span class="count">{clips.length}</span>{/if}
+<section class="page">
+  <header class="page-head">
+    <div>
+      <h1>My clips</h1>
+      {#if hotkey}
+        <p class="subtitle">Press <Keys shortcut={hotkey} /> in a game to save the last {bufferLabel(bufferSeconds)}.</p>
+      {/if}
     </div>
-    <div class="tools">
+    <div class="page-tools">
       <button
         class="btn btn-ghost"
         onclick={() => (sort = sort === "newestFirst" ? "oldestFirst" : "newestFirst")}
@@ -147,11 +152,11 @@
         <Icon name="sort" size={16} />
         {sort === "newestFirst" ? "Newest first" : "Oldest first"}
       </button>
-      <button class="btn" onclick={saveNow} disabled={saving}>
-        <Icon name="record" size={16} /> Save clip now
+      <button class="btn btn-rec" onclick={saveNow} disabled={saving}>
+        <span class="rec-dot"></span> Save clip now
       </button>
     </div>
-  </div>
+  </header>
 
   {#if games.length > 0}
     <GameFilter {games} selected={game} onselect={(g) => (game = g)} />
@@ -159,36 +164,57 @@
 
   {#if loadError}
     <div class="empty">
-      <Icon name="alert" size={32} />
+      <div class="empty-icon error"><Icon name="alert" size={28} /></div>
       <p>{loadError}</p>
       <button class="btn" onclick={load}><Icon name="retry" size={16} /> Try again</button>
     </div>
   {:else if loaded && clips.length === 0}
-    <div class="empty">
-      <div class="empty-icon"><Icon name="film" size={30} /></div>
-      {#if game}
+    {#if game}
+      <div class="empty">
+        <div class="empty-icon"><Icon name="film" size={28} /></div>
         <p>No clips for this game.</p>
-      {:else}
-        <h2>No clips yet</h2>
+      </div>
+    {:else}
+      <div class="empty first-run">
+        {#if hotkey}
+          <div class="hero-keys"><Keys shortcut={hotkey} size="lg" /></div>
+        {:else}
+          <div class="empty-icon"><Icon name="film" size={28} /></div>
+        {/if}
+        <h2>Your best moments land here</h2>
         <p>
-          Press <kbd>{hotkey}</kbd> in a game to save the last {bufferLabel(bufferSeconds)}.
+          Play something and press {#if hotkey}<strong>{hotkey}</strong>{:else}the hotkey{/if}. Klipt saves the last
+          {bufferLabel(bufferSeconds)} as a clip.
         </p>
-      {/if}
-    </div>
+        <ol class="steps">
+          <li><span>1</span> Play a game</li>
+          <li><span>2</span> Press the hotkey</li>
+          <li><span>3</span> Upload and share the link</li>
+        </ol>
+      </div>
+    {/if}
   {:else}
-    <div class="grid">
-      {#each clips as clip (clip.id)}
-        <ClipCard
-          {clip}
-          {now}
-          onupload={() => (uploading = clip)}
-          onedit={onedit ? () => onedit(clip) : undefined}
-          onrename={() => (renaming = { clip, value: clip.title })}
-          onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
-          onremove={() => (removing = { clip, deleteFile: false })}
-          onshowfolder={() => act(() => api.showInFolder(clip.id))}
-          oncopy={() => copyLink(clip)}
-        />
+    <div class="clip-groups">
+      {#each groups as group (group.key)}
+        <section aria-label={group.label}>
+          <h2 class="group-label">{group.label}</h2>
+          <div class="clip-grid">
+            {#each group.items as clip, i (clip.id)}
+              <ClipCard
+                {clip}
+                {now}
+                index={i}
+                onupload={() => (uploading = clip)}
+                onedit={onedit ? () => onedit(clip) : undefined}
+                onrename={() => (renaming = { clip, value: clip.title })}
+                onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
+                onremove={() => (removing = { clip, deleteFile: false })}
+                onshowfolder={() => act(() => api.showInFolder(clip.id))}
+                oncopy={() => copyLink(clip)}
+              />
+            {/each}
+          </div>
+        </section>
       {/each}
     </div>
   {/if}
@@ -258,81 +284,62 @@
 {/if}
 
 <style>
-  .library {
-    display: flex;
-    flex-direction: column;
-    gap: 1.1rem;
-    padding: 1.5rem 1.75rem 2.5rem;
+  .first-run {
+    gap: 0.9rem;
+    padding-top: 3.5rem;
   }
 
-  .toolbar {
+  .first-run p {
+    max-width: 28rem;
+  }
+
+  .first-run strong {
+    color: var(--text);
+  }
+
+  .hero-keys {
+    margin-bottom: 0.75rem;
+    animation: float 4s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    50% {
+      transform: translateY(-5px);
+    }
+  }
+
+  .steps {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.6rem;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .steps li {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  .heading {
-    display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
-  }
-
-  h1 {
-    font-size: 1.5rem;
-    letter-spacing: -0.02em;
-  }
-
-  .count {
-    color: var(--text-faint);
+    gap: 0.5rem;
+    padding: 0.45rem 0.85rem 0.45rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.88rem;
     font-weight: 600;
   }
 
-  .tools {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 1rem;
-  }
-
-  .empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 5rem 1rem;
-    color: var(--text-muted);
-    text-align: center;
-  }
-
-  .empty-icon {
+  .steps span {
     display: grid;
     place-items: center;
-    width: 4rem;
-    height: 4rem;
-    border-radius: 18px;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
     background: var(--accent-soft);
-    color: var(--accent);
-  }
-
-  .empty h2 {
-    color: var(--text);
-    font-size: 1.2rem;
-  }
-
-  kbd {
-    padding: 0.1rem 0.45rem;
-    border: 1px solid var(--border);
-    border-bottom-width: 2px;
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    font-weight: 600;
+    color: var(--accent-text);
+    font-size: 0.78rem;
   }
 
   form {

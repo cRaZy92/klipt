@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { bufferLabel, defaultTitle, exportFileName, formatDuration, hotkeyLabel, relativeDate, uploadTitle } from "./format";
+import {
+  bufferLabel,
+  dayGroup,
+  defaultTitle,
+  exportFileName,
+  formatDuration,
+  groupByDay,
+  hotkeyKeys,
+  hotkeyLabel,
+  hueOf,
+  relativeDate,
+  uploadTitle,
+} from "./format";
 
 describe("formatDuration", () => {
   it("shows minutes and zero-padded seconds", () => {
@@ -125,5 +137,104 @@ describe("exportFileName", () => {
 
   it("falls back to Clip", () => {
     expect(exportFileName("  ///  ")).toBe("Clip.mp4");
+  });
+});
+
+describe("dayGroup", () => {
+  const now = new Date(2026, 10, 11, 15, 0, 0); // 11 Nov 2026, 15:00 local
+
+  it("names today and yesterday by the calendar day, not 24 hours", () => {
+    expect(dayGroup(new Date(2026, 10, 11, 0, 5), now)).toBe("Today");
+    expect(dayGroup(new Date(2026, 10, 10, 23, 55), now)).toBe("Yesterday");
+    expect(dayGroup(new Date(2026, 10, 10, 0, 1), now)).toBe("Yesterday");
+  });
+
+  it("treats a clock that's a little ahead as today", () => {
+    expect(dayGroup(new Date(2026, 10, 11, 15, 1), now)).toBe("Today");
+  });
+
+  it("groups the rest of the week, then the rest of the month", () => {
+    expect(dayGroup(new Date(2026, 10, 9), now)).toBe("Last 7 days");
+    expect(dayGroup(new Date(2026, 10, 5), now)).toBe("Last 7 days");
+    expect(dayGroup(new Date(2026, 10, 4), now)).toBe("Earlier this month");
+    expect(dayGroup(new Date(2026, 10, 1), now)).toBe("Earlier this month");
+  });
+
+  it("names older months, with the year only when it isn't this year", () => {
+    expect(dayGroup(new Date(2026, 9, 31), now)).toBe("October");
+    expect(dayGroup(new Date(2025, 10, 20), now)).toBe("November 2025");
+  });
+
+  it("puts the last days of the previous month in the week group", () => {
+    const early = new Date(2026, 10, 2, 12, 0);
+    expect(dayGroup(new Date(2026, 9, 30), early)).toBe("Last 7 days");
+  });
+});
+
+describe("groupByDay", () => {
+  const now = new Date(2026, 10, 11, 15, 0, 0);
+  const at = (d: number, h = 12) => new Date(2026, 10, d, h).getTime();
+
+  it("keeps the order and starts a group where the heading changes", () => {
+    const groups = groupByDay([at(11, 14), at(11, 9), at(10), at(8), at(7), at(2)], (t) => t, now);
+    expect(groups.map((g) => [g.label, g.items.length])).toEqual([
+      ["Today", 2],
+      ["Yesterday", 1],
+      ["Last 7 days", 2],
+      ["Earlier this month", 1],
+    ]);
+  });
+
+  it("works oldest first too, with unique keys", () => {
+    const groups = groupByDay([at(2), at(10), at(11)], (t) => t, now);
+    expect(groups.map((g) => g.label)).toEqual(["Earlier this month", "Yesterday", "Today"]);
+    expect(new Set(groups.map((g) => g.key)).size).toBe(3);
+  });
+
+  it("keys groups by label, so they keep their key when an earlier group goes away", () => {
+    const before = groupByDay([at(11), at(10), at(8)], (t) => t, now);
+    const after = groupByDay([at(11), at(8)], (t) => t, now);
+    expect(before.at(-1)!.key).toBe(after.at(-1)!.key);
+  });
+
+  it("still gives unique keys when a heading comes back in an unsorted list", () => {
+    const groups = groupByDay([at(11), at(10), at(11)], (t) => t, now);
+    expect(groups.map((g) => g.label)).toEqual(["Today", "Yesterday", "Today"]);
+    expect(new Set(groups.map((g) => g.key)).size).toBe(3);
+  });
+
+  it("gives an empty list no groups", () => {
+    expect(groupByDay([], (t: number) => t, now)).toEqual([]);
+  });
+});
+
+describe("hueOf", () => {
+  it("is stable, in range and ignores case and outer spaces", () => {
+    const hue = hueOf("Deep Rock Galactic");
+    expect(hue).toBeGreaterThanOrEqual(0);
+    expect(hue).toBeLessThan(360);
+    expect(hueOf(" deep rock galactic ")).toBe(hue);
+  });
+
+  it("spreads names over several colours", () => {
+    const names = ["Counter-Strike 2", "Deep Rock Galactic", "Helldivers 2", "Rocket League", "Elden Ring", "Apex Legends"];
+    expect(new Set(names.map(hueOf)).size).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("hotkeyKeys", () => {
+  it("splits a shortcut into keys", () => {
+    expect(hotkeyKeys("Alt+`")).toEqual(["Alt", "`"]);
+    expect(hotkeyKeys("Ctrl + Shift + K")).toEqual(["Ctrl", "Shift", "K"]);
+    expect(hotkeyKeys("Alt+;")).toEqual(["Alt", ";"]);
+  });
+
+  it("keeps a plus key", () => {
+    expect(hotkeyKeys("Ctrl++")).toEqual(["Ctrl", "+"]);
+    expect(hotkeyKeys("Ctrl + +")).toEqual(["Ctrl", "+"]);
+  });
+
+  it("gives nothing for an empty shortcut", () => {
+    expect(hotkeyKeys("")).toEqual([]);
   });
 });

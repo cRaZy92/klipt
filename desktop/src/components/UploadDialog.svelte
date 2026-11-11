@@ -57,17 +57,21 @@
         <legend>Who can see it</legend>
         <label class="option" class:selected={visibility === "feed"}>
           <input type="radio" name="visibility" value="feed" bind:group={visibility} />
-          <span>
+          <span class="opt-icon"><Icon name="users" size={18} /></span>
+          <span class="opt-text">
             <strong>Feed</strong>
             <small>Your friends see it in the feed.</small>
           </span>
+          <span class="ring" aria-hidden="true"></span>
         </label>
         <label class="option" class:selected={visibility === "link"}>
           <input type="radio" name="visibility" value="link" bind:group={visibility} />
-          <span>
+          <span class="opt-icon"><Icon name="link" size={18} /></span>
+          <span class="opt-text">
             <strong>Link only</strong>
             <small>Only people you send the link to can watch it.</small>
           </span>
+          <span class="ring" aria-hidden="true"></span>
         </label>
       </fieldset>
     </form>
@@ -141,32 +145,83 @@
   }
 
   .option {
+    position: relative;
     display: flex;
-    align-items: flex-start;
-    gap: 0.7rem;
-    padding: 0.75rem 0.85rem;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.75rem 0.9rem 0.75rem 0.75rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: 12px;
+    background: var(--bg);
     cursor: pointer;
     transition:
-      border-color 0.12s,
-      background 0.12s;
+      border-color 0.15s,
+      background 0.15s,
+      box-shadow 0.15s;
+  }
+
+  .option:hover {
+    border-color: var(--border-strong);
   }
 
   .option.selected {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    border-color: rgba(124, 92, 255, 0.7);
+    background: var(--accent-softer);
+    box-shadow: 0 0 0 3px var(--accent-softer);
   }
 
+  /* The radio is drawn by `.ring`; the real one stays for keyboard and screen readers. */
   .option input {
-    margin: 0.2rem 0 0;
-    accent-color: var(--accent);
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
   }
 
-  .option span {
+  .option:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .opt-icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 10px;
+    background: var(--surface-3);
+    color: var(--text-muted);
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
+
+  .selected .opt-icon {
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  .opt-text {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: 0.1rem;
+  }
+
+  .ring {
+    flex: none;
+    width: 1.15rem;
+    height: 1.15rem;
+    border: 2px solid var(--border-strong);
+    border-radius: 50%;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+
+  .selected .ring {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 3px var(--bg), inset 0 0 0 10px var(--accent);
   }
 
   small {
@@ -209,7 +264,13 @@
   .step.active .bullet {
     border-color: var(--accent);
     background: var(--accent);
+    box-shadow: 0 0 12px var(--accent-glow);
     color: #fff;
+  }
+
+  .step.complete .bullet {
+    border-color: transparent;
+    background: var(--success-soft);
   }
 
   .status {
@@ -217,7 +278,7 @@
   }
 
   .status.failed {
-    color: #ffb3ba;
+    color: var(--danger-text);
     font-weight: 500;
   }
 
@@ -236,11 +297,22 @@
   .done-icon {
     display: grid;
     place-items: center;
-    width: 3.2rem;
-    height: 3.2rem;
+    width: 3.5rem;
+    height: 3.5rem;
     border-radius: 50%;
     background: var(--success-soft);
+    box-shadow:
+      0 0 0 8px rgba(60, 207, 142, 0.06),
+      0 0 30px rgba(60, 207, 142, 0.25);
     color: var(--success);
+    animation: done-pop 0.4s var(--ease-out);
+  }
+
+  @keyframes done-pop {
+    from {
+      transform: scale(0.6);
+      opacity: 0;
+    }
   }
 
   .link {

@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { api, errorMessage, on, type ClipView, type EditInput, type EditorData } from "../lib/api";
-  import { exportFileName } from "../lib/format";
+  import { exportFileName, hueOf } from "../lib/format";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
   import { toast } from "../lib/toasts.svelte";
   import { isBusy, uploads } from "../lib/uploads.svelte";
@@ -329,7 +329,10 @@
     </button>
     <div class="title">
       <h1 title={data?.clip.title ?? clip.title}>{data?.clip.title ?? clip.title}</h1>
-      <span class="muted" class:unknown={!clip.gameName}>{clip.gameName ?? "Unknown game"}</span>
+      <span class="game" class:unknown={!clip.gameName}>
+        {#if clip.gameName}<span class="game-dot" style:--hue={hueOf(clip.gameName)}></span>{/if}
+        {clip.gameName ?? "Unknown game"}
+      </span>
     </div>
     {#if changed}<span class="unsaved">Unsaved changes</span>{/if}
   </header>
@@ -404,14 +407,32 @@
     <div class="panel">
       <div class="mixer">
         <label class="volume">
-          <span>Game</span>
-          <input type="range" min="0" max="100" step="1" bind:value={gameVolume} aria-label="Game volume" />
+          <span class="vol-label"><Icon name="volume" size={17} /> Game</span>
+          <input
+            class="range"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            bind:value={gameVolume}
+            style:--fill="{gameVolume}%"
+            aria-label="Game volume"
+          />
           <output>{gameVolume}%</output>
         </label>
         {#if data.micAudioPath}
           <label class="volume">
-            <span>Mic</span>
-            <input type="range" min="0" max="100" step="1" bind:value={micVolume} aria-label="Mic volume" />
+            <span class="vol-label"><Icon name="mic" size={17} /> Mic</span>
+            <input
+              class="range"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              bind:value={micVolume}
+              style:--fill="{micVolume}%"
+              aria-label="Mic volume"
+            />
             <output>{micVolume}%</output>
           </label>
         {/if}
@@ -451,7 +472,7 @@
     flex-direction: column;
     gap: 1rem;
     height: 100%;
-    padding: 1rem 1.75rem 1.5rem;
+    padding: 1.1rem 2rem 1.5rem;
   }
 
   .bar {
@@ -469,20 +490,24 @@
   .title {
     display: flex;
     align-items: baseline;
-    gap: 0.75rem;
+    gap: 0.85rem;
     min-width: 0;
   }
 
   h1 {
     overflow: hidden;
-    font-size: 1.25rem;
-    letter-spacing: -0.01em;
+    font-size: 1.45rem;
+    font-weight: 750;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .title .muted {
+  .game {
+    display: inline-flex;
     flex: none;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--text-muted);
     font-size: 0.9rem;
   }
 
@@ -493,12 +518,13 @@
   .unsaved {
     flex: none;
     margin-left: auto;
-    padding: 0.2rem 0.6rem;
+    padding: 0.2rem 0.65rem;
     border-radius: 999px;
-    background: rgba(255, 181, 71, 0.14);
+    background: var(--warning-soft);
     color: var(--warning);
     font-size: 0.8rem;
     font-weight: 650;
+    animation: rise 0.25s var(--ease-out);
   }
 
   .center {
@@ -525,8 +551,9 @@
     min-height: 12rem;
     overflow: hidden;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
     background: #000;
+    box-shadow: 0 24px 60px -30px rgba(124, 92, 255, 0.35);
   }
 
   .freeze {
@@ -576,14 +603,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.4rem;
     flex: none;
     width: 7.5rem;
   }
 
   .play {
-    width: 3.25rem;
-    height: 3.25rem;
+    width: 3.5rem;
+    height: 3.5rem;
     border-radius: 50%;
   }
 
@@ -611,35 +638,36 @@
     justify-content: space-between;
     gap: 1rem 2rem;
     flex: none;
-    padding: 0.9rem 1rem;
+    padding: 0.85rem 0.9rem 0.85rem 1.2rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
     background: var(--surface);
   }
 
   .mixer {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.6rem 2rem;
+    gap: 0.6rem 2.25rem;
   }
 
   .volume {
     display: flex;
     align-items: center;
-    gap: 0.7rem;
+    gap: 0.8rem;
     font-weight: 600;
   }
 
-  .volume span {
-    width: 2.6rem;
+  .vol-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 4.6rem;
     color: var(--text-muted);
     font-size: 0.9rem;
   }
 
-  .volume input {
-    width: 11rem;
-    accent-color: var(--accent);
-    cursor: pointer;
+  .volume .range {
+    width: 10rem;
   }
 
   output {

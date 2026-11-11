@@ -4,6 +4,7 @@
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
   import { resumeAfterLogin, watchUploads } from "./lib/uploads.svelte";
+  import Avatar from "./components/Avatar.svelte";
   import Icon from "./components/Icon.svelte";
   import Toast from "./components/Toast.svelte";
   import Modal from "./components/Modal.svelte";
@@ -154,9 +155,21 @@
   function closeAccountMenu(e: MouseEvent) {
     if (accountMenu && !(e.target as Element).closest?.(".account")) accountMenu = false;
   }
+
+  function openWebsite() {
+    accountMenu = false;
+    api.openWebsite().catch((e) => toast(errorMessage(e), "error"));
+  }
+
+  const inClips = $derived(view.name === "library" || view.name === "editor");
 </script>
 
-<svelte:window onclick={closeAccountMenu} />
+<svelte:window
+  onclick={closeAccountMenu}
+  onkeydown={(e) => {
+    if (e.key === "Escape") accountMenu = false;
+  }}
+/>
 
 {#if !ready}
   <div class="center">
@@ -171,81 +184,109 @@
   <Login initialServer={settings?.serverUrl ?? null} notice={loginNotice} onlogin={loggedIn} />
 {:else}
   <div class="shell">
-    <header class="topbar">
-      <button class="brand" onclick={() => go({ name: "library" })}>
-        <span class="logo"><Icon name="logo" size={24} /></span>
-        Klipt
+    <nav class="rail" aria-label="Sections">
+      <button class="brand" onclick={() => go({ name: "library" })} title="Klipt" aria-label="Klipt, my clips">
+        <Icon name="logo" size={26} />
       </button>
-      <nav class="tabs" aria-label="Sections">
-        <button class:active={view.name === "library" || view.name === "editor"} onclick={() => go({ name: "library" })}>
-          My clips
+
+      <div class="nav">
+        <button class="item" class:active={inClips} aria-current={inClips ? "page" : undefined} onclick={() => go({ name: "library" })}>
+          <span class="item-icon"><Icon name="film" size={20} /></span>
+          Clips
         </button>
-        <button class:active={view.name === "feed"} onclick={() => go({ name: "feed" })}>Feed</button>
-      </nav>
-      <div class="right">
         <button
-          class="btn btn-ghost btn-icon"
-          aria-label="Settings"
-          title="Settings"
+          class="item"
+          class:active={view.name === "feed"}
+          aria-current={view.name === "feed" ? "page" : undefined}
+          onclick={() => go({ name: "feed" })}
+        >
+          <span class="item-icon"><Icon name="users" size={20} /></span>
+          Feed
+        </button>
+      </div>
+
+      <div class="nav bottom">
+        <button
+          class="item"
+          class:active={view.name === "settings"}
+          aria-current={view.name === "settings" ? "page" : undefined}
           onclick={() => go({ name: "settings" })}
         >
-          <Icon name="settings" />
+          <span class="item-icon"><Icon name="settings" size={20} /></span>
+          Settings
         </button>
         <div class="account">
-          <button class="btn btn-ghost" onclick={() => (accountMenu = !accountMenu)} aria-expanded={accountMenu}>
-            <span class="avatar">{account.username.slice(0, 1).toUpperCase()}</span>
-            {account.username}
+          <button
+            class="me"
+            onclick={() => (accountMenu = !accountMenu)}
+            aria-expanded={accountMenu}
+            aria-haspopup="menu"
+            aria-label="Account: {account.username}"
+            title={account.username}
+          >
+            <Avatar name={account.username} size={36} />
           </button>
           {#if accountMenu}
             <div class="menu" role="menu">
-              <p class="server muted">Logged in to {hostOf(account.serverUrl)}</p>
+              <div class="who">
+                <Avatar name={account.username} size={38} />
+                <div>
+                  <strong>{account.username}</strong>
+                  <span>{hostOf(account.serverUrl)}</span>
+                </div>
+              </div>
+              <hr />
+              <button role="menuitem" onclick={openWebsite}><Icon name="external" size={16} /> Open website</button>
               <button role="menuitem" onclick={requestLogout}><Icon name="logout" size={16} /> Log out</button>
             </div>
           {/if}
         </div>
       </div>
-    </header>
+    </nav>
 
-    {#if update}
-      <div class="update-bar" role="status">
-        <span>Update available: Klipt {update.version}</span>
-        <button class="btn btn-primary" onclick={installUpdate} disabled={update.installing}>
-          {#if update.installing}<span class="spinner"></span> Installing…{:else}Restart to install{/if}
-        </button>
-        <button class="btn btn-ghost" onclick={() => (update = null)} disabled={update.installing}>Later</button>
-      </div>
-    {/if}
-
-    <main>
-      {#if view.name === "library"}
-        <Library
-          {hotkey}
-          bufferSeconds={settings?.bufferSeconds ?? 30}
-          onedit={(clip) => go({ name: "editor", clip })}
-        />
-      {:else if view.name === "feed"}
-        <Feed
-          onunauthorized={() => {
-            account = null;
-            loginNotice = "Your session has expired. Log in again to see the feed.";
-          }}
-        />
-      {:else if view.name === "editor"}
-        {#key view.clip.id}
-          <Editor clip={view.clip} bind:dirty={viewDirty} onclose={() => go({ name: "library" })} />
-        {/key}
-      {:else if settings}
-        <SettingsView
-          {settings}
-          {account}
-          {hotkeyStatus}
-          bind:dirty={viewDirty}
-          onsaved={settingsSaved}
-          onlogout={requestLogout}
-          onclose={() => go({ name: "library" })}
-        />
+    <div class="content">
+      {#if update}
+        <div class="update-bar" role="status">
+          <span class="update-icon"><Icon name="download" size={18} /></span>
+          <span class="update-text"><strong>Klipt {update.version}</strong> is ready to install.</span>
+          <button class="btn btn-sm btn-ghost" onclick={() => (update = null)} disabled={update.installing}>Later</button>
+          <button class="btn btn-sm btn-primary" onclick={installUpdate} disabled={update.installing}>
+            {#if update.installing}<span class="spinner"></span> Installing…{:else}Restart to install{/if}
+          </button>
+        </div>
       {/if}
-    </main>
+
+      <main>
+        {#if view.name === "library"}
+          <Library
+            {hotkey}
+            bufferSeconds={settings?.bufferSeconds ?? 30}
+            onedit={(clip) => go({ name: "editor", clip })}
+          />
+        {:else if view.name === "feed"}
+          <Feed
+            server={hostOf(account.serverUrl)}
+            onunauthorized={() => {
+              account = null;
+              loginNotice = "Your session has expired. Log in again to see the feed.";
+            }}
+          />
+        {:else if view.name === "editor"}
+          {#key view.clip.id}
+            <Editor clip={view.clip} bind:dirty={viewDirty} onclose={() => go({ name: "library" })} />
+          {/key}
+        {:else if settings}
+          <SettingsView
+            {settings}
+            {account}
+            {hotkeyStatus}
+            bind:dirty={viewDirty}
+            onsaved={settingsSaved}
+            onlogout={requestLogout}
+          />
+        {/if}
+      </main>
+    </div>
   </div>
 {/if}
 
@@ -278,19 +319,215 @@
 
   .shell {
     display: flex;
-    flex-direction: column;
     height: 100%;
   }
 
-  .topbar {
+  /* The navigation rail on the left. */
+  .rail {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    align-items: center;
+    width: 5rem;
+    padding: 0.9rem 0;
+    border-right: 1px solid var(--border);
+    background: var(--bg-2);
+  }
+
+  .brand {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border: none;
+    border-radius: 13px;
+    background: linear-gradient(145deg, #9479ff, #6a4bf0);
+    box-shadow:
+      0 8px 22px -8px var(--accent-glow),
+      inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    color: #fff;
+    cursor: pointer;
+    transition: transform 0.15s var(--ease-out);
+  }
+
+  .brand:hover {
+    transform: rotate(-4deg) scale(1.05);
+  }
+
+  .nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    width: 100%;
+    margin-top: 1.4rem;
+    padding: 0 0.5rem;
+  }
+
+  .nav.bottom {
+    align-items: center;
+    margin-top: auto;
+  }
+
+  .item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    width: 100%;
+    padding: 0.4rem 0 0.45rem;
+    border: none;
+    border-radius: 12px;
+    background: none;
+    color: var(--text-faint);
+    font-size: 0.72rem;
+    font-weight: 650;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  .item-icon {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.1rem;
+    border-radius: 11px;
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
+
+  .item:hover {
+    color: var(--text);
+  }
+
+  .item:hover .item-icon {
+    background: var(--surface-2);
+  }
+
+  .item.active {
+    color: var(--text);
+  }
+
+  .item.active .item-icon {
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  .item.active::before {
+    content: "";
+    position: absolute;
+    top: 0.65rem;
+    left: -0.5rem;
+    width: 3px;
+    height: 1.6rem;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+
+  .account {
+    position: relative;
+    margin-top: 0.6rem;
+  }
+
+  .me {
+    display: grid;
+    place-items: center;
+    padding: 2px;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    background: none;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .me:hover,
+  .me[aria-expanded="true"] {
+    border-color: var(--border-strong);
+  }
+
+  .menu {
+    position: absolute;
+    bottom: 0;
+    left: calc(100% + 0.75rem);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    min-width: 15rem;
+    padding: 0.35rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+    animation: menu-in 0.15s var(--ease-out);
+  }
+
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      transform: translateX(-4px);
+    }
+  }
+
+  .who {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    flex: none;
-    height: 3.5rem;
-    padding: 0 1rem 0 1.25rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    gap: 0.65rem;
+    padding: 0.5rem 0.55rem 0.45rem;
+  }
+
+  .who div {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .who span {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  hr {
+    width: 100%;
+    margin: 0.3rem 0;
+    border: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--text-muted);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .menu button:hover {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+
+  /* Everything right of the rail. A faint glow sits behind the top of every page. */
+  .content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    background:
+      radial-gradient(60rem 22rem at 20% -6rem, rgba(124, 92, 255, 0.11), transparent 70%),
+      var(--bg);
   }
 
   .update-bar {
@@ -298,122 +535,26 @@
     align-items: center;
     gap: 0.75rem;
     flex: none;
-    padding: 0.5rem 1.25rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--accent-soft);
+    margin: 0.85rem 2rem 0;
+    padding: 0.55rem 0.6rem 0.55rem 0.7rem;
+    border: 1px solid rgba(124, 92, 255, 0.35);
+    border-radius: var(--radius);
+    background: linear-gradient(90deg, rgba(124, 92, 255, 0.24), rgba(124, 92, 255, 0.06));
+    animation: rise 0.35s var(--ease-out);
   }
 
-  .update-bar span {
-    margin-right: auto;
-    font-weight: 600;
-  }
-
-  .tabs {
-    display: flex;
-    gap: 0.25rem;
-    margin-right: auto;
-    margin-left: 1.5rem;
-  }
-
-  .tabs button {
-    padding: 0.4rem 0.85rem;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--text-muted);
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .tabs button:hover {
-    color: var(--text);
-    background: var(--surface-2);
-  }
-
-  .tabs button.active {
-    color: var(--text);
-    background: var(--surface-3);
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0;
-    border: none;
-    background: none;
-    font-size: 1.1rem;
-    font-weight: 750;
-    letter-spacing: -0.01em;
-    cursor: pointer;
-  }
-
-  .logo {
+  .update-icon {
     display: grid;
     place-items: center;
-    width: 1.8rem;
-    height: 1.8rem;
-    border-radius: 8px;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 9px;
     background: var(--accent);
     color: #fff;
   }
 
-  .right {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-
-  .account {
-    position: relative;
-  }
-
-  .avatar {
-    display: grid;
-    place-items: center;
-    width: 1.6rem;
-    height: 1.6rem;
-    border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-size: 0.8rem;
-  }
-
-  .menu {
-    position: absolute;
-    top: calc(100% + 0.35rem);
-    right: 0;
-    z-index: 30;
-    display: flex;
-    flex-direction: column;
-    min-width: 13rem;
-    padding: 0.3rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface-2);
-    box-shadow: var(--shadow);
-  }
-
-  .server {
-    padding: 0.45rem 0.6rem;
-    font-size: 0.82rem;
-  }
-
-  .menu button {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0.5rem 0.6rem;
-    border: none;
-    border-radius: 6px;
-    background: none;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .menu button:hover {
-    background: var(--surface-3);
+  .update-text {
+    margin-right: auto;
   }
 
   main {

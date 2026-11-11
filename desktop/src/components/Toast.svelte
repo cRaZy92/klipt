@@ -31,31 +31,43 @@
   .toast {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.65rem;
     max-width: 26rem;
-    padding: 0.7rem 0.8rem 0.7rem 0.9rem;
-    border: 1px solid var(--border);
+    padding: 0.6rem 0.6rem 0.6rem 0.65rem;
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius);
-    background: var(--surface-2);
+    background: rgba(30, 28, 42, 0.92);
+    backdrop-filter: blur(12px);
     box-shadow: var(--shadow);
     pointer-events: auto;
-    animation: pop 0.18s ease-out;
+    animation: slide-in 0.25s var(--ease-out);
+  }
+
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(14px);
+    }
   }
 
   .dot {
     display: grid;
     place-items: center;
     flex: none;
-    width: 1.6rem;
-    height: 1.6rem;
-    border-radius: 50%;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 9px;
     background: var(--accent-soft);
-    color: var(--accent);
+    color: var(--accent-text);
   }
 
   .success .dot {
     background: var(--success-soft);
     color: var(--success);
+  }
+
+  .error {
+    border-color: rgba(255, 93, 108, 0.35);
   }
 
   .error .dot {
@@ -66,27 +78,22 @@
   .text {
     flex: 1;
     font-size: 0.92rem;
+    font-weight: 500;
   }
 
   .close {
     display: grid;
     place-items: center;
-    padding: 0.25rem;
+    padding: 0.3rem;
     border: none;
-    border-radius: 6px;
+    border-radius: 7px;
     background: none;
     color: var(--text-faint);
     cursor: pointer;
   }
 
   .close:hover {
+    background: rgba(255, 255, 255, 0.06);
     color: var(--text);
-  }
-
-  @keyframes pop {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
   }
 </style>

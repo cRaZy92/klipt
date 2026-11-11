@@ -79,3 +79,14 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
   .grid { grid-template-columns: 1fr; }
   .topbar { padding: 10px 12px; }
 }
+
+/* Clip page: the video as tall as the window allows, details in a sidebar on the right. */
+.container:has(> .share) { max-width: 1800px; }
+.share { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+.share video { display: block; width: 100%; height: calc(100vh - 130px); min-height: 240px; background: #000; border-radius: 12px; object-fit: contain; }
+.share-info h1 { margin-top: 0; font-size: 1.5rem; overflow-wrap: anywhere; }
+.share-info .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 900px) {
+  .share { grid-template-columns: 1fr; }
+  .share video { height: auto; max-height: 75vh; }
+}

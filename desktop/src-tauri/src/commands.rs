@@ -1055,6 +1055,12 @@ pub async fn feed_games(app: AppHandle) -> Result<serde_json::Value> {
     Ok(server_get(&app, "/api/games", vec![("scope", "feed".to_string())]).await?.0)
 }
 
+/// How much server storage your own clips use: the server's `MyStorage` (`{ clips, bytes }`).
+#[tauri::command]
+pub async fn my_storage(app: AppHandle) -> Result<serde_json::Value> {
+    Ok(server_get(&app, "/api/me/storage", Vec::new()).await?.0)
+}
+
 /// Opens the Klipt website in the browser: its home page, or `url` (e.g. a clip's share link),
 /// which must be on the server. A full URL rather than a path, so a server at a subpath
 /// (`https://example.com/klipt`) doesn't get its path twice.

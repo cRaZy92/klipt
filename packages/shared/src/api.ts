@@ -49,7 +49,15 @@ export interface AdminUser {
   isAdmin: boolean;
   disabled: boolean;
   clipCount: number;
+  /** Bytes the user's clips take on the server. */
+  storageBytes: number;
   createdAt: string;
+}
+
+/** `GET /api/me/storage`: how much server storage your own clips use (feed and link-only). */
+export interface MyStorage {
+  clips: number;
+  bytes: number;
 }
 
 export interface AdminStats {

@@ -8,7 +8,7 @@ import { getAdminStats, isInviteActive, listActiveInvites, listAdminUsers } from
 import { toClip } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
 import { users } from '../db/schema.js';
-import { getClip, listClips, listGames, InvalidCursorError, type Scope } from '../clips/repo.js';
+import { getClip, getUserStorage, listClips, listGames, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
 import { InvitePage } from './pages/invite.js';
@@ -132,8 +132,8 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     if (!guard(req, reply)) return reply;
     const user = req.user!;
     const data = await load(req, 'mine');
-    const sessionInfos = await listSessions(db, user);
-    return html(reply, MePage({ user, ...data, sessions: sessionInfos, baseUrl: config.baseUrl }) as string);
+    const [sessionInfos, storage] = await Promise.all([listSessions(db, user), getUserStorage(db, user.id)]);
+    return html(reply, MePage({ user, ...data, sessions: sessionInfos, storage, baseUrl: config.baseUrl }) as string);
   });
 
   app.get('/admin', async (req, reply) => {

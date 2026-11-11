@@ -1,7 +1,7 @@
-import type { GameCount, SessionInfo } from '@klipt/shared';
+import type { GameCount, MyStorage, SessionInfo } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import type { ClipWithOwner } from '../../clips/repo.js';
-import { formatDuration, GameFilter, Pager, relativeDate } from '../components.js';
+import { formatDuration, formatSize, GameFilter, Pager, relativeDate } from '../components.js';
 import { Layout } from '../layout.js';
 
 import { esc as e } from '../escape.js';
@@ -47,11 +47,20 @@ export function MePage(props: {
   games: GameCount[];
   game?: string;
   sessions: SessionInfo[];
+  storage: MyStorage;
   baseUrl: string;
 }): JSX.Element {
+  const { storage } = props;
   return (
     <Layout title="My clips" user={props.user}>
       <h1>My clips</h1>
+      {storage.clips > 0 ? (
+        <p class="meta" data-role="storage">
+          {storage.clips === 1 ? '1 clip' : `${storage.clips} clips`} · {formatSize(storage.bytes)} on the server
+        </p>
+      ) : (
+        ''
+      )}
       <GameFilter games={props.games} active={props.game} basePath="/me" />
       {props.items.length === 0 ? (
         <p class="empty">You haven't uploaded any clips yet.</p>

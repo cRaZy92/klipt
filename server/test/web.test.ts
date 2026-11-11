@@ -137,6 +137,17 @@ describe('web pages', () => {
     expect((await get('/u/nobody', b.cookie)).statusCode).toBe(404);
   });
 
+  it('me page shows how much server storage your clips use', async () => {
+    const a = await mk('alice');
+    const b = await mk('bob');
+    await addClip(a.u.id, { sizeBytes: 1_000_000_000 });
+    await addClip(a.u.id, { sizeBytes: 610_000_000, visibility: 'link' });
+    await addClip(b.u.id, { sizeBytes: 5_000_000_000 });
+    expect((await get('/me', a.cookie)).body).toMatch(/data-role="storage">2 clips · 1\.5 GB on the server</);
+    const c = await mk('carol');
+    expect((await get('/me', c.cookie)).body).not.toContain('data-role="storage"');
+  });
+
   it('me page says where each clip is visible and the button says what it does', async () => {
     const a = await mk('alice');
     await addClip(a.u.id, { title: 'Pub' });
@@ -178,6 +189,17 @@ describe('web pages', () => {
     expect(res.statusCode).toBe(404);
     expect(res.headers['content-type']).toContain('text/html');
     expect((await get('/api/nothing')).headers['content-type']).toContain('json');
+  });
+});
+
+describe('formatSize', () => {
+  it('uses MB below a gigabyte and GB with one decimal above', async () => {
+    const { formatSize } = await import('../src/web/components.js');
+    expect(formatSize(0)).toBe('0 MB');
+    expect(formatSize(10)).toBe('0.1 MB');
+    expect(formatSize(340 * 1024 ** 2)).toBe('340 MB');
+    expect(formatSize(1.5 * 1024 ** 3)).toBe('1.5 GB');
+    expect(formatSize(12 * 1024 ** 3)).toBe('12 GB');
   });
 });
 

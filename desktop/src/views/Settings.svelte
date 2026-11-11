@@ -14,7 +14,7 @@
     type Resolution,
     type Settings,
   } from "../lib/api";
-  import { bufferLabel, hotkeyLabel } from "../lib/format";
+  import { bufferLabel, formatSize, hotkeyLabel } from "../lib/format";
   import { acceleratorFromKeydown } from "../lib/hotkey";
   import {
     BITRATE_KBPS_MAX,
@@ -578,6 +578,16 @@
         <dd><code>{account.serverUrl}</code></dd>
         <dt>Username</dt>
         <dd>{account.username}</dd>
+        <dt>Your clips on the server</dt>
+        <dd>
+          {#await api.myStorage()}
+            …
+          {:then storage}
+            {storage.clips === 1 ? "1 clip" : `${storage.clips} clips`} · {formatSize(storage.bytes)}
+          {:catch}
+            <span class="muted">Can't reach the server</span>
+          {/await}
+        </dd>
       </dl>
       <div>
         <button class="btn" onclick={onlogout}><Icon name="logout" size={16} /> Log out</button>

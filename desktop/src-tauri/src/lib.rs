@@ -107,6 +107,7 @@ pub fn run() {
             commands::copy_text_to_clipboard,
             commands::feed_clips,
             commands::feed_games,
+            commands::my_storage,
             commands::open_website,
             server_clips::my_uploads,
             server_clips::update_upload,

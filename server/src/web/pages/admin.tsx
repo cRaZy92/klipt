@@ -1,6 +1,6 @@
 import type { AdminStats, AdminUser, Invite } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
-import { formatGB, relativeDate, skDate } from '../components.js';
+import { formatGB, formatSize, relativeDate, skDate } from '../components.js';
 import { Layout } from '../layout.js';
 
 import { esc as e } from '../escape.js';
@@ -40,7 +40,7 @@ export function AdminPage(props: { user: AuthUser; stats: AdminStats; invites: I
               <a href={`/u/${encodeURIComponent(u.username)}`}><strong>{e(u.username)}</strong></a>
               {u.isAdmin ? <span class="badge accent">admin</span> : ''}
               {u.disabled ? <span class="badge">disabled</span> : ''}
-              <div class="meta"><span>{u.clipCount} clips</span><span>joined {relativeDate(new Date(u.createdAt))}</span></div>
+              <div class="meta"><span>{u.clipCount} clips · {formatSize(u.storageBytes)}</span><span>joined {relativeDate(new Date(u.createdAt))}</span></div>
             </div>
             {u.id === props.user.id ? (
               ''

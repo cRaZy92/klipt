@@ -211,6 +211,12 @@ export interface FeedClip {
 }
 
 /** One of your uploads on the server, for My clips. */
+/** How much server storage your own uploads use. */
+export interface MyStorage {
+  clips: number;
+  bytes: number;
+}
+
 export interface MyUpload extends FeedClip {
   visibility: Visibility;
 }
@@ -249,6 +255,8 @@ export const api = {
   showInFolder: (id: string) => invoke<void>("show_in_folder", { id }),
   /** All your uploads, newest first; null when not logged in. */
   myUploads: () => invoke<MyUpload[] | null>("my_uploads"),
+  /** How much server storage your uploads use. */
+  myStorage: () => invoke<MyStorage>("my_storage"),
   /** Renames your upload on the server and/or changes who sees it. */
   updateUpload: (id: string, change: { title?: string; visibility?: Visibility }) =>
     invoke<MyUpload>("update_upload", { id, title: change.title ?? null, visibility: change.visibility ?? null }),

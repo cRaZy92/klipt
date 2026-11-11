@@ -35,6 +35,7 @@ export async function listAdminUsers(db: Db): Promise<AdminUser[]> {
       disabledAt: users.disabledAt,
       createdAt: users.createdAt,
       clipCount: sql<number>`count(${clips.id})::int`,
+      storageBytes: sql<number>`coalesce(sum(${clips.sizeBytes}), 0)::float8`,
     })
     .from(users)
     .leftJoin(clips, eq(clips.userId, users.id))
@@ -46,6 +47,7 @@ export async function listAdminUsers(db: Db): Promise<AdminUser[]> {
     isAdmin: u.isAdmin,
     disabled: u.disabledAt !== null,
     clipCount: u.clipCount,
+    storageBytes: Number(u.storageBytes),
     createdAt: u.createdAt.toISOString(),
   }));
 }

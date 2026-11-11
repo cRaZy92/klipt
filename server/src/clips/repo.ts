@@ -1,5 +1,5 @@
 import { and, count, desc, eq, lt, or, sql, type SQL } from 'drizzle-orm';
-import type { GameCount } from '@klipt/shared';
+import type { GameCount, MyStorage } from '@klipt/shared';
 import type { AuthUser } from '../auth/sessions.js';
 import type { Db } from '../db/client.js';
 import { clips, users } from '../db/schema.js';
@@ -84,6 +84,14 @@ export async function listGames(
     .groupBy(clips.gameName)
     .orderBy(desc(count()), clips.gameName);
   return rows.map((r) => ({ gameName: r.gameName!, steamAppId: r.steamAppId ?? null, count: Number(r.count) }));
+}
+
+export async function getUserStorage(db: Db, userId: string): Promise<MyStorage> {
+  const [row] = await db
+    .select({ clips: sql<number>`count(*)::int`, bytes: sql<number>`coalesce(sum(${clips.sizeBytes}), 0)::float8` })
+    .from(clips)
+    .where(eq(clips.userId, userId));
+  return { clips: Number(row!.clips), bytes: Number(row!.bytes) };
 }
 
 export async function getClip(db: Db, id: string): Promise<ClipWithOwner | null> {

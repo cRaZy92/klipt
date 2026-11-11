@@ -41,6 +41,14 @@ export function relativeDate(date: Date, now = new Date()): string {
   return 'just now';
 }
 
+/** 0.4 MB, 9.5 MB, 340 MB, 1.5 GB, 12 GB: one decimal below 10, a trailing ".0" dropped. */
+export function formatSize(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  const [value, unit] = gb >= 1 ? [gb, 'GB'] : [bytes / 1024 ** 2, 'MB'];
+  const shown = value >= 10 ? String(Math.round(value)) : (bytes > 0 ? Math.max(value, 0.1) : 0).toFixed(1).replace(/\.0$/, '');
+  return `${shown} ${unit}`;
+}
+
 export function formatGB(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }

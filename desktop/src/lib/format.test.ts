@@ -5,6 +5,7 @@ import {
   defaultTitle,
   exportFileName,
   formatDuration,
+  formatSize,
   groupByDay,
   hotkeyKeys,
   hotkeyLabel,
@@ -236,5 +237,16 @@ describe("hotkeyKeys", () => {
 
   it("gives nothing for an empty shortcut", () => {
     expect(hotkeyKeys("")).toEqual([]);
+  });
+});
+
+describe("formatSize", () => {
+  it("uses MB below a gigabyte and GB above, one decimal below 10", () => {
+    expect(formatSize(0)).toBe("0 MB");
+    expect(formatSize(10)).toBe("0.1 MB");
+    expect(formatSize(340 * 1024 ** 2)).toBe("340 MB");
+    expect(formatSize(1.5 * 1024 ** 3)).toBe("1.5 GB");
+    expect(formatSize(1024 ** 3)).toBe("1 GB");
+    expect(formatSize(12 * 1024 ** 3)).toBe("12 GB");
   });
 });

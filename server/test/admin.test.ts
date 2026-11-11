@@ -122,9 +122,10 @@ describe('admin + registration', () => {
     const users_ = ur.json() as {
       username: string;
       clipCount: number;
+      storageBytes: number;
       disabled: boolean;
     }[];
-    expect(users_.find((x) => x.username === 'filmer')).toMatchObject({ clipCount: 2, disabled: false });
+    expect(users_.find((x) => x.username === 'filmer')).toMatchObject({ clipCount: 2, storageBytes: 5_000_000_010, disabled: false });
     expect((await t.app.inject({ url: '/api/admin/stats', headers: adminHeaders })).json()).toEqual({
       users: 2,
       clips: 2,

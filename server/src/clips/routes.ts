@@ -10,7 +10,7 @@ import { requireUser } from '../auth/plugin.js';
 import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
 import { assertPlayable, makeThumbnail, MediaError, probeVideo, remuxFaststart } from './media.js';
 import { newClipId } from './ids.js';
-import { getClip, InvalidCursorError, listClips, listGames } from './repo.js';
+import { getClip, getUserStorage, InvalidCursorError, listClips, listGames } from './repo.js';
 
 type ClipRow = typeof clips.$inferSelect;
 
@@ -102,6 +102,8 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (!q.success) return reply.code(400).send({ error: 'invalid_request' });
     return listGames(db, req.user!, q.data.scope, q.data.username);
   });
+
+  app.get('/api/me/storage', { preHandler: requireUser }, async (req) => getUserStorage(db, req.user!.id));
 
   app.get('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
     const p = idParam.safeParse(req.params);

@@ -146,6 +146,19 @@ describe('update and delete', () => {
   });
 });
 
+describe('my storage', () => {
+  it('counts only your own clips, private ones included', async () => {
+    await addClip(a.id, { sizeBytes: 3_000_000_000 }, false);
+    await addClip(a.id, { sizeBytes: 500, visibility: 'link' }, false);
+    await addClip(b.id, { sizeBytes: 7 }, false);
+    const res = await t.app.inject({ url: '/api/me/storage', headers: a.h });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ clips: 2, bytes: 3_000_000_500 });
+    expect((await t.app.inject({ url: '/api/me/storage', headers: admin.h })).json()).toEqual({ clips: 0, bytes: 0 });
+    expect((await t.app.inject({ url: '/api/me/storage' })).statusCode).toBe(401);
+  });
+});
+
 describe('media serving', () => {
   it('serves ranges publicly with immutable caching', async () => {
     const id = await addClip(a.id, {}, false);

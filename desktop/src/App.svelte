@@ -173,7 +173,7 @@
   <div class="shell">
     <header class="topbar">
       <button class="brand" onclick={() => go({ name: "library" })}>
-        <span class="logo"><Icon name="record" size={16} /></span>
+        <span class="logo"><Icon name="logo" size={24} /></span>
         Klipt
       </button>
       <nav class="tabs" aria-label="Sections">

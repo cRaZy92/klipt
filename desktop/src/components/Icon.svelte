@@ -22,9 +22,17 @@
     retry: "M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15m0 5v-5h5",
     logout: "M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12",
     server: "M4 5h16v6H4zM4 13h16v6H4zM8 8h.01M8 16h.01",
+    // The app icon's glyph (src-tauri/icons/source.svg scaled 1/32 about its centre): frame brackets
+    // here, the play triangle in FILLS. Put it on an accent tile, sized ~5/6 of the tile, to match.
+    logo: "M5.375 5.375H3.5v13.25h1.875M18.625 5.375H20.5v13.25h-1.875",
   } as const;
 
   export type IconName = keyof typeof PATHS;
+
+  // Solid shapes drawn over an icon's strokes.
+  const FILLS: Partial<Record<IconName, string>> = {
+    logo: "M9.75 7.875v8.25L16.625 12z",
+  };
 </script>
 
 <script lang="ts">
@@ -43,4 +51,5 @@
   aria-hidden="true"
 >
   <path d={PATHS[name]} />
+  {#if FILLS[name]}<path d={FILLS[name]} fill="currentColor" stroke="none" />{/if}
 </svg>

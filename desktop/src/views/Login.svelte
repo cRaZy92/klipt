@@ -78,7 +78,7 @@
 <div class="screen">
   <div class="card">
     <div class="brand">
-      <div class="logo"><Icon name="record" size={26} /></div>
+      <div class="logo"><Icon name="logo" size={40} /></div>
       <h1>Klipt</h1>
       <p class="muted">Save your best moments and share them with friends.</p>
     </div>
@@ -101,7 +101,6 @@
             autofocus
           />
         </label>
-        <p class="hint">Your friend who runs the Klipt server can tell you the address.</p>
         {#if error}<p class="form-error" role="alert">{error}</p>{/if}
         <button class="btn btn-primary btn-block" type="submit" disabled={busy}>
           {#if busy}<span class="spinner"></span> Checking…{:else}Continue{/if}
@@ -185,12 +184,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
-  }
-
-  .hint {
-    margin-top: -0.4rem;
-    color: var(--text-faint);
-    font-size: 0.85rem;
   }
 
   .notice {

@@ -119,15 +119,16 @@ pub fn run() {
 
 /// Turns starting with the OS on or off to match `startWithOs` (at launch and when Settings
 /// change it). Debug builds leave it alone, so a dev run doesn't register the dev binary to
-/// start at login.
+/// start at login. When on, the entry is rewritten every time, so it points at the copy that's
+/// running (e.g. the packaged `/usr/bin/klipt-desktop` after a build from the repo set it up).
 pub fn apply_autostart(app: &AppHandle, enabled: bool) {
     if cfg!(debug_assertions) {
         return;
     }
     let autostart = app.autolaunch();
     let result = match autostart.is_enabled() {
-        Ok(current) if current == enabled => Ok(()),
         _ if enabled => autostart.enable(),
+        Ok(false) => Ok(()),
         _ => autostart.disable(),
     };
     if let Err(e) = result {

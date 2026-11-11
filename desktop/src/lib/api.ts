@@ -269,8 +269,11 @@ export interface Events {
   "upload-done": UploadDone;
   "upload-failed": UploadFailed;
   "export-progress": ExportProgress;
-  /** Windows: a newer signed release is ready to install. */
-  "update-available": { version: string };
+  /**
+   * A newer release is out. Windows installs it itself (`installUpdate`); on Linux `command` is
+   * what the user runs in a terminal to install it.
+   */
+  "update-available": { version: string; command: string | null };
 }
 
 /**

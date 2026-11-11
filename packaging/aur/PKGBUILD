@@ -25,6 +25,8 @@ pkgver() {
 build() {
   cd klipt
   export CARGO_HOME="$srcdir/cargo-home"
+  # Lets the app tell when a newer release is out (see desktop/src-tauri/src/update.rs).
+  export KLIPT_COMMIT="$(git rev-parse HEAD)"
   pnpm install --frozen-lockfile
   cd desktop
   pnpm tauri build --no-bundle

@@ -14,6 +14,7 @@ pub mod library;
 pub mod media_server;
 pub mod update;
 pub mod recorder;
+pub mod server_clips;
 pub mod settings;
 pub mod sound;
 pub mod state;
@@ -107,6 +108,10 @@ pub fn run() {
             commands::feed_clips,
             commands::feed_games,
             commands::open_website,
+            server_clips::my_uploads,
+            server_clips::update_upload,
+            server_clips::delete_upload,
+            server_clips::download_upload,
             update::install_update,
             commands::upload_clip,
             commands::open_editor,

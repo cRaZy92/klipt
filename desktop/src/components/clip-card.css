@@ -1,0 +1,316 @@
+/* Clip cards in My clips: ClipCard (on this PC) and OnlineClipCard (only on the server). */
+.clip-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    transform 0.2s var(--ease-out);
+}
+
+.clip-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 16px 36px -18px rgba(0, 0, 0, 0.8);
+  transform: translateY(-2px);
+}
+
+/* Its menu must draw over the neighbouring cards. */
+.clip-card.menu-open {
+  z-index: 5;
+}
+
+.clip-card .thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+  background: var(--surface-2);
+}
+
+/* Darkens the bottom so the duration stays readable on bright frames. */
+.clip-card .thumb::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 45%;
+  background: linear-gradient(transparent, rgba(5, 4, 10, 0.55));
+  pointer-events: none;
+}
+
+.clip-card img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.45s var(--ease-out);
+}
+
+.clip-card:hover img {
+  transform: scale(1.05);
+}
+
+.clip-card .placeholder {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(124, 92, 255, 0.12), transparent 60%),
+    var(--surface-2);
+  color: var(--text-faint);
+}
+
+.clip-card.missing .placeholder {
+  background: var(--surface-2);
+  color: var(--warning);
+}
+
+.clip-card .open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.clip-card .open:hover:not(:disabled),
+.clip-card .open:focus-visible {
+  background: rgba(8, 7, 14, 0.35);
+}
+
+.clip-card .open:disabled {
+  cursor: default;
+}
+
+.clip-card .open:focus-visible {
+  outline-offset: -3px;
+  border-radius: inherit;
+}
+
+.clip-card .open-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(15, 13, 24, 0.72);
+  backdrop-filter: blur(8px);
+  font-size: 0.88rem;
+  font-weight: 650;
+  opacity: 0;
+  transform: translateY(4px) scale(0.96);
+  transition:
+    opacity 0.2s,
+    transform 0.2s var(--ease-out);
+}
+
+.clip-card .open:hover:not(:disabled) .open-pill,
+.clip-card .open:focus-visible .open-pill {
+  opacity: 1;
+  transform: none;
+}
+
+.clip-card .badge {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.clip-card .badge-uploaded {
+  border: 1px solid rgba(60, 207, 142, 0.3);
+  background: rgba(8, 28, 20, 0.78);
+  color: var(--success);
+}
+
+.clip-card .badge-online {
+  border: 1px solid rgba(124, 92, 255, 0.35);
+  background: rgba(20, 14, 40, 0.8);
+  color: var(--accent-text, #c9bcff);
+}
+
+.clip-card .badge-missing {
+  border: 1px solid rgba(255, 181, 71, 0.3);
+  background: rgba(40, 28, 8, 0.82);
+  color: var(--warning);
+}
+
+.clip-card .duration {
+  position: absolute;
+  right: 0.55rem;
+  bottom: 0.5rem;
+  z-index: 2;
+  padding: 0.1rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  font-size: 0.78rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.clip-card .overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  gap: 0.65rem;
+  padding: 1rem 1.25rem;
+  background: rgba(9, 8, 15, 0.78);
+  backdrop-filter: blur(3px);
+  text-align: center;
+}
+
+.clip-card .overlay-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.clip-card .status {
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.clip-card .status.failed {
+  color: var(--danger-text);
+  font-weight: 500;
+}
+
+.clip-card .info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.8rem 0.9rem 0.55rem;
+  min-width: 0;
+}
+
+.clip-card h3 {
+  overflow: hidden;
+  font-size: 0.98rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip-card .meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
+.clip-card .game {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clip-card .when {
+  flex: none;
+}
+
+.clip-card .unknown {
+  font-style: italic;
+}
+
+.clip-card .actions {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: auto;
+  padding: 0.3rem 0.6rem 0.75rem 0.9rem;
+}
+
+.clip-card .grow {
+  flex: 1;
+}
+
+.clip-card .menu-wrap {
+  position: relative;
+}
+
+.clip-card .menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.4rem);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 11.5rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+  animation: menu-in 0.15s var(--ease-out);
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.clip-card .menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.clip-card .menu button:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.clip-card .menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.clip-card .menu .danger {
+  color: var(--danger);
+}
+
+.clip-card .menu .danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.clip-card hr {
+  width: 100%;
+  margin: 0.25rem 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}

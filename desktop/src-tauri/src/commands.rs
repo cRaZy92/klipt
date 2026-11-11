@@ -47,7 +47,7 @@ const MAX_TITLE_CHARS: usize = 100;
 /// The longest the server address check may take.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -1028,7 +1028,7 @@ async fn server_get(app: &AppHandle, path: &str, query: Vec<(&str, String)>) -> 
 
 /// Drops feed clips whose links or media aren't on the server itself. The page may load images
 /// and video from any http(s) address (CSP), so a server can't point them elsewhere this way.
-fn keep_own_media(page: &mut serde_json::Value, client: &ApiClient) {
+pub(crate) fn keep_own_media(page: &mut serde_json::Value, client: &ApiClient) {
     if let Some(items) = page.get_mut("items").and_then(|v| v.as_array_mut()) {
         items.retain(|clip| {
             ["shareUrl", "videoUrl", "thumbnailUrl"]

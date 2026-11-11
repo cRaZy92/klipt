@@ -4,6 +4,7 @@
   import { formatDuration, groupByDay, hueOf, relativeDate } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "../components/Avatar.svelte";
+  import ClipPlayer from "../components/ClipPlayer.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import Icon from "../components/Icon.svelte";
 
@@ -84,18 +85,8 @@
     }
   }
 
-  function openOnWeb(clip: FeedClip) {
-    api.openWebsite(clip.shareUrl).catch((e) => toast(errorMessage(e), "error"));
-  }
-
-  function onkeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && playing) playing = null;
-  }
-
   onMount(refresh);
 </script>
-
-<svelte:window {onkeydown} />
 
 <section class="page">
   <header class="page-head">
@@ -194,38 +185,7 @@
 </section>
 
 {#if playing}
-  <div class="backdrop" onclick={(e) => e.target === e.currentTarget && (playing = null)} role="presentation">
-    <div class="player" role="dialog" aria-modal="true" aria-label={playing.title}>
-      <div class="player-head">
-        <Avatar name={playing.owner.username} size={38} />
-        <div class="text">
-          <div class="title">{playing.title}</div>
-          <div class="meta">
-            <span class="who">{playing.owner.username}</span>
-            {#if playing.gameName}
-              <span aria-hidden="true">·</span>
-              <span class="game"><span class="game-dot" style:--hue={hueOf(playing.gameName)}></span>{playing.gameName}</span>
-            {/if}
-            <span aria-hidden="true">·</span>
-            <span>{relativeDate(new Date(playing.createdAt), now)}</span>
-          </div>
-        </div>
-        <div class="tools">
-          <button class="btn btn-sm" onclick={() => playing && copyLink(playing)}>
-            <Icon name="link" size={15} /> Copy link
-          </button>
-          <button class="btn btn-sm btn-ghost" onclick={() => playing && openOnWeb(playing)}>
-            <Icon name="external" size={15} /> Open on web
-          </button>
-          <button class="btn btn-sm btn-ghost btn-icon" aria-label="Close" onclick={() => (playing = null)}>
-            <Icon name="close" />
-          </button>
-        </div>
-      </div>
-      <!-- svelte-ignore a11y_media_has_caption -->
-      <video src={playing.videoUrl} poster={playing.thumbnailUrl} controls autoplay></video>
-    </div>
-  </div>
+  <ClipPlayer clip={playing} {now} onclose={() => (playing = null)} />
 {/if}
 
 <style>
@@ -387,12 +347,6 @@
     font-weight: 600;
   }
 
-  .game {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
   /* Loading placeholders */
   .thumb-ghost {
     aspect-ratio: 16 / 9;
@@ -425,71 +379,5 @@
   .more {
     display: flex;
     justify-content: center;
-  }
-
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    display: grid;
-    place-items: center;
-    padding: 2rem;
-    background: rgba(5, 4, 10, 0.82);
-    backdrop-filter: blur(6px);
-    animation: fade 0.18s ease-out;
-  }
-
-  @keyframes fade {
-    from {
-      opacity: 0;
-    }
-  }
-
-  .player {
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-    width: min(1100px, 100%);
-    padding: 0.9rem;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg);
-    background: var(--surface);
-    box-shadow: var(--shadow);
-    animation: pop 0.22s var(--ease-out);
-  }
-
-  @keyframes pop {
-    from {
-      opacity: 0;
-      transform: scale(0.97);
-    }
-  }
-
-  .player-head {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    min-width: 0;
-    padding: 0 0.15rem;
-  }
-
-  .player-head .title {
-    font-family: var(--font-display);
-    font-size: 1.1rem;
-    font-weight: 700;
-  }
-
-  .tools {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 0.35rem;
-  }
-
-  video {
-    width: 100%;
-    max-height: calc(100vh - 12rem);
-    background: #000;
-    border-radius: var(--radius);
   }
 </style>

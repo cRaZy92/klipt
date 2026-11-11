@@ -210,6 +210,11 @@ export interface FeedClip {
   thumbnailUrl: string;
 }
 
+/** One of your uploads on the server, for My clips. */
+export interface MyUpload extends FeedClip {
+  visibility: Visibility;
+}
+
 export interface FeedPage {
   items: FeedClip[];
   nextCursor: string | null;
@@ -242,6 +247,14 @@ export const api = {
   setClipGame: (id: string, name: string | null) => invoke<void>("set_clip_game", { id, name }),
   deleteClip: (id: string, deleteFile: boolean) => invoke<void>("delete_clip", { id, deleteFile }),
   showInFolder: (id: string) => invoke<void>("show_in_folder", { id }),
+  /** All your uploads, newest first; null when not logged in. */
+  myUploads: () => invoke<MyUpload[] | null>("my_uploads"),
+  /** Renames your upload on the server and/or changes who sees it. */
+  updateUpload: (id: string, change: { title?: string; visibility?: Visibility }) =>
+    invoke<MyUpload>("update_upload", { id, title: change.title ?? null, visibility: change.visibility ?? null }),
+  deleteUpload: (id: string) => invoke<void>("delete_upload", { id }),
+  /** Downloads your upload into the library (linked to the server copy). */
+  downloadUpload: (id: string) => invoke<ClipView>("download_upload", { id }),
   copyShareLink: (id: string) => invoke<string>("copy_share_link", { id }),
   uploadClip: (id: string, title: string, visibility: Visibility) =>
     invoke<void>("upload_clip", { id, title, visibility }),

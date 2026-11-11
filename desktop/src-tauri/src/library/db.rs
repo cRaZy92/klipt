@@ -201,6 +201,33 @@ impl Library {
         )
     }
 
+    /// The local clip uploaded as server clip `server_clip_id`, if any.
+    pub fn find_by_server_id(&self, server_clip_id: &str) -> Result<Option<Clip>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {COLUMNS} FROM clips WHERE server_clip_id = ?1 ORDER BY created_at LIMIT 1"),
+                [server_clip_id],
+                row_to_clip,
+            )
+            .optional()?)
+    }
+
+    /// The server copy's visibility changed: local clips uploaded as it follow.
+    pub fn set_server_visibility(&self, server_clip_id: &str, visibility: &str) -> Result<()> {
+        self.conn.execute("UPDATE clips SET visibility = ?2 WHERE server_clip_id = ?1", params![server_clip_id, visibility])?;
+        Ok(())
+    }
+
+    /// The server copy was deleted: local clips uploaded as it count as not uploaded again.
+    pub fn unlink_server_clip(&self, server_clip_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE clips SET server_clip_id = NULL, share_url = NULL, visibility = NULL WHERE server_clip_id = ?1",
+            [server_clip_id],
+        )?;
+        Ok(())
+    }
+
     /// Removes the clip from the library. With `delete_file`, also deletes the video file; if that
     /// fails (for example the file is open in a player), the clip stays in the library.
     pub fn remove(&self, id: &str, delete_file: bool) -> Result<()> {

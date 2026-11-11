@@ -1,0 +1,128 @@
+<script lang="ts">
+  import type { MyUpload } from "../lib/api";
+  import { menu } from "../lib/a11y";
+  import { formatDuration, hueOf, relativeDate } from "../lib/format";
+  import Icon from "./Icon.svelte";
+  import "./clip-card.css";
+
+  // One of your uploads that isn't on this PC: it plays from the server and can be downloaded.
+  let {
+    upload,
+    now,
+    index = 0,
+    downloading = false,
+    onplay,
+    oncopy,
+    onopenweb,
+    onrename,
+    onvisibility,
+    ondownload,
+    ondelete,
+  }: {
+    upload: MyUpload;
+    now: number;
+    index?: number;
+    /** A download of this clip is running. */
+    downloading?: boolean;
+    onplay: () => void;
+    oncopy: () => void;
+    onopenweb: () => void;
+    onrename: () => void;
+    onvisibility: () => void;
+    ondownload: () => void;
+    ondelete: () => void;
+  } = $props();
+
+  let menuOpen = $state(false);
+  let menuWrap = $state<HTMLElement>();
+  let thumbFailed = $state(false);
+
+  function closeMenuOutside(e: MouseEvent) {
+    if (menuOpen && !menuWrap?.contains(e.target as Node)) menuOpen = false;
+  }
+
+  function pick(action: () => void) {
+    menuOpen = false;
+    action();
+  }
+</script>
+
+<svelte:window onclick={closeMenuOutside} />
+
+<article class="card clip-card rise" class:menu-open={menuOpen} style:--i={index}>
+  <div class="thumb">
+    {#if !thumbFailed}
+      <img src={upload.thumbnailUrl} alt="" loading="lazy" onerror={() => (thumbFailed = true)} />
+    {:else}
+      <div class="placeholder"><Icon name="film" size={30} /></div>
+    {/if}
+    <button class="open" onclick={onplay} aria-label="Play {upload.title}">
+      <span class="open-pill"><Icon name="play" size={15} /> Play</span>
+    </button>
+    <span class="badge badge-online" title="Uploaded; not on this computer">
+      <Icon name="cloud" size={13} /> Online only
+    </span>
+    <span class="duration">{formatDuration(upload.durationMs)}</span>
+    {#if downloading}
+      <div class="overlay">
+        <span class="status">Downloading…</span>
+        <div class="progress indeterminate"><div></div></div>
+      </div>
+    {/if}
+  </div>
+
+  <div class="info">
+    <h3 title={upload.title}>{upload.title}</h3>
+    <p class="meta">
+      {#if upload.gameName}<span class="game-dot" style:--hue={hueOf(upload.gameName)}></span>{/if}
+      <span class="game" class:unknown={!upload.gameName}>{upload.gameName ?? "Unknown game"}</span>
+      <span aria-hidden="true">·</span>
+      <span class="when">{relativeDate(new Date(upload.createdAt), now)}</span>
+      {#if upload.visibility === "link"}
+        <span aria-hidden="true">·</span>
+        <span class="when" title="Only people with the link can see it">Link only</span>
+      {/if}
+    </p>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-sm grow" onclick={oncopy}><Icon name="link" size={15} /> Copy link</button>
+    <button
+      class="btn btn-sm btn-ghost btn-icon"
+      onclick={ondownload}
+      disabled={downloading}
+      aria-label="Download to this PC"
+      title="Download to this PC (to trim it or keep a copy)"
+    >
+      <Icon name="download" size={16} />
+    </button>
+    <div class="menu-wrap" bind:this={menuWrap}>
+      <button
+        class="btn btn-sm btn-ghost btn-icon"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onclick={() => (menuOpen = !menuOpen)}
+      >
+        <Icon name="more" />
+      </button>
+      {#if menuOpen}
+        <div class="menu" role="menu" use:menu={{ close: () => (menuOpen = false) }}>
+          <button role="menuitem" onclick={() => pick(onopenweb)}><Icon name="external" size={16} /> Open on website</button>
+          <button role="menuitem" onclick={() => pick(onrename)}><Icon name="rename" size={16} /> Rename</button>
+          <button role="menuitem" onclick={() => pick(onvisibility)}>
+            <Icon name="eye" size={16} />
+            {upload.visibility === "feed" ? "Hide from feed" : "Show in feed"}
+          </button>
+          <button role="menuitem" onclick={() => pick(ondownload)} disabled={downloading}>
+            <Icon name="download" size={16} /> Download to this PC
+          </button>
+          <hr />
+          <button role="menuitem" class="danger" onclick={() => pick(ondelete)} disabled={downloading}>
+            <Icon name="trash" size={16} /> Delete from server
+          </button>
+        </div>
+      {/if}
+    </div>
+  </div>
+</article>

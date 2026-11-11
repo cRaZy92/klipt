@@ -1,12 +1,15 @@
 <script lang="ts">
-  import { api, errorMessage, on, type ClipView, type GameCount, type Sort } from "../lib/api";
+  import { api, errorMessage, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay } from "../lib/format";
+  import { gameCounts, matchesPlace, mergeClips, visibleClips, type Place } from "../lib/myClips";
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
+  import ClipPlayer from "../components/ClipPlayer.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import Icon from "../components/Icon.svelte";
   import Keys from "../components/Keys.svelte";
   import Modal from "../components/Modal.svelte";
+  import OnlineClipCard from "../components/OnlineClipCard.svelte";
   import UploadDialog from "../components/UploadDialog.svelte";
 
   let {
@@ -21,8 +24,12 @@
     onedit?: (clip: ClipView) => void;
   } = $props();
 
-  let clips = $state<ClipView[]>([]);
-  let games = $state<GameCount[]>([]);
+  // My clips = the clips on this PC plus your uploads on the server (myClips.ts merges them).
+  let local = $state<ClipView[]>([]);
+  /** Your uploads; null when logged out (or not loaded yet). */
+  let uploads = $state<MyUpload[] | null>(null);
+  let uploadsError = $state<string | null>(null);
+  let place = $state<Place>("all");
   let game = $state<string | null>(null);
   let sort = $state<Sort>("newestFirst");
   let loaded = $state(false);
@@ -30,53 +37,68 @@
   let now = $state(Date.now());
 
   let uploading = $state<ClipView | null>(null);
-  let renaming = $state<{ clip: ClipView; value: string } | null>(null);
+  let renaming = $state<{ kind: "local" | "online"; id: string; value: string } | null>(null);
   let tagging = $state<{ clip: ClipView; value: string } | null>(null);
   let removing = $state<{ clip: ClipView; deleteFile: boolean } | null>(null);
+  let deletingOnline = $state<MyUpload | null>(null);
+  let playing = $state<MyUpload | null>(null);
+  let downloading = $state<Set<string>>(new Set());
   let saving = $state(false);
 
-  const groups = $derived(groupByDay(clips, (c) => c.createdAt, now));
+  const items = $derived(mergeClips(local, uploads ?? []));
+  const games = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
+  const visible = $derived(visibleClips(items, place, game, sort));
+  const groups = $derived(groupByDay(visible, (i) => i.at, now));
 
-  // Bumped to drop answers from older requests when the filter changes quickly.
-  let request = 0;
+  $effect(() => {
+    // A filter for a game with no clips left (in this place) would show nothing forever.
+    if (game !== null && !games.some((g) => g.name === game)) game = null;
+  });
 
-  async function load() {
-    const mine = ++request;
+  // Bumped to drop answers from older requests.
+  let localRequest = 0;
+  let uploadsRequest = 0;
+
+  async function loadLocal() {
+    const mine = ++localRequest;
     try {
-      const [list, gameList] = await Promise.all([api.listClips({ game, sort }), api.listGames()]);
-      if (mine !== request) return;
-      clips = list;
-      games = gameList;
+      const list = await api.listClips({ game: null, sort: "newestFirst" });
+      if (mine !== localRequest) return;
+      local = list;
       loadError = null;
-      // A filter for a game whose last clip was removed would show nothing forever.
-      if (game !== null && !gameList.some((g) => g.name === game)) game = null;
     } catch (e) {
-      if (mine === request) loadError = errorMessage(e);
+      if (mine === localRequest) loadError = errorMessage(e);
     } finally {
-      if (mine === request) loaded = true;
+      if (mine === localRequest) loaded = true;
     }
   }
 
-  $effect(() => {
-    // Reload whenever the filter or sort changes.
-    void game;
-    void sort;
-    void load();
-  });
+  async function loadUploads() {
+    const mine = ++uploadsRequest;
+    try {
+      const list = await api.myUploads();
+      if (mine !== uploadsRequest) return;
+      uploads = list;
+      uploadsError = null;
+    } catch (e) {
+      if (mine === uploadsRequest) uploadsError = errorMessage(e);
+    }
+  }
+
+  function load() {
+    void loadLocal();
+    void loadUploads();
+  }
 
   $effect(() => {
+    load();
     const timer = setInterval(() => (now = Date.now()), 30_000);
     const stops = [
       on("clip-saved", (clip) => {
         now = Date.now();
-        if (game === null && sort === "newestFirst" && !clips.some((c) => c.id === clip.id)) {
-          clips = [clip, ...clips];
-          void api.listGames().then((g) => (games = g)).catch(() => {});
-        } else {
-          void load();
-        }
+        local = [clip, ...local.filter((c) => c.id !== clip.id)];
       }),
-      on("upload-done", () => void load()),
+      on("upload-done", load),
     ];
     return () => {
       clearInterval(timer);
@@ -106,12 +128,22 @@
     await act(() => api.copyShareLink(clip.id), "Link copied!");
   }
 
+  /** Puts the server's answer in place of the upload it updates. */
+  function replaceUpload(updated: MyUpload) {
+    if (uploads) uploads = uploads.map((u) => (u.id === updated.id ? updated : u));
+  }
+
   async function submitRename(e: SubmitEvent) {
     e.preventDefault();
     if (!renaming || !renaming.value.trim()) return;
-    if (await act(() => api.renameClip(renaming!.clip.id, renaming!.value))) {
+    const { kind, id, value } = renaming;
+    const done =
+      kind === "local"
+        ? await act(() => api.renameClip(id, value))
+        : await act(async () => replaceUpload(await api.updateUpload(id, { title: value })));
+    if (done) {
       renaming = null;
-      void load();
+      if (kind === "local") void loadLocal();
     }
   }
 
@@ -121,7 +153,7 @@
     const name = tagging.value.trim() || null;
     if (await act(() => api.setClipGame(tagging!.clip.id, name))) {
       tagging = null;
-      void load();
+      void loadLocal();
     }
   }
 
@@ -130,9 +162,41 @@
     const { clip, deleteFile } = removing;
     if (await act(() => api.deleteClip(clip.id, deleteFile), deleteFile ? "Clip deleted." : "Removed from library.")) {
       removing = null;
-      void load();
+      void loadLocal();
     }
   }
+
+  async function toggleVisibility(upload: MyUpload) {
+    const visibility = upload.visibility === "feed" ? "link" : "feed";
+    await act(
+      async () => replaceUpload(await api.updateUpload(upload.id, { visibility })),
+      visibility === "feed" ? "Now in the feed." : "Now link-only.",
+    );
+  }
+
+  async function download(upload: MyUpload) {
+    downloading = new Set(downloading).add(upload.id);
+    if (await act(() => api.downloadUpload(upload.id), "Downloaded to your clips folder.")) await loadLocal();
+    const rest = new Set(downloading);
+    rest.delete(upload.id);
+    downloading = rest;
+  }
+
+  async function confirmDeleteOnline() {
+    if (!deletingOnline) return;
+    const { id } = deletingOnline;
+    if (await act(() => api.deleteUpload(id), "Deleted from the server.")) {
+      deletingOnline = null;
+      if (uploads) uploads = uploads.filter((u) => u.id !== id);
+      void loadLocal();
+    }
+  }
+
+  const PLACES: { value: Place; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "local", label: "On this PC" },
+    { value: "uploaded", label: "Uploaded" },
+  ];
 </script>
 
 <section class="page">
@@ -158,6 +222,22 @@
     </div>
   </header>
 
+  <div class="filters">
+    <div class="places" role="group" aria-label="Show clips">
+      {#each PLACES as p (p.value)}
+        <button class:active={place === p.value} aria-pressed={place === p.value} onclick={() => (place = p.value)}>
+          {p.label}
+        </button>
+      {/each}
+    </div>
+    {#if uploadsError}
+      <p class="uploads-error">
+        <Icon name="alert" size={15} /> Couldn't load your uploads.
+        <button class="link" onclick={loadUploads}>Try again</button>
+      </p>
+    {/if}
+  </div>
+
   {#if games.length > 0}
     <GameFilter {games} selected={game} onselect={(g) => (game = g)} />
   {/if}
@@ -168,7 +248,20 @@
       <p>{loadError}</p>
       <button class="btn" onclick={load}><Icon name="retry" size={16} /> Try again</button>
     </div>
-  {:else if loaded && clips.length === 0}
+  {:else if loaded && visible.length === 0 && (game || place !== "all")}
+    <div class="empty">
+      <div class="empty-icon"><Icon name="film" size={28} /></div>
+      {#if place === "uploaded" && uploads === null && !uploadsError}
+        <p>Log in to see your uploads.</p>
+      {:else if game}
+        <p>No clips for this game here.</p>
+      {:else if place === "uploaded"}
+        <p>Nothing uploaded yet.</p>
+      {:else}
+        <p>No clips on this PC.</p>
+      {/if}
+    </div>
+  {:else if loaded && visible.length === 0}
     {#if game}
       <div class="empty">
         <div class="empty-icon"><Icon name="film" size={28} /></div>
@@ -199,19 +292,37 @@
         <section aria-label={group.label}>
           <h2 class="group-label">{group.label}</h2>
           <div class="clip-grid">
-            {#each group.items as clip, i (clip.id)}
-              <ClipCard
-                {clip}
-                {now}
-                index={i}
-                onupload={() => (uploading = clip)}
-                onedit={onedit ? () => onedit(clip) : undefined}
-                onrename={() => (renaming = { clip, value: clip.title })}
-                onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
-                onremove={() => (removing = { clip, deleteFile: false })}
-                onshowfolder={() => act(() => api.showInFolder(clip.id))}
-                oncopy={() => copyLink(clip)}
-              />
+            {#each group.items as item, i (item.key)}
+              {#if item.kind === "local"}
+                {@const clip = item.clip}
+                <ClipCard
+                  {clip}
+                  {now}
+                  index={i}
+                  onupload={() => (uploading = clip)}
+                  onedit={onedit ? () => onedit(clip) : undefined}
+                  onrename={() => (renaming = { kind: "local", id: clip.id, value: clip.title })}
+                  onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
+                  onremove={() => (removing = { clip, deleteFile: false })}
+                  onshowfolder={() => act(() => api.showInFolder(clip.id))}
+                  oncopy={() => copyLink(clip)}
+                />
+              {:else}
+                {@const upload = item.upload}
+                <OnlineClipCard
+                  {upload}
+                  {now}
+                  index={i}
+                  downloading={downloading.has(upload.id)}
+                  onplay={() => (playing = upload)}
+                  oncopy={() => act(() => api.copyText(upload.shareUrl), "Link copied!")}
+                  onopenweb={() => act(() => api.openWebsite(upload.shareUrl))}
+                  onrename={() => (renaming = { kind: "online", id: upload.id, value: upload.title })}
+                  onvisibility={() => toggleVisibility(upload)}
+                  ondownload={() => download(upload)}
+                  ondelete={() => (deletingOnline = upload)}
+                />
+              {/if}
             {/each}
           </div>
         </section>
@@ -222,6 +333,23 @@
 
 {#if uploading}
   <UploadDialog clip={uploading} onclose={() => (uploading = null)} />
+{/if}
+
+{#if playing}
+  <ClipPlayer clip={playing} {now} onclose={() => (playing = null)} />
+{/if}
+
+{#if deletingOnline}
+  <Modal title="Delete from server?" onclose={() => (deletingOnline = null)}>
+    <p>
+      <strong>{deletingOnline.title}</strong> will be deleted from the server. Its link stops working for everyone.
+      {#if local.some((c) => c.serverClipId === deletingOnline?.id && !c.fileMissing)}The copy on this PC stays.{/if}
+    </p>
+    {#snippet footer()}
+      <button class="btn" onclick={() => (deletingOnline = null)}>Cancel</button>
+      <button class="btn btn-danger" onclick={confirmDeleteOnline}>Delete</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if renaming}
@@ -284,6 +412,62 @@
 {/if}
 
 <style>
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .places {
+    display: inline-flex;
+    gap: 0.2rem;
+    padding: 0.2rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .places button {
+    padding: 0.35rem 0.9rem;
+    border: none;
+    border-radius: 999px;
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .places button:hover {
+    color: var(--text);
+  }
+
+  .places button.active {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+
+  .uploads-error {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--warning);
+    font-size: 0.86rem;
+  }
+
+  .link {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent-text);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
   .first-run {
     gap: 0.9rem;
     padding-top: 3.5rem;

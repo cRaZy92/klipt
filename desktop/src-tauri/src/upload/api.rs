@@ -192,6 +192,35 @@ impl ApiClient {
         parse_json(resp).await
     }
 
+    /// An authenticated PATCH of a JSON API path; returns the answer as-is.
+    pub async fn patch_json(&self, token: &str, path: &str, body: &serde_json::Value) -> Result<serde_json::Value, ApiError> {
+        let resp = self.http.patch(self.url(path)).bearer_auth(token).json(body).send().await.map_err(network)?;
+        parse_json(resp).await
+    }
+
+    /// An authenticated DELETE of an API path.
+    pub async fn delete(&self, token: &str, path: &str) -> Result<(), ApiError> {
+        let resp = self.http.delete(self.url(path)).bearer_auth(token).send().await.map_err(network)?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(error_from(resp).await)
+        }
+    }
+
+    /// Starts downloading `url`, which must be on this server; the caller reads the body.
+    pub async fn get_media(&self, url: &str) -> Result<Response, ApiError> {
+        if !self.same_origin(url) {
+            return Err(ApiError::Network("the video isn't on this server".into()));
+        }
+        let resp = self.http.get(url).send().await.map_err(network)?;
+        if resp.status().is_success() {
+            Ok(resp)
+        } else {
+            Err(error_from(resp).await)
+        }
+    }
+
     pub async fn logout(&self, token: &str) -> Result<(), ApiError> {
         let resp = self.http.post(self.url("/api/auth/logout")).bearer_auth(token).send().await.map_err(network)?;
         if resp.status().is_success() {

@@ -1,7 +1,7 @@
 import type { GameCount } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import type { ClipWithOwner } from '../../clips/repo.js';
-import { ClipGrid, emptyText, GameFilter, Pager, SearchBox, WithMeChip } from '../components.js';
+import { ClipGrid, emptyText, FeedFilters, feedBase, GameFilter, Pager, SearchBox, type KindFilter } from '../components.js';
 import { Layout } from '../layout.js';
 
 export function FeedPage(props: {
@@ -12,13 +12,14 @@ export function FeedPage(props: {
   game?: string;
   search?: string;
   withMe?: boolean;
+  kind?: KindFilter;
 }): JSX.Element {
-  const base = props.withMe ? '/?with=me' : '/';
+  const base = feedBase(!!props.withMe, props.kind);
   return (
     <Layout title="Feed" user={props.user}>
       <h1>Feed</h1>
-      <SearchBox basePath="/" search={props.search} game={props.game} withMe={props.withMe} />
-      <WithMeChip active={!!props.withMe} />
+      <SearchBox basePath="/" search={props.search} game={props.game} withMe={props.withMe} kind={props.kind} />
+      <FeedFilters withMe={!!props.withMe} kind={props.kind} />
       <GameFilter games={props.games} active={props.game} basePath={base} search={props.search} />
       <ClipGrid
         items={props.items}

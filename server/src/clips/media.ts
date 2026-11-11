@@ -143,3 +143,37 @@ export async function makeThumbnail(
     output,
   ]);
 }
+
+export interface ImageInfo {
+  width: number;
+  height: number;
+}
+
+/** A still picture (PNG, JPEG, WebP…) rather than a video: its size, or null for anything else. */
+export async function probeImage(path: string): Promise<ImageInfo | null> {
+  let out: string;
+  try {
+    out = await run(ffprobeBin(), ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path]);
+  } catch (err) {
+    if (err instanceof MediaError) return null;
+    throw err;
+  }
+  let parsed: { streams?: ProbeStream[]; format?: { format_name?: string } };
+  try {
+    parsed = JSON.parse(out);
+  } catch {
+    return null;
+  }
+  const format = parsed.format?.format_name ?? '';
+  // ffmpeg's still-image demuxers are `image2` and `<codec>_pipe` (png_pipe, jpeg_pipe, webp_pipe…).
+  if (format !== 'image2' && !format.endsWith('_pipe')) return null;
+  const streams = parsed.streams ?? [];
+  const video = streams.find((s) => s.codec_type === 'video');
+  if (!video?.width || !video.height || streams.length !== 1) return null;
+  return { width: video.width, height: video.height };
+}
+
+/** Writes `input`'s picture as a PNG. */
+export async function toPng(input: string, output: string): Promise<void> {
+  await run(ffmpegBin(), ['-v', 'error', '-y', '-i', input, '-frames:v', '1', '-f', 'image2', '-c:v', 'png', output]);
+}

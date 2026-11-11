@@ -11,48 +11,62 @@ use std::sync::mpsc::Receiver;
 use tauri::AppHandle;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-use super::{classify_register_error, label, to_plugin_accelerator, BoundKey, HotkeyService, PressSink};
+use super::{classify_register_error, label, to_plugin_accelerator, Action, BoundKey, HotkeyService, Keys, PressSink};
 use crate::errors::{AppError, Result};
 
 pub struct PluginHotkey {
     app: AppHandle,
     sink: PressSink,
-    /// The accelerator currently registered.
-    current: Option<String>,
+    /// The accelerators currently registered.
+    current: Vec<String>,
 }
 
 impl PluginHotkey {
     pub fn new(app: AppHandle) -> PluginHotkey {
-        PluginHotkey { app, sink: PressSink::default(), current: None }
+        PluginHotkey { app, sink: PressSink::default(), current: Vec::new() }
     }
 }
 
-impl HotkeyService for PluginHotkey {
-    fn bind(&mut self, accel: &str) -> Result<BoundKey> {
+impl PluginHotkey {
+    fn register(&mut self, accel: &str, action: Action) -> Result<String> {
         let accelerator = to_plugin_accelerator(accel)?;
         let display = label(accel)?;
-        let shortcuts = self.app.global_shortcut();
-        if let Some(old) = self.current.take() {
-            if let Err(e) = shortcuts.unregister(old.as_str()) {
-                eprintln!("klipt: can't unregister the old shortcut {old}: {e}");
-            }
-        }
         let sink = self.sink.clone();
-        shortcuts
+        self.app
+            .global_shortcut()
             .on_shortcut(accelerator.as_str(), move |_app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    sink.press();
+                    sink.press(action);
                 }
             })
             .map_err(|e| match e {
                 tauri_plugin_global_shortcut::Error::GlobalHotkey(message) => classify_register_error(&message),
                 e => AppError::HotkeyUnavailable(e.to_string()),
             })?;
-        self.current = Some(accelerator);
-        Ok(BoundKey { display })
+        self.current.push(accelerator);
+        Ok(display)
+    }
+}
+
+impl HotkeyService for PluginHotkey {
+    fn bind(&mut self, keys: &Keys) -> Result<BoundKey> {
+        for old in std::mem::take(&mut self.current) {
+            if let Err(e) = self.app.global_shortcut().unregister(old.as_str()) {
+                eprintln!("klipt: can't unregister the old shortcut {old}: {e}");
+            }
+        }
+        let display = self.register(&keys.save, Action::SaveClip)?;
+        let (screenshot, screenshot_error) = match &keys.screenshot {
+            None => (None, None),
+            Some(accel) => match self.register(accel, Action::Screenshot) {
+                Ok(shown) => (Some(shown), None),
+                Err(e) => (None, Some(format!("The screenshot shortcut didn't work: {}", e.user_message()))),
+            },
+        };
+        Ok(BoundKey { display, screenshot, screenshot_error })
     }
 
-    fn events(&self) -> Receiver<()> {
+    fn events(&self) -> Receiver<Action> {
         self.sink.subscribe()
     }
 }

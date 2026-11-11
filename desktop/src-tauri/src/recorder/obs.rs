@@ -429,7 +429,7 @@ mod tests {
                 r#"{"event":"displays","items":[{"id":"d1","name":"DELL","width":2560,"height":1440,"primary":true}]}"#
             ),
             Some(HelperEvent::Displays {
-                items: vec![Display { id: "d1".into(), name: "DELL".into(), width: 2560, height: 1440, primary: true }]
+                items: vec![Display { id: "d1".into(), name: "DELL".into(), width: 2560, height: 1440, primary: true, x: 0, y: 0 }]
             })
         );
         assert_eq!(
@@ -444,8 +444,8 @@ mod tests {
     #[test]
     fn native_size_comes_from_the_display() {
         let displays = vec![
-            Display { id: "a".into(), name: "A".into(), width: 1920, height: 1080, primary: false },
-            Display { id: "b".into(), name: "B".into(), width: 3440, height: 1440, primary: true },
+            Display { id: "a".into(), name: "A".into(), width: 1920, height: 1080, primary: false, x: 0, y: 0 },
+            Display { id: "b".into(), name: "B".into(), width: 3440, height: 1440, primary: true, x: 0, y: 0 },
         ];
         let native = RecordConfig { size: None, ..cfg() };
         assert_eq!(output_size(&native, &displays), (3440, 1440));

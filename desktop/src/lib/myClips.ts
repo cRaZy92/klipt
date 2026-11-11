@@ -41,6 +41,14 @@ export function isUploaded(item: MyClip): boolean {
   return item.kind === "online" || !!item.clip.shareUrl;
 }
 
+/** Videos, screenshots or both. */
+export type MediaKind = "all" | "clip" | "screenshot";
+
+/** Whether an entry is a video clip or a screenshot (older servers know only clips). */
+export function mediaKindOf(item: MyClip): "clip" | "screenshot" {
+  return (item.kind === "local" ? item.clip.kind : item.upload.kind) ?? "clip";
+}
+
 export function matchesPlace(item: MyClip, place: Place): boolean {
   if (place === "local") return item.kind === "local";
   if (place === "uploaded") return isUploaded(item);
@@ -65,11 +73,22 @@ function titleOf(item: MyClip): string {
 }
 
 /** The clips to show: in `place`, of `game` (null: any), matching `search`, in `sort` order. */
-export function visibleClips(items: MyClip[], place: Place, game: string | null, sort: Sort, search = ""): MyClip[] {
+export function visibleClips(
+  items: MyClip[],
+  place: Place,
+  game: string | null,
+  sort: Sort,
+  search = "",
+  media: MediaKind = "all",
+): MyClip[] {
   const dir = sort === "newestFirst" ? -1 : 1;
   return items
     .filter(
-      (i) => matchesPlace(i, place) && (game === null || i.game === game) && matchesSearch([titleOf(i), i.game], search),
+      (i) =>
+        matchesPlace(i, place) &&
+        (game === null || i.game === game) &&
+        (media === "all" || mediaKindOf(i) === media) &&
+        matchesSearch([titleOf(i), i.game], search),
     )
     .sort((a, b) => dir * (a.at - b.at) || a.key.localeCompare(b.key));
 }

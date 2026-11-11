@@ -43,6 +43,9 @@ export function validateSettings(s: Settings): FieldError[] {
     fail("bufferSeconds", "Clip length must be between 10 seconds and 10 minutes.");
   }
   if (!s.hotkey.trim()) fail("hotkey", "Choose a shortcut for saving clips.");
+  if (s.screenshotHotkey && s.screenshotHotkey === s.hotkey) {
+    fail("screenshotHotkey", "Use a different shortcut than the one for saving clips.");
+  }
   if (!s.outputDir) fail("outputDir", "Choose a folder for your clips.");
   const badApp = (a: string) => !a.trim() || a.length > 64 || /[|:]/.test(a) || a.trim() !== a;
   if (s.voiceApps.length > 10 || s.voiceApps.some(badApp)) fail("voiceApps", "List up to 10 app names, without | or : characters.");

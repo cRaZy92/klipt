@@ -13,6 +13,7 @@
     type Quality,
     type Resolution,
     type Settings,
+    type SettingsSaved,
   } from "../lib/api";
   import { bufferLabel, formatSize, hotkeyLabel } from "../lib/format";
   import { acceleratorFromKeydown } from "../lib/hotkey";
@@ -48,7 +49,7 @@
     /** The shortcut as the system reports it, or why it isn't working. */
     hotkeyStatus: HotkeyStatus;
     /** After a save: the new settings and, if the shortcut was rebound, how the system shows it. */
-    onsaved: (settings: Settings, hotkeyDisplay: string | null) => void;
+    onsaved: (settings: Settings, result: SettingsSaved) => void;
     /** Log out (the app asks about unsaved changes first). */
     onlogout: () => void;
     /** Whether there are unsaved changes, for the app's "Discard changes?" guard. */
@@ -100,7 +101,8 @@
   let mics = $state<AudioDevice[] | null>(null);
   let micsFailed = $state(false);
 
-  let capturing = $state(false);
+  /** Which shortcut is being recorded. */
+  let capturing = $state<"hotkey" | "screenshotHotkey" | null>(null);
   let captureHint = $state<string | null>(null);
   let captureBox = $state<HTMLDivElement>();
 
@@ -119,6 +121,11 @@
   const hotkeyChanged = $derived(draft.hotkey !== settings.hotkey);
   const hotkeyShown = $derived(
     hotkeyChanged ? hotkeyLabel(draft.hotkey) : (hotkeyStatus.display ?? hotkeyLabel(settings.hotkey)),
+  );
+  const screenshotShown = $derived(
+    draft.screenshotHotkey !== settings.screenshotHotkey
+      ? hotkeyLabel(draft.screenshotHotkey)
+      : (hotkeyStatus.screenshotDisplay ?? hotkeyLabel(draft.screenshotHotkey)),
   );
   const hotkeyStatusError = $derived(
     hotkeyChanged || hotkeyStatus.display
@@ -165,7 +172,7 @@
     hotkeyProblem = null;
     try {
       const result = await api.setSettings($state.snapshot(draft));
-      onsaved(result.settings, result.hotkeyDisplay);
+      onsaved(result.settings, result);
       draft = { ...result.settings };
       setErrors({});
       toast(result.recorderRestarted ? RESTARTED : "Settings saved", "success");
@@ -191,8 +198,8 @@
     setErrors({});
   }
 
-  async function startCapture() {
-    capturing = true;
+  async function startCapture(target: "hotkey" | "screenshotHotkey" = "hotkey") {
+    capturing = target;
     captureHint = null;
     hotkeyProblem = null;
     await tick();
@@ -200,7 +207,7 @@
   }
 
   function stopCapture() {
-    capturing = false;
+    capturing = null;
     captureHint = null;
   }
 
@@ -210,7 +217,7 @@
     const result = acceleratorFromKeydown(e);
     switch (result.kind) {
       case "accel":
-        draft.hotkey = result.accel;
+        if (capturing) draft[capturing] = result.accel;
         stopCapture();
         break;
       case "cancel":
@@ -259,6 +266,7 @@
     micDeviceId: "audio",
     voiceApps: "audio",
     hotkey: "hotkey",
+    screenshotHotkey: "hotkey",
     outputDir: "clips",
     cleanupDays: "clips",
     startWithOs: "general",
@@ -531,7 +539,7 @@
       <h2>Hotkey</h2>
       <p class="intro muted">Press this shortcut anytime, even in a game, to save a clip.</p>
       <div class="hotkey">
-        {#if capturing}
+        {#if capturing === "hotkey"}
           <div
             class="capture"
             tabindex="0"
@@ -546,10 +554,10 @@
           <button class="btn" onmousedown={(e) => e.preventDefault()} onclick={stopCapture}>Cancel</button>
         {:else}
           <span class="keycaps"><Keys shortcut={hotkeyShown} size="lg" /></span>
-          <button class="btn" onclick={startCapture}>Change</button>
+          <button class="btn" onclick={() => startCapture("hotkey")} disabled={!!capturing}>Change</button>
         {/if}
       </div>
-      {#if capturing}
+      {#if capturing === "hotkey"}
         <small class={captureHint ? "error" : "help"}>
           {captureHint ?? "Hold Ctrl, Alt, Shift or Super and press a key. Esc cancels."}
         </small>
@@ -561,6 +569,50 @@
         <small class="help">The new shortcut takes effect when you save.</small>
       {:else if hotkeyStatusError}
         <small class="error">{hotkeyStatusError}</small>
+      {/if}
+    </section>
+
+    <section>
+      <h2>Screenshot</h2>
+      <p class="intro muted">Saves a picture of the screen you record, next to your clips.</p>
+      <div class="hotkey">
+        {#if capturing === "screenshotHotkey"}
+          <div
+            class="capture"
+            tabindex="0"
+            role="textbox"
+            aria-label="Press the new screenshot shortcut"
+            bind:this={captureBox}
+            onkeydown={oncapturekey}
+            onblur={stopCapture}
+          >
+            Press the new shortcut…
+          </div>
+          <button class="btn" onmousedown={(e) => e.preventDefault()} onclick={stopCapture}>Cancel</button>
+        {:else}
+          {#if draft.screenshotHotkey}
+            <span class="keycaps"><Keys shortcut={screenshotShown} size="lg" /></span>
+          {:else}
+            <span class="muted">No shortcut</span>
+          {/if}
+          <button class="btn" onclick={() => startCapture("screenshotHotkey")} disabled={!!capturing}>
+            {draft.screenshotHotkey ? "Change" : "Set shortcut"}
+          </button>
+          {#if draft.screenshotHotkey}
+            <button class="btn btn-ghost" onclick={() => (draft.screenshotHotkey = "")}>Turn off</button>
+          {/if}
+        {/if}
+      </div>
+      {#if capturing === "screenshotHotkey"}
+        <small class={captureHint ? "error" : "help"}>
+          {captureHint ?? "Hold Ctrl, Alt, Shift or Super and press a key. Esc cancels."}
+        </small>
+      {:else if fieldErrors.screenshotHotkey}
+        <small class="error">{fieldErrors.screenshotHotkey}</small>
+      {:else if draft.screenshotHotkey !== settings.screenshotHotkey}
+        <small class="help">The new shortcut takes effect when you save.</small>
+      {:else if hotkeyStatus.screenshotError}
+        <small class="error">{hotkeyStatus.screenshotError}</small>
       {/if}
     </section>
 

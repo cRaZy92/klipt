@@ -17,7 +17,10 @@ use futures_util::StreamExt;
 use tauri::async_runtime::{self, JoinHandle};
 use tokio::sync::oneshot;
 
-use super::{to_portal_trigger, BoundKey, HotkeyService, PressSink, SHORTCUT_DESCRIPTION, SHORTCUT_ID};
+use super::{
+    to_portal_trigger, Action, BoundKey, HotkeyService, Keys, PressSink, SCREENSHOT_DESCRIPTION, SCREENSHOT_ID,
+    SHORTCUT_DESCRIPTION, SHORTCUT_ID,
+};
 use crate::errors::{AppError, Result};
 
 /// How long closing the old portal session may take before a rebind moves on.
@@ -80,6 +83,7 @@ fn portal_error(e: ashpd::Error) -> AppError {
 /// activations to `sink` until `stop` fires (or the portal goes away).
 async fn run_session(
     trigger: String,
+    screenshot_trigger: Option<String>,
     sink: PressSink,
     bound: mpsc::Sender<Result<BoundKey>>,
     mut stop: oneshot::Receiver<()>,
@@ -87,18 +91,27 @@ async fn run_session(
     let setup = async {
         let portal = GlobalShortcuts::new().await?;
         let session: Session<'static, GlobalShortcuts<'static>> = portal.create_session().await?;
-        let shortcut = NewShortcut::new(SHORTCUT_ID, SHORTCUT_DESCRIPTION).preferred_trigger(Some(trigger.as_str()));
-        let response = portal.bind_shortcuts(&session, &[shortcut], None).await?.response()?;
-        let display = response
-            .shortcuts()
-            .iter()
-            .find(|s| s.id() == SHORTCUT_ID)
-            .map(|s| s.trigger_description().trim().to_string())
-            .unwrap_or_default();
+        // Both shortcuts in one session: KDE only delivers presses for shortcuts bound in it.
+        let mut shortcuts =
+            vec![NewShortcut::new(SHORTCUT_ID, SHORTCUT_DESCRIPTION).preferred_trigger(Some(trigger.as_str()))];
+        if let Some(t) = &screenshot_trigger {
+            shortcuts.push(NewShortcut::new(SCREENSHOT_ID, SCREENSHOT_DESCRIPTION).preferred_trigger(Some(t.as_str())));
+        }
+        let response = portal.bind_shortcuts(&session, &shortcuts, None).await?.response()?;
+        let display_of = |id: &str| {
+            response
+                .shortcuts()
+                .iter()
+                .find(|s| s.id() == id)
+                .map(|s| s.trigger_description().trim().to_string())
+                .unwrap_or_default()
+        };
+        let display = display_of(SHORTCUT_ID);
+        let screenshot = display_of(SCREENSHOT_ID);
         let activated = portal.receive_activated().await?;
-        Ok::<_, ashpd::Error>((portal, session, display, activated))
+        Ok::<_, ashpd::Error>((portal, session, display, screenshot, activated))
     };
-    let (portal, session, display, mut activated) = match setup.await {
+    let (portal, session, display, screenshot, mut activated) = match setup.await {
         Ok(ok) => ok,
         Err(e) => {
             let _ = bound.send(Err(portal_error(e)));
@@ -114,14 +127,22 @@ async fn run_session(
         return;
     }
     eprintln!("klipt: save-clip shortcut bound to {display} (requested {trigger})");
-    if bound.send(Ok(BoundKey { display })).is_err() {
+    let (screenshot, screenshot_error) = match &screenshot_trigger {
+        None => (None, None),
+        Some(_) if screenshot.is_empty() => {
+            (None, Some("The screenshot shortcut is taken by another app. Pick another one in Settings.".to_string()))
+        }
+        Some(_) => (Some(screenshot), None),
+    };
+    if bound.send(Ok(BoundKey { display, screenshot, screenshot_error })).is_err() {
         let _ = session.close().await;
         return;
     }
     loop {
         tokio::select! {
             event = activated.next() => match event {
-                Some(event) if event.shortcut_id() == SHORTCUT_ID => sink.press(),
+                Some(event) if event.shortcut_id() == SHORTCUT_ID => sink.press(Action::SaveClip),
+                Some(event) if event.shortcut_id() == SCREENSHOT_ID => sink.press(Action::Screenshot),
                 Some(_) => {}
                 None => break,
             },
@@ -140,12 +161,13 @@ async fn run_session(
 }
 
 impl HotkeyService for PortalHotkey {
-    fn bind(&mut self, accel: &str) -> Result<BoundKey> {
-        let trigger = to_portal_trigger(accel)?;
+    fn bind(&mut self, keys: &Keys) -> Result<BoundKey> {
+        let trigger = to_portal_trigger(&keys.save)?;
+        let screenshot_trigger = keys.screenshot.as_deref().map(to_portal_trigger).transpose()?;
         self.unbind();
         let (tx, rx) = mpsc::channel();
         let (stop, stop_rx) = oneshot::channel();
-        let task = async_runtime::spawn(run_session(trigger, self.sink.clone(), tx, stop_rx));
+        let task = async_runtime::spawn(run_session(trigger, screenshot_trigger, self.sink.clone(), tx, stop_rx));
         // Blocks until the portal answers, which includes the time the user spends in KDE's
         // dialog the first time. Callers run this off the main thread.
         let result = rx
@@ -157,7 +179,7 @@ impl HotkeyService for PortalHotkey {
         result
     }
 
-    fn events(&self) -> mpsc::Receiver<()> {
+    fn events(&self) -> mpsc::Receiver<Action> {
         self.sink.subscribe()
     }
 }

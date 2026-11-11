@@ -7,7 +7,7 @@ function local(id: string, at: number, extra: Partial<ClipView> = {}): ClipView 
     id, path: `/clips/${id}.mp4`, createdAt: at, durationMs: 1000, width: 1920, height: 1080, hasMic: false,
     gameName: "Deadlock", steamAppId: 1, exe: null, title: id, trimStartMs: null, trimEndMs: null,
     gameVolume: 1, micVolume: 1, serverClipId: null, shareUrl: null, visibility: null, uploadId: null,
-    uploadOffset: null, favorite: false, thumbnailMs: null, hasVoice: false, voiceVolume: 1, masterVolume: 1, fileMissing: false, thumbPath: null, ...extra,
+    uploadOffset: null, favorite: false, thumbnailMs: null, hasVoice: false, voiceVolume: 1, masterVolume: 1, kind: "clip", fileMissing: false, thumbPath: null, ...extra,
   };
 }
 
@@ -90,5 +90,19 @@ describe("favorites and search", () => {
   it("matchesSearch works on plain text", () => {
     expect(matchesSearch(["Žltý Kôň", null], "zlty kon")).toBe(true);
     expect(matchesSearch(["x"], "y")).toBe(false);
+  });
+});
+
+describe("clips and screenshots", () => {
+  it("filters by what an entry is", () => {
+    const items = mergeClips(
+      [local("vid", 3), local("pic", 2, { kind: "screenshot" })],
+      [upload("S1", 1, { kind: "screenshot" }), upload("S2", 0)],
+    );
+    const keys = (media: "all" | "clip" | "screenshot") =>
+      visibleClips(items, "all", null, "newestFirst", "", media).map((i) => i.key);
+    expect(keys("all")).toEqual(["l:vid", "l:pic", "s:S1", "s:S2"]);
+    expect(keys("clip")).toEqual(["l:vid", "s:S2"]);
+    expect(keys("screenshot")).toEqual(["l:pic", "s:S1"]);
   });
 });

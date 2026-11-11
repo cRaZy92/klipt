@@ -8,7 +8,7 @@ import { clips, uploads } from '../db/schema.js';
 import fastifyStatic from '@fastify/static';
 import { requireUser } from '../auth/plugin.js';
 import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
-import { assertPlayable, makeThumbnail, MediaError, probeVideo, remuxFaststart } from './media.js';
+import { assertPlayable, makeThumbnail, MediaError, probeImage, probeVideo, remuxFaststart, toPng } from './media.js';
 import { newClipId } from './ids.js';
 import {
   getClip,
@@ -40,10 +40,11 @@ export function toClip(row: ClipRow, owner: { username: string }, baseUrl: strin
     sizeBytes: row.sizeBytes,
     views,
     tagged,
+    kind: row.kind,
     createdAt: row.createdAt.toISOString(),
     owner: { username: owner.username },
     shareUrl: `${baseUrl}/c/${row.id}`,
-    videoUrl: `${baseUrl}/media/${row.id}.mp4`,
+    videoUrl: `${baseUrl}/media/${row.id}.${row.kind === 'screenshot' ? 'png' : 'mp4'}`,
     thumbnailUrl: `${baseUrl}/media/${row.id}.jpg`,
   };
 }
@@ -68,11 +69,11 @@ const finalizeBody = z.object({
  * Content-Disposition for saving a clip as "<title>.mp4": characters that file systems reject
  * become "_", with a plain-ASCII filename for old clients and the full UTF-8 name in filename*.
  */
-export function downloadDisposition(title: string): string {
+export function downloadDisposition(title: string, ext: 'mp4' | 'png' = 'mp4'): string {
   const name = title.replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, '_').trim().slice(0, 100) || 'klipt-clip';
   const ascii = name.replace(/[^\x20-\x7e]/g, '_');
   const utf8 = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `attachment; filename="${ascii}.mp4"; filename*=UTF-8''${utf8}.mp4`;
+  return `attachment; filename="${ascii}.${ext}"; filename*=UTF-8''${utf8}.${ext}`;
 }
 
 const mediaMessages: Record<string, string> = {
@@ -91,6 +92,8 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     q: z.string().max(100).optional(),
     /** `me`: only clips you're tagged in. */
     with: z.enum(['me']).optional(),
+    /** Only video clips or only screenshots. */
+    kind: z.enum(['clip', 'screenshot']).optional(),
     cursor: z.string().max(512).optional(),
     limit: z.coerce.number().int().min(1).max(60).optional(),
   });
@@ -116,7 +119,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const q = listQuery.safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
-      const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q, withMe: q.data.with === 'me' });
+      const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q, withMe: q.data.with === 'me', kind: q.data.kind });
       return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl, i.views, i.tagged)), nextCursor };
     } catch (err) {
       if (err instanceof InvalidCursorError) return reply.code(400).send({ error: 'invalid_cursor' });
@@ -186,7 +189,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (found.clip.userId !== req.user!.id && !req.user!.isAdmin) return reply.code(403).send({ error: 'forbidden' });
     await db.delete(clips).where(eq(clips.id, found.clip.id));
     const dir = join(config.dataDir, 'clips');
-    await Promise.all([`${found.clip.id}.mp4`, `${found.clip.id}.jpg`].map((f) => rm(join(dir, f), { force: true })));
+    await Promise.all(['mp4', 'jpg', 'png'].map((ext) => rm(join(dir, `${found.clip.id}.${ext}`), { force: true })));
     return reply.code(204).send();
   });
 
@@ -196,12 +199,12 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
   await app.register(fastifyStatic, { root: clipsDir, serve: false });
   app.get('/media/:file', async (req, reply) => {
     const { file } = req.params as { file: string };
-    if (!/^[A-Za-z0-9_-]{12}\.(mp4|jpg)$/.test(file)) return reply.code(404).send({ error: 'not_found' });
+    if (!/^[A-Za-z0-9_-]{12}\.(mp4|jpg|png)$/.test(file)) return reply.code(404).send({ error: 'not_found' });
     if (!(await stat(join(clipsDir, file)).catch(() => null))) return reply.code(404).send({ error: 'not_found' });
-    if (file.endsWith('.mp4') && (req.query as { download?: string }).download === '1') {
+    if (!file.endsWith('.jpg') && (req.query as { download?: string }).download === '1') {
       const found = await getClip(db, file.slice(0, 12));
       if (!found) return reply.code(404).send({ error: 'not_found' });
-      reply.header('content-disposition', downloadDisposition(found.clip.title));
+      reply.header('content-disposition', downloadDisposition(found.clip.title, file.endsWith('.png') ? 'png' : 'mp4'));
     }
     reply.header('cache-control', 'public, max-age=31536000, immutable');
     return reply.sendFile(file, { cacheControl: false });
@@ -271,18 +274,32 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const thumbPath = join(clipsDir, `${id}.jpg`);
     const tmpVideo = join(clipsDir, `.${id}.mp4.tmp`);
     const tmpThumb = join(clipsDir, `.${id}.jpg.tmp`);
+    const imagePath = join(clipsDir, `${id}.png`);
+    const tmpImage = join(clipsDir, `.${id}.png.tmp`);
     const cleanOutputs = () =>
-      Promise.all([videoPath, thumbPath, tmpVideo, tmpThumb].map((p) => rm(p, { force: true })));
+      Promise.all([videoPath, thumbPath, tmpVideo, tmpThumb, imagePath, tmpImage].map((p) => rm(p, { force: true })));
 
     let row: ClipRow;
     try {
       const source = tusFilePath(config.dataDir, upload.id);
-      const info = await probeVideo(source);
-      assertPlayable(info);
-      await remuxFaststart(source, tmpVideo);
-      await makeThumbnail(tmpVideo, tmpThumb, info.durationMs, body.thumbnailMs);
-      const { size } = await stat(tmpVideo);
-      await rename(tmpVideo, videoPath);
+      // A screenshot is kept as a PNG; anything else must be a playable video.
+      const image = await probeImage(source);
+      let info: { durationMs: number; width: number; height: number };
+      let size: number;
+      if (image) {
+        info = { durationMs: 0, ...image };
+        await toPng(source, tmpImage);
+        await makeThumbnail(tmpImage, tmpThumb, 0);
+        size = (await stat(tmpImage)).size;
+        await rename(tmpImage, imagePath);
+      } else {
+        info = await probeVideo(source);
+        assertPlayable(info as Awaited<ReturnType<typeof probeVideo>>);
+        await remuxFaststart(source, tmpVideo);
+        await makeThumbnail(tmpVideo, tmpThumb, info.durationMs, body.thumbnailMs);
+        size = (await stat(tmpVideo)).size;
+        await rename(tmpVideo, videoPath);
+      }
       await rename(tmpThumb, thumbPath);
       // Insert the clip and turn the upload into its tombstone in one step; if another finalize
       // (one that took over a stale claim) got there first, roll back and answer with its clip.
@@ -296,6 +313,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
             gameName: body.gameName ?? null,
             steamAppId: body.steamAppId ?? null,
             visibility: body.visibility ?? 'feed',
+            kind: image ? 'screenshot' : 'clip',
             durationMs: info.durationMs,
             width: info.width,
             height: info.height,

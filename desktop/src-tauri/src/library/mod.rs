@@ -9,6 +9,24 @@ use serde::{Deserialize, Serialize};
 
 pub use db::Library;
 
+/// A video clip or a screenshot (a PNG): both live in the library.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClipKind {
+    #[default]
+    Clip,
+    Screenshot,
+}
+
+impl ClipKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClipKind::Clip => "clip",
+            ClipKind::Screenshot => "screenshot",
+        }
+    }
+}
+
 /// What the save flow knows about a fresh clip.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewClip {
@@ -25,6 +43,7 @@ pub struct NewClip {
     pub title: String,
     /// Voice chat apps (Discord…) were recorded on their own track (Linux).
     pub has_voice: bool,
+    pub kind: ClipKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -60,6 +79,7 @@ pub struct Clip {
     pub voice_volume: f32,
     /// The whole clip's volume, applied after the tracks are mixed.
     pub master_volume: f32,
+    pub kind: ClipKind,
 }
 
 impl Clip {

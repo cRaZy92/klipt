@@ -188,6 +188,10 @@ pub struct SettingsSaved {
     pub recorder_restarted: bool,
     /// The new save-clip shortcut as the system reports it, when it was rebound.
     pub hotkey_display: Option<String>,
+    /// The screenshot shortcut as the system reports it, when it was rebound.
+    pub screenshot_hotkey_display: Option<String>,
+    /// Why the screenshot shortcut couldn't be bound (the rest was saved).
+    pub screenshot_hotkey_error: Option<String>,
 }
 
 /// One settings save at a time: each diffs against the settings the previous one saved.
@@ -240,10 +244,12 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
         }
     }
 
-    let mut hotkey_display = None;
+    let (mut hotkey_display, mut screenshot_hotkey_display, mut screenshot_hotkey_error) = (None, None, None);
     if effects.rebind_hotkey {
-        let key = rebind_hotkey(&app, new.hotkey.clone()).await?;
+        let key = rebind_hotkey(&app, hotkey::Keys::from_settings(&new)).await?;
         hotkey_display = Some(key.display);
+        screenshot_hotkey_display = key.screenshot;
+        screenshot_hotkey_error = key.screenshot_error;
     }
     let saved = {
         let mut current = lock(&state.settings);
@@ -254,7 +260,7 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
     if let Err(e) = saved {
         if effects.rebind_hotkey {
             // The file still has the old shortcut: bind it again, so what works matches it.
-            if let Err(e) = rebind_hotkey(&app, old.hotkey.clone()).await {
+            if let Err(e) = rebind_hotkey(&app, hotkey::Keys::from_settings(&old)).await {
                 eprintln!("klipt: can't restore the old shortcut after a failed save: {e}");
             }
         }
@@ -275,7 +281,13 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
     }
     // While paused nothing restarts: the new settings apply on resume.
     let paused = app.try_state::<crate::tray::Tray>().is_some_and(|t| t.is_paused());
-    Ok(SettingsSaved { settings: new, recorder_restarted: effects.restart_recorder && !paused, hotkey_display })
+    Ok(SettingsSaved {
+        settings: new,
+        recorder_restarted: effects.restart_recorder && !paused,
+        hotkey_display,
+        screenshot_hotkey_display,
+        screenshot_hotkey_error,
+    })
 }
 
 /// Creates `dir` if needed and checks a file can be written in it.
@@ -286,9 +298,9 @@ pub fn check_writable_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::remove_file(&probe)
 }
 
-async fn rebind_hotkey(app: &AppHandle, accel: String) -> Result<hotkey::BoundKey> {
+async fn rebind_hotkey(app: &AppHandle, keys: hotkey::Keys) -> Result<hotkey::BoundKey> {
     let handle = app.state::<HotkeyHandle>().inner().clone();
-    tauri::async_runtime::spawn_blocking(move || handle.rebind(&accel))
+    tauri::async_runtime::spawn_blocking(move || handle.rebind(&keys))
         .await
         .map_err(|e| AppError::Internal(format!("hotkey rebind task failed: {e}")))?
 }
@@ -307,6 +319,12 @@ pub async fn list_audio_devices(app: AppHandle) -> Result<Vec<AudioDevice>> {
     tauri::async_runtime::spawn_blocking(move || app.state::<SupervisorHandle>().list_audio_devices(LIST_TIMEOUT))
         .await
         .map_err(|e| AppError::Internal(format!("microphone listing failed: {e}")))?
+}
+
+/// Takes a screenshot now (the "Screenshot" button); it arrives as `clip-saved`.
+#[tauri::command]
+pub fn take_screenshot(app: AppHandle) {
+    crate::screenshot::take_in_background(&app);
 }
 
 /// Opens the clips folder in the file manager (creating it if needed).
@@ -640,14 +658,16 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
     let id = clip.id.as_str();
     let server = job.auth.server_url.as_str();
     let client = ApiClient::new(server)?;
-    let exported = editor::upload_export_path(&job.cache_dir, id);
+    let screenshot = clip.kind == crate::library::ClipKind::Screenshot;
+    // A screenshot goes up as the PNG itself; a clip as its export (trim + mix).
+    let exported = if screenshot { clip.path.clone() } else { editor::upload_export_path(&job.cache_dir, id) };
 
     // Resume only an upload of this very export on this very server; anything else starts over.
     let resume = resume_point(clip.upload_id.as_deref(), clip.upload_offset, server).filter(|_| exported.is_file());
-    if resume.is_none() {
-        if clip.upload_id.is_some() {
-            set_upload_progress(app, id, None);
-        }
+    if resume.is_none() && clip.upload_id.is_some() {
+        set_upload_progress(app, id, None);
+    }
+    if resume.is_none() && !screenshot {
         progress(app, id, "exporting", 0, 1000);
         let (tools, input, cache_dir) = (job.tools.clone(), clip.path.clone(), job.cache_dir.clone());
         let (clip_id, tracks, export_app) = (clip.id.clone(), export::Tracks::of(clip), app.clone());
@@ -686,7 +706,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
         game_name: clip.game_name.clone(),
         steam_app_id: clip.steam_app_id,
         visibility: job.visibility,
-        thumbnail_ms: upload_thumbnail_ms(clip),
+        thumbnail_ms: if screenshot { None } else { upload_thumbnail_ms(clip) },
         tagged: job.tagged.clone(),
     };
     let server_clip = client.finalize(token, &request).await?;
@@ -702,8 +722,10 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
             eprintln!("klipt: can't save the uploaded title of clip {id}: {e}");
         }
     }
-    if let Err(e) = std::fs::remove_file(&exported) {
-        eprintln!("klipt: can't delete the uploaded export {}: {e}", exported.display());
+    if !screenshot {
+        if let Err(e) = std::fs::remove_file(&exported) {
+            eprintln!("klipt: can't delete the uploaded export {}: {e}", exported.display());
+        }
     }
     Ok(server_clip.share_url)
 }
@@ -1007,6 +1029,7 @@ mod tests {
             has_voice: false,
             voice_volume: 1.0,
             master_volume: 1.0,
+            kind: crate::library::ClipKind::Clip,
         }
     }
 
@@ -1152,8 +1175,10 @@ pub async fn feed_clips(
     cursor: Option<String>,
     search: Option<String>,
     with_me: Option<bool>,
+    kind: Option<String>,
 ) -> Result<serde_json::Value> {
     let mut query = vec![("scope", "feed".to_string())];
+    query.extend(kind.filter(|k| k == "clip" || k == "screenshot").map(|k| ("kind", k)));
     if with_me == Some(true) {
         query.push(("with", "me".to_string()));
     }

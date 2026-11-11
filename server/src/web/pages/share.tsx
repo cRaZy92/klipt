@@ -9,6 +9,21 @@ function meta(attr: 'property' | 'name', key: string, value: string | number): s
 }
 
 export function shareHead(clip: Clip): string {
+  if (clip.kind === 'screenshot') {
+    return [
+      '<meta name="robots" content="noindex" />',
+      meta('property', 'og:site_name', 'Klipt'),
+      meta('property', 'og:type', 'website'),
+      meta('property', 'og:title', clip.title),
+      meta('property', 'og:description', clip.gameName ? `${clip.gameName} · screenshot by ${clip.owner.username}` : clip.owner.username),
+      meta('property', 'og:url', clip.shareUrl),
+      meta('property', 'og:image', clip.videoUrl),
+      meta('property', 'og:image:width', clip.width),
+      meta('property', 'og:image:height', clip.height),
+      meta('name', 'twitter:card', 'summary_large_image'),
+      meta('name', 'theme-color', '#7c5cff'),
+    ].join('\n');
+  }
   const description = clip.gameName ? `${clip.gameName} · clipped by ${clip.owner.username}` : clip.owner.username;
   return [
     '<meta name="robots" content="noindex" />',
@@ -39,13 +54,17 @@ export function SharePage(props: {
   return (
     <Layout title={clip.title} user={props.user} head={shareHead(clip)}>
       <div class="share" style={`--ar:${clip.width > 0 && clip.height > 0 ? `${clip.width}/${clip.height}` : '16/9'}`}>
+        {clip.kind === 'screenshot' ? (
+          <img class="shot" src={e(clip.videoUrl)} alt={e(clip.title)} data-view-url={`/api/clips/${e(clip.id)}/view`} />
+        ) : (
         <video
-          controls
-          {...{ playsinline: true, preload: "metadata" }}
-          poster={e(clip.thumbnailUrl)}
-          src={e(clip.videoUrl)}
-          data-view-url={`/api/clips/${e(clip.id)}/view`}
-        ></video>
+            controls
+            {...{ playsinline: true, preload: "metadata" }}
+            poster={e(clip.thumbnailUrl)}
+            src={e(clip.videoUrl)}
+            data-view-url={`/api/clips/${e(clip.id)}/view`}
+          ></video>
+        )}
         <aside class="share-info">
         <h1>{e(clip.title)}</h1>
         <p class="meta">

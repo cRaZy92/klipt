@@ -67,6 +67,8 @@ pub struct Settings {
     /// Tauri accelerator syntax. The default is Alt plus the key under Esc (W3C code "Backquote"):
     /// NVIDIA App already takes Alt+F9/Alt+F10 on most NVIDIA PCs.
     pub hotkey: String,
+    /// The take-screenshot shortcut, same syntax as `hotkey`; empty = no screenshot shortcut.
+    pub screenshot_hotkey: String,
     pub output_dir: PathBuf,
     pub start_with_os: bool,
     pub save_sound: bool,
@@ -90,6 +92,8 @@ pub struct FieldError {
 }
 
 pub const DEFAULT_HOTKEY: &str = "Alt+Backquote";
+/// Alt+Shift plus the key under Esc, next to the save-clip shortcut.
+pub const DEFAULT_SCREENSHOT_HOTKEY: &str = "Alt+Shift+Backquote";
 
 pub const BUFFER_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
 pub const BITRATE_KBPS_RANGE: std::ops::RangeInclusive<u32> = 2_000..=80_000;
@@ -119,6 +123,7 @@ impl Default for Settings {
             mic_enabled: false,
             mic_device_id: None,
             hotkey: DEFAULT_HOTKEY.into(),
+            screenshot_hotkey: DEFAULT_SCREENSHOT_HOTKEY.into(),
             output_dir: default_output_dir(),
             start_with_os: true,
             save_sound: true,
@@ -214,6 +219,16 @@ impl Settings {
         if self.hotkey.trim().is_empty() {
             fail("hotkey", "Choose a shortcut for saving clips.");
         }
+        if !self.screenshot_hotkey.trim().is_empty() {
+            let canonical = |accel: &str| crate::hotkey::normalize(accel).ok();
+            match canonical(&self.screenshot_hotkey) {
+                None => fail("screenshotHotkey", "That isn't a shortcut Klipt can use."),
+                Some(shot) if Some(&shot) == canonical(&self.hotkey).as_ref() => {
+                    fail("screenshotHotkey", "Use a different shortcut than the one for saving clips.")
+                }
+                Some(_) => {}
+            }
+        }
         if self.output_dir.as_os_str().is_empty() {
             fail("outputDir", "Choose a folder for your clips.");
         }
@@ -242,6 +257,7 @@ impl Settings {
                 "customBitrateKbps" => self.custom_bitrate_kbps = defaults.custom_bitrate_kbps,
                 "bufferSeconds" => self.buffer_seconds = defaults.buffer_seconds,
                 "hotkey" => self.hotkey = defaults.hotkey.clone(),
+                "screenshotHotkey" => self.screenshot_hotkey = defaults.screenshot_hotkey.clone(),
                 "outputDir" => self.output_dir = defaults.output_dir.clone(),
                 "cleanupDays" => self.cleanup_days = defaults.cleanup_days,
                 "voiceApps" => self.voice_apps = defaults.voice_apps.clone(),
@@ -279,7 +295,8 @@ impl Effects {
         let canonical = |accel: &str| crate::hotkey::normalize(accel).unwrap_or_else(|_| accel.trim().to_string());
         Effects {
             restart_recorder,
-            rebind_hotkey: canonical(&old.hotkey) != canonical(&new.hotkey),
+            rebind_hotkey: canonical(&old.hotkey) != canonical(&new.hotkey)
+                || canonical(&old.screenshot_hotkey) != canonical(&new.screenshot_hotkey),
             autostart: old.start_with_os != new.start_with_os,
         }
     }
@@ -496,5 +513,16 @@ mod tests {
         assert!(!ok(with(&["x"; 11])));
         let old = Settings::default();
         assert!(Effects::between(&old, &with(&["discord"])).restart_recorder);
+    }
+
+    #[test]
+    fn screenshot_shortcut_is_optional_and_differs_from_the_save_one() {
+        let with = |key: &str| Settings { screenshot_hotkey: key.into(), ..Settings::default() };
+        let ok = |s: Settings| s.validate().iter().all(|e| e.field != "screenshotHotkey");
+        assert!(ok(Settings::default()));
+        assert!(ok(with("")));
+        assert!(!ok(with("alt+backquote")), "same as the save shortcut");
+        assert!(!ok(with("Ctrl+Nonsense")));
+        assert!(Effects::between(&Settings::default(), &with("Ctrl+F12")).rebind_hotkey);
     }
 }

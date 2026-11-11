@@ -69,9 +69,10 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   };
 
   const listQuery = (req: FastifyRequest) => {
-    const q = req.query as { game?: unknown; q?: unknown; with?: unknown; cursor?: unknown };
+    const q = req.query as { game?: unknown; q?: unknown; with?: unknown; kind?: unknown; cursor?: unknown };
     return {
       withMe: q.with === 'me',
+      kind: q.kind === 'clip' || q.kind === 'screenshot' ? (q.kind as 'clip' | 'screenshot') : undefined,
       game: typeof q.game === 'string' && q.game ? q.game.slice(0, 100) : undefined,
       search: typeof q.q === 'string' && q.q.trim() ? q.q.trim().slice(0, 100) : undefined,
       cursor: typeof q.cursor === 'string' && q.cursor ? q.cursor.slice(0, 512) : undefined,
@@ -80,14 +81,14 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
 
   /** Shared list loading; an invalid cursor falls back to the first page. */
   async function load(req: FastifyRequest, scope: Scope, username?: string) {
-    const { game, search, withMe, cursor } = listQuery(req);
+    const { game, search, withMe, kind, cursor } = listQuery(req);
     const user = req.user!;
-    const run = (c?: string) => listClips(db, user, { scope, username, game, search, withMe, cursor: c });
+    const run = (c?: string) => listClips(db, user, { scope, username, game, search, withMe, kind, cursor: c });
     const [page, games] = await Promise.all([
       run(cursor).catch((err) => (err instanceof InvalidCursorError ? run() : Promise.reject(err))),
       listGames(db, user, scope, username),
     ]);
-    return { ...page, games, game, search, withMe };
+    return { ...page, games, game, search, withMe, kind };
   }
 
   app.get('/login', async (req, reply) => {

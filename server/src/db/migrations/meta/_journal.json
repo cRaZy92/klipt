@@ -43,6 +43,13 @@
       "when": 1794415061708,
       "tag": "0005_clip_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794418692670,
+      "tag": "0006_clip_kind",
+      "breakpoints": true
     }
   ]
 }

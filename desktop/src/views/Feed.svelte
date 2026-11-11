@@ -25,6 +25,8 @@
   let search = $state("");
   /** Only clips you're tagged in. */
   let withMe = $state(false);
+  /** Only video clips or only screenshots. */
+  let kind = $state<"clip" | "screenshot" | null>(null);
   let cursor = $state<string | null>(null);
   let loading = $state(false);
   let loaded = $state(false);
@@ -57,12 +59,12 @@
     loading = true;
     if (!more) loadError = null;
     try {
-      const page = await api.feedClips(game, more ? cursor : null, search.trim() || null, withMe);
+      const page = await api.feedClips(game, more ? cursor : null, search.trim() || null, withMe, kind);
       if (id !== request) return;
       clips = more ? [...clips, ...page.items] : page.items;
       cursor = page.nextCursor;
       // The unfiltered first page is the whole feed's newest end: you've now seen it.
-      if (!more && !game && !search.trim() && !withMe && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
+      if (!more && !game && !search.trim() && !withMe && !kind && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
       now = Date.now();
       loaded = true;
     } catch (e) {
@@ -141,6 +143,19 @@
     >
       I'm in it
     </button>
+    {#each [["clip", "Clips"], ["screenshot", "Screenshots"]] as const as [value, label] (value)}
+      <button
+        class="with-me"
+        class:on={kind === value}
+        aria-pressed={kind === value}
+        onclick={() => {
+          kind = kind === value ? null : value;
+          void load();
+        }}
+      >
+        {label}
+      </button>
+    {/each}
   </div>
 
   {#if games.length > 0}
@@ -192,13 +207,13 @@
               <article class="card rise" style:--i={i}>
                 <button class="thumb" onclick={() => (playing = clip)} aria-label={`Play ${clip.title}`}>
                   <img src={clip.thumbnailUrl} alt="" loading="lazy" />
-                  <span class="play"><Icon name="play" size={22} /></span>
+                  <span class="play"><Icon name={clip.kind === "screenshot" ? "image" : "play"} size={22} /></span>
                   {#if clip.gameName}
                     <span class="game-tag" style:--hue={hueOf(clip.gameName)}>
                       <span class="game-dot"></span>{clip.gameName}
                     </span>
                   {/if}
-                  <span class="dur">{formatDuration(clip.durationMs)}</span>
+                  <span class="dur">{clip.kind === "screenshot" ? "Screenshot" : formatDuration(clip.durationMs)}</span>
                 </button>
                 <div class="body">
                   <Avatar name={clip.owner.username} size={32} />

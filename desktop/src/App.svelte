@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, errorMessage, on, type Account, type ClipView, type HotkeyStatus, type Settings } from "./lib/api";
+  import { api, errorMessage, on, type Account, type ClipView, type HotkeyStatus, type Settings, type SettingsSaved } from "./lib/api";
   import { menu } from "./lib/a11y";
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
@@ -64,8 +64,12 @@
         hotkeyStatus = { display: null, error: e.message, errorCode: e.code };
         toast(e.message, "error");
       }),
-      on("hotkey-bound", ({ display }) => (hotkeyStatus = { display, error: null, errorCode: null })),
-      on("clip-saved", () => toast("Clip saved", "success")),
+      on(
+        "hotkey-bound",
+        ({ display, screenshotDisplay, screenshotError }) =>
+          (hotkeyStatus = { display, error: null, errorCode: null, screenshotDisplay, screenshotError }),
+      ),
+      on("clip-saved", (clip) => toast(clip.kind === "screenshot" ? "Screenshot saved" : "Clip saved", "success")),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
       on("feed-new", ({ count }) => (feedNew = count)),
       watchUploads({
@@ -155,9 +159,17 @@
     }
   }
 
-  function settingsSaved(saved: Settings, hotkeyDisplay: string | null) {
+  function settingsSaved(saved: Settings, result: SettingsSaved) {
     settings = saved;
-    if (hotkeyDisplay) hotkeyStatus = { display: hotkeyDisplay, error: null, errorCode: null };
+    if (result.hotkeyDisplay) {
+      hotkeyStatus = {
+        display: result.hotkeyDisplay,
+        error: null,
+        errorCode: null,
+        screenshotDisplay: result.screenshotHotkeyDisplay,
+        screenshotError: result.screenshotHotkeyError,
+      };
+    }
   }
 
   function hostOf(url: string): string {

@@ -12,7 +12,7 @@ function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element
     <li class="row" data-clip-id={clip.id}>
       <a class="row-thumb" href={`/c/${clip.id}`}>
         <img src={`/media/${clip.id}.jpg`} alt="" loading="lazy" width="160" height="90" />
-        <span class="dur">{formatDuration(clip.durationMs)}</span>
+        <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>
       </a>
       <div class="row-main">
         <a class="row-title" href={`/c/${clip.id}`} data-role="title">{e(clip.title)}</a>

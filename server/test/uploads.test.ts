@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -53,6 +54,36 @@ describe('uploads and finalize', () => {
     const res = await finalize(uploadId, { tagged: ['Bob'] });
     expect(res.statusCode).toBe(201);
     expect(res.json().tagged).toEqual(['bob']);
+  });
+
+  it('finalizes a PNG as a screenshot: stored as PNG with a thumbnail, served as an image', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'klipt-png-'));
+    const png = join(dir, 'shot.png');
+    await new Promise<void>((resolve, reject) =>
+      execFile(process.env.FFMPEG_PATH ?? 'ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360', '-frames:v', '1', png], (e) => (e ? reject(e) : resolve())),
+    );
+    const { uploadId } = await tusUpload(t.app, token, await readFile(png));
+    const res = await finalize(uploadId, { title: 'Look' });
+    expect(res.statusCode).toBe(201);
+    const clip = res.json();
+    expect(clip).toMatchObject({ kind: 'screenshot', width: 640, height: 360, durationMs: 0 });
+    expect(clip.videoUrl).toBe(`http://localhost/media/${clip.id}.png`);
+    expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.png`))).toBe(true);
+    expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.jpg`))).toBe(true);
+    const media = await t.app.inject({ url: `/media/${clip.id}.png` });
+    expect(media.statusCode).toBe(200);
+    expect(media.headers['content-type']).toBe('image/png');
+    const shots = await t.app.inject({ url: '/api/clips?kind=screenshot', headers });
+    expect((shots.json() as { items: { id: string }[] }).items.map((c) => c.id)).toEqual([clip.id]);
+    const vids = await t.app.inject({ url: '/api/clips?kind=clip', headers });
+    expect((vids.json() as { items: unknown[] }).items).toEqual([]);
+    const share = await t.app.inject({ url: `/c/${clip.id}` });
+    expect(share.body).toContain(`<img class="shot" src="http://localhost/media/${clip.id}.png"`);
+    expect(share.body).not.toContain('og:video');
+    expect(share.body).toContain('<meta name="twitter:card" content="summary_large_image" />');
+    const del = await t.app.inject({ method: 'DELETE', url: `/api/clips/${clip.id}`, headers });
+    expect(del.statusCode).toBe(204);
+    expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.png`))).toBe(false);
   });
 
   it('a repeated finalize after success returns the same clip with 200 (lost-response retry)', async () => {

@@ -28,6 +28,8 @@ export interface ClipView {
   visibility: Visibility | null;
   uploadId: string | null;
   uploadOffset: number | null;
+  /** A video clip or a screenshot (PNG). */
+  kind: "clip" | "screenshot";
   /** Starred; the automatic cleanup never deletes it. */
   favorite: boolean;
   /** Voice chat (Discord…) has its own track. */
@@ -73,6 +75,8 @@ export interface Settings {
   micDeviceId: string | null;
   /** Canonical accelerator, e.g. "Alt+Backquote". */
   hotkey: string;
+  /** The take-screenshot shortcut; "" = none. */
+  screenshotHotkey: string;
   outputDir: string;
   startWithOs: boolean;
   saveSound: boolean;
@@ -99,6 +103,8 @@ export interface SettingsSaved {
   recorderRestarted: boolean;
   /** The save-clip shortcut was bound again; `hotkeyDisplay` is what the system reports. */
   hotkeyDisplay: string | null;
+  screenshotHotkeyDisplay: string | null;
+  screenshotHotkeyError: string | null;
 }
 
 export interface Display {
@@ -124,6 +130,10 @@ export interface HotkeyStatus {
   error: string | null;
   /** `hotkey_taken` or `hotkey_unavailable` when `error` is set. */
   errorCode: string | null;
+  /** The screenshot shortcut as the system reports it. */
+  screenshotDisplay?: string | null;
+  /** Why the screenshot shortcut isn't bound (saving clips still works). */
+  screenshotError?: string | null;
 }
 
 export interface AppError {
@@ -235,6 +245,9 @@ export interface FeedClip {
   views: number;
   /** Friends in the clip, by username. Missing from older servers. */
   tagged?: string[];
+  /** A video clip or a screenshot; missing from older servers (a clip). For a screenshot
+   * `videoUrl` is the picture. */
+  kind?: "clip" | "screenshot";
 }
 
 /** A friend who watched one of your uploads. */
@@ -282,6 +295,8 @@ export const api = {
   logout: () => invoke<void>("logout"),
   getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
   saveClipNow: () => invoke<void>("save_clip_now"),
+  /** Takes a screenshot; it arrives as `clip-saved`. */
+  takeScreenshot: () => invoke<void>("take_screenshot"),
   listClips: (filter: ListFilter) => invoke<ClipView[]>("list_clips", { filter }),
   listGames: () => invoke<GameCount[]>("list_games"),
   renameClip: (id: string, title: string) => invoke<void>("rename_clip", { id, title }),
@@ -305,8 +320,13 @@ export const api = {
   /** The server's users, for tagging friends in a clip. */
   listUsers: () => invoke<{ username: string }[]>("list_users"),
   /** One page of the feed; `search` matches title, game and uploader on the server. */
-  feedClips: (game: string | null, cursor: string | null, search: string | null = null, withMe = false) =>
-    invoke<FeedPage>("feed_clips", { game, cursor, search, withMe }),
+  feedClips: (
+    game: string | null,
+    cursor: string | null,
+    search: string | null = null,
+    withMe = false,
+    kind: "clip" | "screenshot" | null = null,
+  ) => invoke<FeedPage>("feed_clips", { game, cursor, search, withMe, kind }),
   feedGames: () => invoke<FeedGame[]>("feed_games"),
   /** Friends' clips new since you last opened the Feed. */
   feedNewCount: () => invoke<number>("feed_new_count"),
@@ -337,7 +357,7 @@ export interface Events {
   "clip-saved": ClipView;
   "save-busy": null;
   "recorder-error": AppError;
-  "hotkey-bound": { display: string };
+  "hotkey-bound": { display: string; screenshotDisplay: string | null; screenshotError: string | null };
   "hotkey-error": AppError;
   "upload-progress": UploadProgress;
   "upload-done": UploadDone;

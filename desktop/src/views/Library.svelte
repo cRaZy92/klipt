@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { api, errorMessage, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
+  import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay } from "../lib/format";
-  import { gameCounts, matchesPlace, mergeClips, visibleClips, type Place } from "../lib/myClips";
+  import { gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
   import GameFilter from "../components/GameFilter.svelte";
+  import ImageViewer from "../components/ImageViewer.svelte";
   import Icon from "../components/Icon.svelte";
   import Keys from "../components/Keys.svelte";
   import Modal from "../components/Modal.svelte";
@@ -34,6 +35,9 @@
   let game = $state<string | null>(null);
   let sort = $state<Sort>("newestFirst");
   let search = $state("");
+  let media = $state<MediaKind>("all");
+  /** The screenshot shown full size. */
+  let viewing = $state<ClipView | null>(null);
   let loaded = $state(false);
   let loadError = $state<string | null>(null);
   let now = $state(Date.now());
@@ -51,7 +55,7 @@
 
   const items = $derived(mergeClips(local, uploads ?? []));
   const games = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
-  const visible = $derived(visibleClips(items, place, game, sort, search));
+  const visible = $derived(visibleClips(items, place, game, sort, search, media));
   const groups = $derived(groupByDay(visible, (i) => i.at, now));
 
   $effect(() => {
@@ -214,6 +218,12 @@
     { value: "uploaded", label: "Uploaded" },
     { value: "favorites", label: "Favorites" },
   ];
+
+  const MEDIA: { value: MediaKind; label: string }[] = [
+    { value: "all", label: "Everything" },
+    { value: "clip", label: "Clips" },
+    { value: "screenshot", label: "Screenshots" },
+  ];
 </script>
 
 <section class="page">
@@ -233,6 +243,9 @@
         <Icon name="sort" size={16} />
         {sort === "newestFirst" ? "Newest first" : "Oldest first"}
       </button>
+      <button class="btn" onclick={() => act(() => api.takeScreenshot())} title="Take a screenshot of the recorded screen">
+        <Icon name="image" size={16} /> Screenshot
+      </button>
       <button class="btn btn-rec" onclick={saveNow} disabled={saving}>
         <span class="rec-dot"></span> Save clip now
       </button>
@@ -244,6 +257,13 @@
       {#each PLACES as p (p.value)}
         <button class:active={place === p.value} aria-pressed={place === p.value} onclick={() => (place = p.value)}>
           {p.label}
+        </button>
+      {/each}
+    </div>
+    <div class="places" role="group" aria-label="Clips or screenshots">
+      {#each MEDIA as m (m.value)}
+        <button class:active={media === m.value} aria-pressed={media === m.value} onclick={() => (media = m.value)}>
+          {m.label}
         </button>
       {/each}
     </div>
@@ -266,11 +286,13 @@
       <p>{loadError}</p>
       <button class="btn" onclick={load}><Icon name="retry" size={16} /> Try again</button>
     </div>
-  {:else if loaded && visible.length === 0 && (game || place !== "all" || search.trim())}
+  {:else if loaded && visible.length === 0 && (game || place !== "all" || search.trim() || media !== "all")}
     <div class="empty">
       <div class="empty-icon"><Icon name={place === "favorites" && !search.trim() ? "star" : "film"} size={28} /></div>
       {#if search.trim()}
         <p>No clips match “{search.trim()}”.</p>
+      {:else if media === "screenshot"}
+        <p>No screenshots here yet. Press your screenshot shortcut in a game, or use the Screenshot button.</p>
       {:else if place === "favorites"}
         <p>No favorites yet. Star a clip to keep it here.</p>
       {:else if place === "uploaded" && uploads === null && !uploadsError}
@@ -322,7 +344,8 @@
                   {now}
                   index={i}
                   onupload={() => (uploading = clip)}
-                  onedit={onedit ? () => onedit(clip) : undefined}
+                  onedit={clip.kind === "screenshot" ? undefined : onedit ? () => onedit(clip) : undefined}
+                  onview={clip.kind === "screenshot" ? () => (viewing = clip) : undefined}
                   onrename={() => (renaming = { kind: "local", id: clip.id, value: clip.title })}
                   onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
                   onremove={() => (removing = { clip, deleteFile: false })}
@@ -361,6 +384,10 @@
 
 {#if playing}
   <ClipPlayer clip={playing} {now} own onclose={() => (playing = null)} />
+{/if}
+
+{#if viewing}
+  <ImageViewer src={fileUrl(viewing.path)} title={viewing.title} onclose={() => (viewing = null)} />
 {/if}
 
 {#if deletingOnline}

@@ -99,6 +99,8 @@ pub fn parse_monitors(text: &str) -> Vec<Display> {
                 height: h.parse().ok()?,
                 // Wayland doesn't say which monitor is primary.
                 primary: false,
+                x: 0,
+                y: 0,
             })
         })
         .collect()
@@ -151,7 +153,7 @@ const KSCREEN_TIMEOUT: Duration = Duration::from_secs(3);
 const LIST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Asks KDE which monitor is primary. None off KDE, or if it doesn't answer in time.
-fn kscreen_primary() -> Option<String> {
+pub(crate) fn kscreen_primary() -> Option<String> {
     match stdout_within(Command::new("kscreen-doctor").arg("-j"), KSCREEN_TIMEOUT) {
         Ok(text) => parse_kscreen_primary(&text),
         Err(e) => {
@@ -163,7 +165,7 @@ fn kscreen_primary() -> Option<String> {
 
 /// Runs `cmd` and returns its stdout, or an error if it can't start or takes longer than
 /// `timeout` (then it's killed). A wedged helper must not block the recorder thread forever.
-fn stdout_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<String> {
+pub(crate) fn stdout_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<String> {
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
     let mut stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("no stdout"))?;
     // Read on a thread so a large answer can't fill the pipe while this waits.
@@ -569,8 +571,8 @@ mod tests {
         assert_eq!(
             displays,
             vec![
-                Display { id: "HDMI-A-1".into(), name: "HDMI-A-1".into(), width: 1920, height: 1080, primary: false },
-                Display { id: "DP-1".into(), name: "DP-1".into(), width: 2560, height: 1440, primary: false },
+                Display { id: "HDMI-A-1".into(), name: "HDMI-A-1".into(), width: 1920, height: 1080, primary: false, x: 0, y: 0 },
+                Display { id: "DP-1".into(), name: "DP-1".into(), width: 2560, height: 1440, primary: false, x: 0, y: 0 },
             ]
         );
     }

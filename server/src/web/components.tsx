@@ -69,7 +69,7 @@ export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
     <a class="card" href={`/c/${clip.id}`}>
       <div class="thumb">
         <img src={`/media/${clip.id}.jpg`} alt="" loading="lazy" width="320" height="180" />
-        <span class="dur">{formatDuration(clip.durationMs)}</span>
+        <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>
       </div>
       <div class="card-body">
         <div class="card-title">{e(clip.title)}</div>
@@ -92,12 +92,13 @@ function href(base: string, params: Record<string, string | null | undefined>): 
 }
 
 /** A search box for the list at `basePath`; the game filter is kept. */
-export function SearchBox(props: { basePath: string; search?: string; game?: string; withMe?: boolean }): JSX.Element {
+export function SearchBox(props: { basePath: string; search?: string; game?: string; withMe?: boolean; kind?: KindFilter }): JSX.Element {
   return (
     <form class="search" method="get" action={e(props.basePath)} role="search">
       <input type="search" name="q" value={e(props.search ?? '')} placeholder="Search by title, game or friend" aria-label="Search clips" maxlength="100" />
       {props.game ? <input type="hidden" name="game" value={e(props.game)} /> : ''}
       {props.withMe ? <input type="hidden" name="with" value="me" /> : ''}
+      {props.kind ? <input type="hidden" name="kind" value={props.kind} /> : ''}
       <button type="submit" class="btn">Search</button>
     </form>
   );
@@ -130,13 +131,26 @@ export function GameFilter(props: { games: GameCount[]; active?: string; basePat
   );
 }
 
-/** The feed's "I'm in it" filter: clips you're tagged in. */
-export function WithMeChip(props: { active: boolean }): JSX.Element {
+export type KindFilter = 'clip' | 'screenshot' | undefined;
+
+/** The feed's base path for a set of filters ("I'm in it", clips or screenshots). */
+export function feedBase(withMe: boolean, kind: KindFilter): string {
+  return href('/', { with: withMe ? 'me' : undefined, kind });
+}
+
+/** The feed's filters: "I'm in it" (clips you're tagged in), and clips or screenshots only. */
+export function FeedFilters(props: { withMe: boolean; kind: KindFilter }): JSX.Element {
+  const chip = (label: string, active: boolean, to: string, title?: string) => (
+    <a class={`chip${active ? ' active' : ''}`} href={e(to)} title={title ?? ''}>
+      {label}
+    </a>
+  );
+  const kindTo = (k: KindFilter) => feedBase(props.withMe, props.kind === k ? undefined : k);
   return (
     <div class="chips">
-      <a class={`chip${props.active ? ' active' : ''}`} href={props.active ? '/' : '/?with=me'} title="Clips your friends tagged you in">
-        I'm in it
-      </a>
+      {chip("I'm in it", props.withMe, feedBase(!props.withMe, props.kind), 'Clips your friends tagged you in')}
+      {chip('Clips', props.kind === 'clip', kindTo('clip'))}
+      {chip('Screenshots', props.kind === 'screenshot', kindTo('screenshot'))}
     </div>
   );
 }

@@ -148,6 +148,9 @@ pub struct DisplayInfo {
     pub width: u32,
     pub height: u32,
     pub primary: bool,
+    /// The monitor's top-left corner on the virtual desktop (for screenshots).
+    pub x: i32,
+    pub y: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -304,11 +307,13 @@ mod tests {
                 width: 2560,
                 height: 1440,
                 primary: true,
+                x: 0,
+                y: 0,
             }],
         };
         assert_eq!(
             ev.to_line(),
-            r#"{"event":"displays","items":[{"id":"\\\\?\\DISPLAY#GSM5B7F#1","name":"LG ULTRAGEAR","width":2560,"height":1440,"primary":true}]}"#
+            r#"{"event":"displays","items":[{"id":"\\\\?\\DISPLAY#GSM5B7F#1","name":"LG ULTRAGEAR","width":2560,"height":1440,"primary":true,"x":0,"y":0}]}"#
         );
     }
 

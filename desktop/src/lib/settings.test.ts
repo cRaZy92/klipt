@@ -14,6 +14,7 @@ const defaults: Settings = {
   micEnabled: false,
   micDeviceId: null,
   hotkey: "Alt+Backquote",
+  screenshotHotkey: "Alt+Shift+Backquote",
   outputDir: "/home/u/Videos/Klipt",
   startWithOs: true,
   saveSound: true,
@@ -127,5 +128,12 @@ describe("voice chat apps", () => {
   it("compares lists by content for unsaved changes", () => {
     expect(sameSettings(defaults, { ...defaults, voiceApps: ["discord", "vesktop"] })).toBe(true);
     expect(sameSettings(defaults, { ...defaults, voiceApps: ["discord"] })).toBe(false);
+  });
+});
+
+describe("screenshot shortcut", () => {
+  it("is optional but can't be the save shortcut", () => {
+    expect(fields({ screenshotHotkey: "" })).toEqual([]);
+    expect(fields({ screenshotHotkey: "Alt+Backquote" })).toEqual(["screenshotHotkey"]);
   });
 });

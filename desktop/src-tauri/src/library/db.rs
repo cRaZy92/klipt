@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::{Clip, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes};
+use super::{Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes};
 use crate::errors::{AppError, Result};
 
 /// Per-track volume range the editor offers (0–200 %).
@@ -48,11 +48,13 @@ const MIGRATIONS: &[&str] = &["
     ALTER TABLE clips ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;
 ", "
     ALTER TABLE clips ADD COLUMN master_volume REAL NOT NULL DEFAULT 1;
+", "
+    ALTER TABLE clips ADD COLUMN kind TEXT NOT NULL DEFAULT 'clip';
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
-                       visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume";
+                       visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -81,6 +83,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         has_voice: row.get(22)?,
         voice_volume: row.get(23)?,
         master_volume: row.get(24)?,
+        kind: if row.get::<_, String>(25)? == "screenshot" { ClipKind::Screenshot } else { ClipKind::Clip },
     })
 }
 
@@ -115,8 +118,8 @@ impl Library {
     pub fn insert(&self, clip: NewClip) -> Result<Clip> {
         let id = uuid::Uuid::new_v4().simple().to_string();
         self.conn.execute(
-            "INSERT INTO clips (id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, title, has_voice)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO clips (id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, title, has_voice, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 id,
                 clip.path.to_string_lossy(),
@@ -130,6 +133,7 @@ impl Library {
                 clip.exe,
                 clip.title,
                 clip.has_voice,
+                clip.kind.as_str(),
             ],
         )?;
         self.get(&id)
@@ -341,6 +345,7 @@ mod tests {
             height: 1080,
             has_mic: false,
             has_voice: false,
+            kind: crate::library::ClipKind::Clip,
             game_name: game.map(|g| g.0.to_string()),
             steam_app_id: game.map(|g| g.1),
             exe: Some("game.exe".into()),

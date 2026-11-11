@@ -68,6 +68,8 @@ pub fn list() -> Vec<DisplayInfo> {
                 width: (rect.right - rect.left).max(0) as u32,
                 height: (rect.bottom - rect.top).max(0) as u32,
                 primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+                x: rect.left,
+                y: rect.top,
             });
         }
     }

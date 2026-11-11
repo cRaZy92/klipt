@@ -94,6 +94,8 @@ export interface Clip {
   views: number;
   /** Friends in the clip, by username (alphabetical). */
   tagged: string[];
+  /** A video clip, or a screenshot whose `videoUrl` is the PNG. */
+  kind: 'clip' | 'screenshot';
   createdAt: string;
   owner: { username: string };
   shareUrl: string;

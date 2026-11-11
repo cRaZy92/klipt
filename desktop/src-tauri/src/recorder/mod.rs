@@ -76,6 +76,11 @@ pub struct Display {
     pub height: u32,
     #[serde(default)]
     pub primary: bool,
+    /// The top-left corner on the desktop (Windows; 0 when the helper doesn't say).
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
 }
 
 /// A microphone the user can pick.
@@ -182,6 +187,7 @@ pub fn process_saved_clip(library: &Mutex<Library>, tools: Option<&Tools>, saved
         height: probe.as_ref().map_or(0, |p| p.height),
         has_mic,
         has_voice,
+        kind: crate::library::ClipKind::Clip,
         game_name: saved.game.game_name,
         steam_app_id: saved.game.steam_app_id,
         exe: saved.game.exe,

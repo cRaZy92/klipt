@@ -167,6 +167,11 @@
     }, { once: true });
   });
 
+  // A screenshot counts as viewed when its page opens.
+  document.querySelectorAll('img[data-view-url]').forEach(function (img) {
+    fetch(img.dataset.viewUrl, { method: 'POST', credentials: 'same-origin' }).catch(function () {});
+  });
+
   // Game chips: drop the art when Steam has none, so the chip shows just its name.
   // Errors don't bubble, hence the capture listener; the sweep catches any that failed before this ran.
   function dropBrokenArt(img) {

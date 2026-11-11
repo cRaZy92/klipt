@@ -89,7 +89,7 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
    the details sit beside it when at least ~280px is left over, otherwise they wrap underneath. */
 .container:has(> .share) { max-width: 1800px; }
 .share { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
-.share video { display: block; flex: 0 1 auto; aspect-ratio: var(--ar, 16/9); width: min(100%, calc((100vh - 130px) * var(--ar, 16/9))); height: auto; background: #000; border-radius: 12px; }
+.share video, .share img.shot { display: block; flex: 0 1 auto; aspect-ratio: var(--ar, 16/9); width: min(100%, calc((100vh - 130px) * var(--ar, 16/9))); height: auto; background: #000; border-radius: 12px; }
 .share-info { flex: 1 1 280px; min-width: 0; }
 .share-info h1 { margin-top: 0; font-size: 1.5rem; overflow-wrap: anywhere; }
 .share-info .actions { display: flex; flex-wrap: wrap; gap: 8px; }

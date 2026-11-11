@@ -18,6 +18,7 @@
     onshowfolder,
     oncopy,
     onfavorite,
+    onview,
     thumbVersion = 0,
   }: {
     clip: ClipView;
@@ -37,6 +38,8 @@
     onfavorite?: () => void;
     /** Changes when the thumbnail file is rewritten, so the cached picture isn't shown. */
     thumbVersion?: number;
+    /** Shows a screenshot full size (screenshots have no editor). */
+    onview?: () => void;
   } = $props();
 
   let menuOpen = $state(false);
@@ -72,7 +75,11 @@
     {:else}
       <div class="placeholder"><Icon name={clip.fileMissing ? "alert" : "film"} size={30} /></div>
     {/if}
-    {#if onedit && !clip.fileMissing}
+    {#if onview && !clip.fileMissing}
+      <button class="open" onclick={onview} aria-label="View {clip.title}">
+        <span class="open-pill"><Icon name="image" size={15} /> View</span>
+      </button>
+    {:else if onedit && !clip.fileMissing}
       <!-- The whole picture opens the editor, which is also where the clip plays. -->
       <button class="open" onclick={onedit} disabled={busy} aria-label="Edit {clip.title}">
         <span class="open-pill"><Icon name="scissors" size={15} /> Edit</span>
@@ -83,7 +90,11 @@
     {:else if uploaded}
       <span class="badge badge-uploaded"><Icon name="check" size={13} /> Uploaded</span>
     {/if}
-    <span class="duration">{formatDuration(clip.durationMs)}</span>
+    {#if clip.kind === "screenshot"}
+      <span class="duration" title="Screenshot"><Icon name="image" size={13} /></span>
+    {:else}
+      <span class="duration">{formatDuration(clip.durationMs)}</span>
+    {/if}
     {#if onfavorite}
       <button
         class="star"

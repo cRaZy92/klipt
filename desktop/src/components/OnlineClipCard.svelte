@@ -62,7 +62,7 @@
     <span class="badge badge-online" title="Uploaded; not on this computer">
       <Icon name="cloud" size={13} /> Online only
     </span>
-    <span class="duration">{formatDuration(upload.durationMs)}</span>
+    <span class="duration">{upload.kind === "screenshot" ? "Screenshot" : formatDuration(upload.durationMs)}</span>
     {#if downloading}
       <div class="overlay">
         <span class="status">Downloading…</span>

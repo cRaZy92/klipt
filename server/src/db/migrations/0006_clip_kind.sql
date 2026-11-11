@@ -1,0 +1,1 @@
+ALTER TABLE "clips" ADD COLUMN "kind" text DEFAULT 'clip' NOT NULL;

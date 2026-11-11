@@ -71,7 +71,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | Tag friends in a clip      | **Done.** Pick "Who's in it" when uploading (or "Tag friends" on the share page); tagged feed clips show on their profiles, "With …" on the share page and player, and an "I'm in it" filter in the Feed and on the website |
 | Next clip suggestion       | **Done (desktop Feed).** When a clip ends, "Up next" offers the next one (Play next / Replay, no autoplay); ← → and header arrows move between clips |
 | Download on the share page | **Done.** A Download button saves the video as "<title>.mp4" (`/media/<id>.mp4?download=1`)       |
-| Screenshots                | A screenshot hotkey; screenshots live in the library next to clips, with a Clips / Screenshots filter (library, Feed, website) |
+| Screenshots                | **Done (needs a Windows check).** A screenshot shortcut (default Alt+Shift+`, Settings → Hotkey) or the Screenshot button saves a PNG next to the clips; Clips / Screenshots filters in My clips, the Feed and on the website; screenshots upload and get a share page. Windows grabs the desktop with ffmpeg gdigrab: exclusive-fullscreen games may come out black |
 | Profile stats              | **Done (website).** Profiles show clips, total views and the most-watched clip (over what the viewer may see); clips per game are the game chips' counts |
 
 Turned down: a save-and-share hotkey (clips are always trimmed before sharing), choosing the clip

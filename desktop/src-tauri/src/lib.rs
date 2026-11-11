@@ -16,6 +16,7 @@ pub mod library;
 pub mod media_server;
 pub mod update;
 pub mod recorder;
+pub mod screenshot;
 pub mod server_clips;
 pub mod settings;
 pub mod sound;
@@ -71,7 +72,7 @@ pub fn run() {
             if !std::env::args().any(|arg| arg == AUTOSTART_ARG) {
                 tray::show_main_window(app.handle());
             }
-            app.manage(hotkey::start_for_app(app.handle(), settings.hotkey.clone()));
+            app.manage(hotkey::start_for_app(app.handle(), hotkey::Keys::from_settings(&settings)));
             update::start(app.handle());
             cleanup::start(app.handle());
             feed_watch::start(app.handle());
@@ -102,6 +103,7 @@ pub fn run() {
             commands::open_clips_folder,
             commands::clips_folder_size,
             commands::save_clip_now,
+            commands::take_screenshot,
             commands::list_clips,
             commands::list_games,
             commands::rename_clip,

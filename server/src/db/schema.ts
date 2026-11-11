@@ -59,6 +59,8 @@ export const clips = pgTable(
     width: integer('width').notNull(),
     height: integer('height').notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    /** A video clip, or a screenshot (stored as `<id>.png`). */
+    kind: text('kind', { enum: ['clip', 'screenshot'] }).notNull().default('clip'),
     /** Plays by visitors who weren't logged in (share links); logged-in viewers are in clip_views. */
     anonViews: integer('anon_views').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),

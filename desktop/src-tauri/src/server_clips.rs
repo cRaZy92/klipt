@@ -161,9 +161,10 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
 
     let output_dir = crate::commands::lock(&state.settings).output_dir.clone();
     std::fs::create_dir_all(&output_dir)?;
-    let dest = free_path(&output_dir, &file_name(&info.title, &id));
+    let ext = if info.screenshot { "png" } else { "mp4" };
+    let dest = free_path(&output_dir, &file_name(&info.title, &id, ext));
     let mut resp = client.get_media(&info.video_url).await.map_err(|e| failed(&data_dir, &saved, e))?;
-    let part = dest.with_extension("mp4.part");
+    let part = dest.with_extension(format!("{ext}.part"));
     let written = async {
         let mut file = std::fs::File::create(&part)?;
         while let Some(chunk) = resp.chunk().await.map_err(|e| AppError::Network(e.without_url().to_string()))? {
@@ -188,6 +189,7 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
         // Uploads have one mixed audio track.
         has_mic: false,
         has_voice: false,
+        kind: if info.screenshot { crate::library::ClipKind::Screenshot } else { crate::library::ClipKind::Clip },
         game_name: info.game_name,
         steam_app_id: info.steam_app_id,
         exe: None,
@@ -226,6 +228,7 @@ struct ServerClipInfo {
     share_url: String,
     video_url: String,
     visibility: String,
+    screenshot: bool,
 }
 
 impl ServerClipInfo {
@@ -246,6 +249,7 @@ impl ServerClipInfo {
             height: n("height").and_then(|h| u32::try_from(h).ok()).unwrap_or(0),
             created_at_ms,
             share_url: s("shareUrl")?,
+            screenshot: s("kind").as_deref() == Some("screenshot"),
             video_url: s("videoUrl")?,
             visibility: s("visibility").unwrap_or_else(|| "feed".into()),
         })
@@ -273,7 +277,7 @@ fn chrono_free_parse_ms(t: &str) -> Option<i64> {
 }
 
 /// `<title> (<id>).mp4`, with characters Windows and Linux don't allow in file names replaced.
-fn file_name(title: &str, id: &str) -> String {
+fn file_name(title: &str, id: &str, ext: &str) -> String {
     let clean: String = title
         .chars()
         .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '_' } else { c })
@@ -284,7 +288,7 @@ fn file_name(title: &str, id: &str) -> String {
         .take(80)
         .collect();
     let clean = if clean.is_empty() { "Clip".to_string() } else { clean };
-    format!("{clean} ({id}).mp4")
+    format!("{clean} ({id}).{ext}")
 }
 
 /// `dir/name`, or `dir/name (2)` … when that's taken.
@@ -319,9 +323,9 @@ mod tests {
 
     #[test]
     fn download_names_are_safe_and_unique() {
-        assert_eq!(file_name("Deadlock — 10 Nov 2026", "AbC_12-xyz09"), "Deadlock — 10 Nov 2026 (AbC_12-xyz09).mp4");
-        assert_eq!(file_name("a/b:c*?", "AbC_12-xyz09"), "a_b_c__ (AbC_12-xyz09).mp4");
-        assert_eq!(file_name("  ...", "AbC_12-xyz09"), "Clip (AbC_12-xyz09).mp4");
+        assert_eq!(file_name("Deadlock — 10 Nov 2026", "AbC_12-xyz09", "mp4"), "Deadlock — 10 Nov 2026 (AbC_12-xyz09).mp4");
+        assert_eq!(file_name("a/b:c*?", "AbC_12-xyz09", "mp4"), "a_b_c__ (AbC_12-xyz09).mp4");
+        assert_eq!(file_name("  ...", "AbC_12-xyz09", "png"), "Clip (AbC_12-xyz09).png");
         let dir = tempfile::tempdir().unwrap();
         let name = "x (AbC_12-xyz09).mp4";
         assert_eq!(free_path(dir.path(), name), dir.path().join(name));

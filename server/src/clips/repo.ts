@@ -79,13 +79,14 @@ export function searchCondition(text: string | undefined): SQL | undefined {
 export async function listClips(
   db: Db,
   viewer: AuthUser,
-  q: { scope: Scope; username?: string; game?: string; search?: string; withMe?: boolean; cursor?: string; limit?: number },
+  q: { scope: Scope; username?: string; game?: string; search?: string; withMe?: boolean; kind?: 'clip' | 'screenshot'; cursor?: string; limit?: number },
 ): Promise<{ items: ClipWithOwner[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(Math.trunc(q.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
   const conds: (SQL | undefined)[] = [scopeCondition(viewer, q.scope, q.username)];
   if (q.game) conds.push(eq(clips.gameName, q.game));
   conds.push(searchCondition(q.search));
   if (q.withMe) conds.push(taggedIn(viewer.username.toLowerCase()));
+  if (q.kind) conds.push(eq(clips.kind, q.kind));
   if (q.cursor) {
     const c = decodeCursor(q.cursor);
     conds.push(or(lt(clips.createdAt, c.createdAt), and(eq(clips.createdAt, c.createdAt), lt(clips.id, c.id))));

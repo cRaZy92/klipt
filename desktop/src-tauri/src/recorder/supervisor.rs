@@ -585,7 +585,7 @@ mod tests {
             rx
         }
         fn list_displays(&mut self) -> Result<Vec<Display>> {
-            Ok(vec![Display { id: "d1".into(), name: "D1".into(), width: 1920, height: 1080, primary: true }])
+            Ok(vec![Display { id: "d1".into(), name: "D1".into(), width: 1920, height: 1080, primary: true, x: 0, y: 0 }])
         }
         fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>> {
             Ok(vec![AudioDevice { id: "m1".into(), name: "Mic".into() }])
@@ -712,6 +712,7 @@ mod tests {
                 has_voice: false,
                 voice_volume: 1.0,
                 master_volume: 1.0,
+                kind: crate::library::ClipKind::Clip,
             },
             file_missing: false,
             thumb_path: None,

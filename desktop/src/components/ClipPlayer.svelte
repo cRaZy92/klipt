@@ -143,6 +143,9 @@
     </div>
     <!-- svelte-ignore a11y_media_has_caption -->
     <div class="stage">
+      {#if clip.kind === "screenshot"}
+        <img class="shot" src={clip.videoUrl} alt={clip.title} onload={countView} />
+      {:else}
       <video
         bind:this={video}
         src={clip.videoUrl}
@@ -155,6 +158,7 @@
           countView();
         }}
       ></video>
+      {/if}
       {#if ended && next}
         <div class="up-next" role="group" aria-label="Up next">
           <span class="up-next-label">Up next</span>
@@ -275,6 +279,15 @@
 
   .stage {
     position: relative;
+  }
+
+  .shot {
+    display: block;
+    width: 100%;
+    max-height: calc(100vh - 12rem);
+    object-fit: contain;
+    background: #000;
+    border-radius: var(--radius);
   }
 
   video {

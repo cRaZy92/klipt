@@ -134,6 +134,7 @@ mod tests {
             height: 1080,
             has_mic: false,
             has_voice: false,
+            kind: crate::library::ClipKind::Clip,
             game_name: None,
             steam_app_id: None,
             exe: None,

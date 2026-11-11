@@ -8,7 +8,7 @@ import { getAdminStats, isInviteActive, listActiveInvites, listAdminUsers } from
 import { toClip } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
 import { users } from '../db/schema.js';
-import { getClip, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
+import { getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
 import { InvitePage } from './pages/invite.js';
@@ -115,8 +115,8 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
       .from(users)
       .where(eq(users.usernameKey, username.toLowerCase()));
     if (!owner) return notFound(req, reply);
-    const data = await load(req, 'user', owner.username);
-    return html(reply, UserPage({ user: req.user!, username: owner.username, ...data }) as string);
+    const [data, stats] = await Promise.all([load(req, 'user', owner.username), getProfileStats(db, req.user!, owner.username)]);
+    return html(reply, UserPage({ user: req.user!, username: owner.username, ...data, stats }) as string);
   });
 
   // Public: the id is the secret (link-only clips are shareable too).

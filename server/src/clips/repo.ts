@@ -87,6 +87,35 @@ export async function listClips(
   return { items, nextCursor };
 }
 
+export interface ProfileStats {
+  clips: number;
+  views: number;
+  /** The clip with the most views; null when none has any. */
+  top: { id: string; title: string; views: number } | null;
+}
+
+/** A profile's totals over the clips `viewer` may see there (feed clips, or all for your own). */
+export async function getProfileStats(db: Db, viewer: AuthUser, username: string): Promise<ProfileStats> {
+  const where = scopeCondition(viewer, 'user', username);
+  const [totals] = await db
+    .select({ clips: sql<number>`count(*)::int`, views: sql<number>`coalesce(sum(${viewsExpr}), 0)::int` })
+    .from(clips)
+    .innerJoin(users, eq(users.id, clips.userId))
+    .where(where);
+  const [top] = await db
+    .select({ id: clips.id, title: clips.title, views: viewsExpr })
+    .from(clips)
+    .innerJoin(users, eq(users.id, clips.userId))
+    .where(where)
+    .orderBy(desc(viewsExpr), desc(clips.createdAt))
+    .limit(1);
+  return {
+    clips: Number(totals!.clips),
+    views: Number(totals!.views),
+    top: top && Number(top.views) > 0 ? { id: top.id, title: top.title, views: Number(top.views) } : null,
+  };
+}
+
 export async function listGames(
   db: Db,
   viewer: AuthUser,

@@ -72,7 +72,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | Next clip suggestion       | **Done (desktop Feed).** When a clip ends, "Up next" offers the next one (Play next / Replay, no autoplay); ← → and header arrows move between clips |
 | Download on the share page | **Done.** A Download button saves the video as "<title>.mp4" (`/media/<id>.mp4?download=1`)       |
 | Screenshots                | A screenshot hotkey; screenshots live in the library next to clips, with a Clips / Screenshots filter (library, Feed, website) |
-| Profile stats              | Clips per game, total views, most-watched clip on each profile (builds on view counts)             |
+| Profile stats              | **Done (website).** Profiles show clips, total views and the most-watched clip (over what the viewer may see); clips per game are the game chips' counts |
 
 Turned down: a save-and-share hotkey (clips are always trimmed before sharing), choosing the clip
 length at save time, moment markers, autoplaying the next clip. Not now: automatic Discord posts, a

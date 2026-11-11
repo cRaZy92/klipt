@@ -152,6 +152,25 @@ describe('web pages', () => {
     expect(none).toContain('No clips match “&lt;nothing&gt;”.');
   });
 
+  it('profile shows clips, views and the most-watched clip, counting only what the viewer may see', async () => {
+    const a = await mk('alice');
+    const b = await mk('bob');
+    const pub = await addClip(a.u.id, { title: 'Popular', gameName: 'CS2', anonViews: 5 });
+    await addClip(a.u.id, { title: 'Quiet', anonViews: 1 });
+    await addClip(a.u.id, { title: 'Secret', visibility: 'link', anonViews: 50 });
+    const theirs = (await get('/u/alice', b.cookie)).body;
+    expect(theirs).toMatch(/data-stat="clips"><b>2</);
+    expect(theirs).toMatch(/data-stat="views"><b>6</);
+    expect(theirs).toMatch(new RegExp(`data-stat="top"><a href="/c/${pub}"><b>Popular</b></a><span>most watched · 5 views<`));
+    expect(theirs).not.toContain('Secret');
+    const own = (await get('/u/alice', a.cookie)).body;
+    expect(own).toMatch(/data-stat="clips"><b>3</);
+    expect(own).toMatch(/data-stat="views"><b>56</);
+    expect(own).toContain('<b>Secret</b>');
+    await mk('carol');
+    expect((await get('/u/carol', b.cookie)).body).not.toContain('data-stat=');
+  });
+
   it('me page shows how much server storage your clips use', async () => {
     const a = await mk('alice');
     const b = await mk('bob');

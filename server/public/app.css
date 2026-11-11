@@ -65,7 +65,9 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 8px; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
-.stat b { display: block; font-size: 1.5rem; } .stat span { color: var(--muted); font-size: .85rem; }
+.stat b { display: block; font-size: 1.5rem; }
+.profile-stats { margin-bottom: 16px; }
+.stat.top { grid-column: span 2; min-width: 0; } .stat.top b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .stat.top a:hover b { color: var(--accent); } .stat span { color: var(--muted); font-size: .85rem; }
 
 .center-card { max-width: 400px; margin: 8vh auto 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
 .form { display: grid; gap: 14px; }

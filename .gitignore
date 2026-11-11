@@ -6,3 +6,4 @@ dist/
 .env
 .env.*
 !.env.example
+desktop/src-tauri/tauri.release.conf.json

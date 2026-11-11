@@ -37,8 +37,8 @@ export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete:
           {...{ playsinline: true, preload: "metadata" }}
           poster={e(clip.thumbnailUrl)}
           src={e(clip.videoUrl)}
-          style="width:100%;max-height:75vh;background:#000;border-radius:12px"
         ></video>
+        <aside class="share-info">
         <h1>{e(clip.title)}</h1>
         <p class="meta">
           <a href={`/u/${encodeURIComponent(clip.owner.username)}`}>{e(clip.owner.username)}</a>
@@ -53,6 +53,7 @@ export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete:
             ''
           )}
         </div>
+        </aside>
       </div>
     </Layout>
   );

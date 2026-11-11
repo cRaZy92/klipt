@@ -135,37 +135,44 @@ pub fn automatic_monitor(displays: &[Display]) -> Option<&str> {
 
 /// How long `kscreen-doctor` may take before it's given up on.
 const KSCREEN_TIMEOUT: Duration = Duration::from_secs(3);
+/// gsr's `--list-monitors` / `--list-audio-devices` answer at once; longer means it's stuck.
+const LIST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Asks KDE which monitor is primary. None off KDE, or if it doesn't answer in time.
 fn kscreen_primary() -> Option<String> {
-    let mut child = Command::new("kscreen-doctor")
-        .arg("-j")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
+    match stdout_within(Command::new("kscreen-doctor").arg("-j"), KSCREEN_TIMEOUT) {
+        Ok(text) => parse_kscreen_primary(&text),
+        Err(e) => {
+            eprintln!("klipt: kscreen-doctor didn't answer ({e}); using the first monitor");
+            None
+        }
+    }
+}
+
+/// Runs `cmd` and returns its stdout, or an error if it can't start or takes longer than
+/// `timeout` (then it's killed). A wedged helper must not block the recorder thread forever.
+fn stdout_within(cmd: &mut Command, timeout: Duration) -> std::io::Result<String> {
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
+    let mut stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("no stdout"))?;
     // Read on a thread so a large answer can't fill the pipe while this waits.
     let reader = thread::spawn(move || {
         let mut text = String::new();
-        std::io::Read::read_to_string(&mut stdout, &mut text).ok().map(|_| text)
+        std::io::Read::read_to_string(&mut stdout, &mut text).map(|_| text)
     });
-    let deadline = Instant::now() + KSCREEN_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => thread::sleep(POLL / 2),
-            _ => {
-                eprintln!("klipt: kscreen-doctor didn't answer; using the first monitor");
+        match child.try_wait()? {
+            Some(_) => break,
+            None if Instant::now() < deadline => thread::sleep(POLL / 2),
+            None => {
                 // Our own child, by its handle.
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("no answer within {timeout:?}")));
             }
         }
     }
-    parse_kscreen_primary(&reader.join().ok()??)
+    reader.join().map_err(|_| std::io::Error::other("stdout reader panicked"))?
 }
 
 /// A stdout line from gsr that names an existing `.mp4` file is a finished save.
@@ -180,6 +187,9 @@ pub fn parse_saved_line(line: &str) -> Option<PathBuf> {
 struct Shared {
     child: Mutex<Option<Child>>,
     stop_requested: AtomicBool,
+    /// Waiting to start gsr again after its encoder failed: there's no child, but saves should
+    /// hear "still starting" rather than "not recording".
+    restarting: AtomicBool,
     /// Set by the stderr reader when gsr says the video encoder couldn't start.
     encoder_failed: Arc<AtomicBool>,
 }
@@ -321,9 +331,11 @@ fn wait_loop(
                 "klipt: gpu-screen-recorder's encoder failed to start ({code:?}); retrying in {ENCODER_RETRY_DELAY:?} ({encoder_retries}/{ENCODER_RETRIES})"
             );
             *slot = None;
+            shared.restarting.store(true, Ordering::SeqCst);
             drop(slot);
             thread::sleep(ENCODER_RETRY_DELAY);
             let mut slot = lock(&shared.child);
+            shared.restarting.store(false, Ordering::SeqCst);
             if shared.stop_requested.load(Ordering::SeqCst) {
                 drop(slot);
                 send(&tx, RecorderEvent::Exited { code });
@@ -389,6 +401,7 @@ impl RecorderBackend for GsrBackend {
         let shared = Arc::new(Shared {
             child: Mutex::new(Some(child)),
             stop_requested: AtomicBool::new(false),
+            restarting: AtomicBool::new(false),
             encoder_failed,
         });
         let retry_args = build_args(cfg, &Target::Portal, &self.portal_token);
@@ -404,7 +417,13 @@ impl RecorderBackend for GsrBackend {
     fn save(&mut self) -> Result<()> {
         let run = self.run.as_ref().ok_or(AppError::NotRecording)?;
         let slot = lock(&run.shared.child);
-        let child = slot.as_ref().ok_or(AppError::NotRecording)?;
+        let Some(child) = slot.as_ref() else {
+            return Err(if run.shared.restarting.load(Ordering::SeqCst) {
+                AppError::RecorderStarting
+            } else {
+                AppError::NotRecording
+            });
+        };
         kill(Pid::from_raw(child.id() as i32), Signal::SIGUSR1)
             .map_err(|e| AppError::RecorderFailed(format!("can't signal gpu-screen-recorder: {e}")))
     }
@@ -436,12 +455,9 @@ impl RecorderBackend for GsrBackend {
     }
 
     fn list_displays(&mut self) -> Result<Vec<Display>> {
-        let output = Command::new(&self.program)
-            .arg("--list-monitors")
-            .stdin(Stdio::null())
-            .output()
+        let output = stdout_within(Command::new(&self.program).arg("--list-monitors"), LIST_TIMEOUT)
             .map_err(|e| spawn_error(&self.program, e))?;
-        let mut displays = parse_monitors(&String::from_utf8_lossy(&output.stdout));
+        let mut displays = parse_monitors(&output);
         if displays.len() > 1 {
             mark_primary(&mut displays, kscreen_primary().as_deref());
         }
@@ -449,12 +465,9 @@ impl RecorderBackend for GsrBackend {
     }
 
     fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>> {
-        let output = Command::new(&self.program)
-            .arg("--list-audio-devices")
-            .stdin(Stdio::null())
-            .output()
+        let output = stdout_within(Command::new(&self.program).arg("--list-audio-devices"), LIST_TIMEOUT)
             .map_err(|e| spawn_error(&self.program, e))?;
-        Ok(parse_audio_devices(&String::from_utf8_lossy(&output.stdout)))
+        Ok(parse_audio_devices(&output))
     }
 }
 
@@ -561,6 +574,15 @@ garbage\n\
             ]
         );
         assert_eq!(parse_audio_devices("weird|"), vec![AudioDevice { id: "weird".into(), name: "weird".into() }]);
+    }
+
+    #[test]
+    fn a_helper_that_hangs_is_killed_at_the_deadline() {
+        assert_eq!(stdout_within(Command::new("echo").arg("DP-1|1920x1080"), LIST_TIMEOUT).unwrap(), "DP-1|1920x1080\n");
+        let started = Instant::now();
+        let err = stdout_within(Command::new("sleep").arg("30"), Duration::from_millis(300)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
     }
 
     #[test]

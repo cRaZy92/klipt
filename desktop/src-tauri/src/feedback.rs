@@ -60,7 +60,7 @@ pub const NOT_SAVED_TEXT: &str = "Clip not saved";
 
 /// Errors that answer a save request (hotkey or tray) with "nothing was saved".
 pub fn is_failed_save(code: &str) -> bool {
-    matches!(code, "recording_paused" | "not_recording" | "save_failed")
+    matches!(code, "recording_paused" | "not_recording" | "recorder_starting" | "save_failed")
 }
 
 #[cfg(test)]

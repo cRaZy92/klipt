@@ -28,6 +28,9 @@ pub enum AppError {
     RecorderFailed(String),
     #[error("not recording")]
     NotRecording,
+    /// Between attempts to start the recorder (e.g. waiting for a busy GPU encoder).
+    #[error("the recorder is still starting")]
+    RecorderStarting,
     #[error("the shortcut is taken by another app")]
     HotkeyTaken,
     #[error("can't set up the global shortcut: {0}")]
@@ -99,6 +102,7 @@ impl AppError {
             AppError::RecorderMissing(_) => "recorder_missing",
             AppError::RecorderFailed(_) => "recorder_failed",
             AppError::NotRecording => "not_recording",
+            AppError::RecorderStarting => "recorder_starting",
             AppError::HotkeyTaken => "hotkey_taken",
             AppError::HotkeyUnavailable(_) | AppError::HotkeyLost => "hotkey_unavailable",
             AppError::Unauthorized => "unauthorized",
@@ -136,6 +140,7 @@ impl AppError {
             AppError::RecorderMissing(_) => "Klipt's recorder is missing. Try reinstalling Klipt.".into(),
             AppError::RecorderFailed(_) => "Recording couldn't start. Check your recording settings.".into(),
             AppError::NotRecording => "Klipt isn't recording right now.".into(),
+            AppError::RecorderStarting => "Recording is still starting. Try again in a few seconds.".into(),
             AppError::HotkeyTaken => {
                 "That shortcut is already used by another app. Pick a different one in Settings.".into()
             }

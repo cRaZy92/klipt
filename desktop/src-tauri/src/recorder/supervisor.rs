@@ -401,6 +401,10 @@ impl Supervisor {
         let game = (self.deps.detect_game)();
         match self.backend.save() {
             Ok(()) => self.pending_save = Some(PendingSave { game, deadline: self.now() + SAVE_TIMEOUT }),
+            Err(AppError::RecorderStarting) => {
+                let e = AppError::RecorderStarting;
+                self.emit(SupervisorEvent::Error { code: e.code().into(), message: e.user_message() });
+            }
             Err(e) => {
                 eprintln!("klipt: can't save: {e}");
                 self.emit_error("save_failed");

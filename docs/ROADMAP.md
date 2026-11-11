@@ -9,7 +9,7 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| 2026-11-11 | Review bugs fixed        | All 13 bugs deferred by reviews fixed (see "Next"); not yet released                                   |
+| 2026-11-11 | Review bugs fixed        | All 13 bugs deferred by reviews and the final review's 9 minors fixed (see "Next")                    |
 | 2026-11-11 | Linux update notice      | The Linux package checks GitHub and shows the command that installs a newer release; autostart follows the installed copy |
 | 2026-11-11 | v0.1.10                  | In-app logo matches the app icon; login hint removed                                                   |
 | 2026-11-11 | v0.1.8, first release    | Signed Windows installer on GitHub Releases; installed copies update themselves                        |
@@ -49,9 +49,11 @@ logout stopping uploads cleanly, the editor's play blip, keyboard menus and dial
 ffmpeg failures keeping the upload, share ids and invite codes kept out of server logs, and the
 website's error messages, visibility button and empty states.
 
-Still open: the final whole-branch review parked 9 more minors in
-`.superpowers/sdd/2026-11-09-klipt-desktop/final-review.md`, which exists only on the Linux machine.
-Copy them here or into a ledger.
+The 9 minors the final whole-branch review parked (`.superpowers/sdd/2026-11-09-klipt-desktop/final-review.md`,
+M-1 to M-9) were fixed the same day: website links at a server subpath, media server limits and
+CORS, a dead login cleared on a feed 401, "still starting" during the gsr encoder retry, gsr
+listings with a deadline, no restart toast while paused, login saving under the settings lock, feed
+media kept on the server, and an unwritable clips folder refused in Settings.
 
 ## Later: after v1
 

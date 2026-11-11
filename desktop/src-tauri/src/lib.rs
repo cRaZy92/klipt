@@ -8,6 +8,8 @@ pub mod feedback;
 pub mod ffmpeg;
 pub mod games;
 pub mod hotkey;
+#[cfg(target_os = "linux")]
+mod autostart_linux;
 pub mod library;
 pub mod media_server;
 pub mod update;
@@ -19,7 +21,9 @@ pub mod tray;
 pub mod upload;
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
-use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_autostart::MacosLauncher;
+#[cfg(not(target_os = "linux"))]
+use tauri_plugin_autostart::ManagerExt;
 
 /// Passed by the OS autostart entry: start hidden in the tray.
 pub const AUTOSTART_ARG: &str = "--autostart";
@@ -129,12 +133,20 @@ pub fn apply_autostart(app: &AppHandle, enabled: bool) {
     if cfg!(debug_assertions) {
         return;
     }
-    let autostart = app.autolaunch();
-    let result = match autostart.is_enabled() {
-        _ if enabled => autostart.enable(),
-        Ok(false) => Ok(()),
-        _ => autostart.disable(),
+    #[cfg(target_os = "linux")]
+    let result = autostart_linux::apply(enabled).map_err(|e| e.to_string());
+    #[cfg(not(target_os = "linux"))]
+    let result = {
+        let autostart = app.autolaunch();
+        match autostart.is_enabled() {
+            _ if enabled => autostart.enable(),
+            Ok(false) => Ok(()),
+            _ => autostart.disable(),
+        }
+        .map_err(|e| e.to_string())
     };
+    #[cfg(target_os = "linux")]
+    let _ = app;
     if let Err(e) = result {
         eprintln!("klipt: can't {} starting with the OS: {e}", if enabled { "turn on" } else { "turn off" });
     }

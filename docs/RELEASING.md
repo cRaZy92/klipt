@@ -1,7 +1,9 @@
 # Releasing Klipt (desktop)
 
-Windows installs update themselves from GitHub Releases. The Linux package (`packaging/aur`) updates
-through pacman (`makepkg -si` again), not through the in-app updater.
+Windows installs update themselves from GitHub Releases. The Linux package (`packaging/aur`) can't:
+it records the commit it was built from (`KLIPT_COMMIT`), checks GitHub every 6 h for a newer
+release, and then shows a command to copy (fresh clone + `makepkg -si`) that rebuilds and installs it.
+Dev builds (`pnpm tauri dev`) have no commit recorded and never check.
 
 ## One-time setup (owner)
 

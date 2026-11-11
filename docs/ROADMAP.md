@@ -55,6 +55,22 @@ CORS, a dead login cleared on a feed 401, "still starting" during the gsr encode
 listings with a deadline, no restart toast while paused, login saving under the settings lock, feed
 media kept on the server, and an unwritable clips folder refused in Settings.
 
+## Planned features (chosen 2026-11-11)
+
+The owner picked these from a list of suggestions. None has a spec yet.
+
+| Feature                    | What it means                                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| New clips from friends     | A "new" count on the Feed tab since you last looked; optional desktop notification when a friend uploads |
+| Local storage cleanup      | Settings shows the clips folder's size; optional "delete local clips older than N days" that keeps uploaded and favorite clips |
+| Leave voice chat out       | Game audio and voice/chat apps on separate tracks, so a clip can be shared without friends' voices |
+| Favorites and search       | Star clips in the library; search by title, game or friend in the library, Feed and website      |
+| Views and "seen by"        | A view count on each clip, and which friends watched it                                            |
+| Your storage on the server | Show each user how much server storage their clips use. No quotas                                  |
+
+Turned down: a save-and-share hotkey (clips are always trimmed before sharing), choosing the clip
+length at save time, moment markers. Not now: automatic Discord posts, a weekly highlights page.
+
 ## Later: after v1
 
 Ideas the spec left out of v1 on purpose, or that came up while building. Nothing here is committed.

@@ -18,6 +18,8 @@ pub struct Edit {
     pub game_volume: f32,
     pub mic_volume: f32,
     pub voice_volume: f32,
+    /// The whole mix, applied after the tracks are mixed.
+    pub master_volume: f32,
 }
 
 /// Which audio tracks besides the game (always track 0) a clip has, by track index.
@@ -63,13 +65,16 @@ pub fn export_args(input: &Path, output: &Path, edit: &Edit, tracks: Tracks) -> 
     let mut inputs = vec![(0, volume(edit.game_volume))];
     inputs.extend(tracks.mic.map(|t| (t, volume(edit.mic_volume))));
     inputs.extend(tracks.voice.map(|t| (t, volume(edit.voice_volume))));
+    // The master volume only appears when it changes something, so default exports stay as before.
+    let master = volume(edit.master_volume);
+    let master = if master == 1.0 { String::new() } else { format!(",volume={master}") };
     let graph = if inputs.len() == 1 {
-        format!("[0:a:0]volume={}[aout]", inputs[0].1)
+        format!("[0:a:0]volume={}{master}[aout]", inputs[0].1)
     } else {
         let filters: Vec<String> =
             inputs.iter().enumerate().map(|(i, (track, vol))| format!("[0:a:{track}]volume={vol}[a{i}]")).collect();
         let labels: String = (0..inputs.len()).map(|i| format!("[a{i}]")).collect();
-        format!("{};{labels}amix=inputs={}:normalize=0[aout]", filters.join(";"), inputs.len())
+        format!("{};{labels}amix=inputs={}:normalize=0{master}[aout]", filters.join(";"), inputs.len())
     };
 
     let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-y"].map(String::from).into();
@@ -185,6 +190,15 @@ mod tests {
     }
 
     #[test]
+    fn master_volume_scales_the_mix() {
+        let e = Edit { master_volume: 0.5, ..edit(None, None) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, MIC).unwrap().join(" ");
+        assert!(joined.contains("amix=inputs=2:normalize=0,volume=0.5[aout]"), "{joined}");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, Tracks::default()).unwrap().join(" ");
+        assert!(joined.contains("[0:a:0]volume=1,volume=0.5[aout]"), "{joined}");
+    }
+
+    #[test]
     fn tracks_the_file_lacks_are_dropped() {
         let both = Tracks { mic: Some(1), voice: Some(2) };
         assert_eq!(both.present_in(2), MIC);
@@ -192,7 +206,7 @@ mod tests {
     }
 
     fn edit(start: Option<u64>, end: Option<u64>) -> Edit {
-        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25 }
+        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0 }
     }
 
     #[test]
@@ -219,7 +233,7 @@ mod tests {
 
     #[test]
     fn volumes_are_clamped_and_bad_ranges_rejected() {
-        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0 };
+        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0 };
         let joined = export_args(Path::new("i"), Path::new("o"), &e, MIC).unwrap().join(" ");
         assert!(joined.contains("volume=2[a0]") && joined.contains("volume=0[a1]") && joined.contains("-to 1.500"));
         for (s, e) in [(Some(4000), Some(2000)), (Some(2000), Some(2000)), (None, Some(0))] {

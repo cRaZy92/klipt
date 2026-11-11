@@ -46,11 +46,13 @@ const MIGRATIONS: &[&str] = &["
 ", "
     ALTER TABLE clips ADD COLUMN has_voice INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE clips ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;
+", "
+    ALTER TABLE clips ADD COLUMN master_volume REAL NOT NULL DEFAULT 1;
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
-                       visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume";
+                       visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -78,6 +80,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         thumbnail_ms: row.get(21)?,
         has_voice: row.get(22)?,
         voice_volume: row.get(23)?,
+        master_volume: row.get(24)?,
     })
 }
 
@@ -173,9 +176,9 @@ impl Library {
         validate_edit(trim, volumes)?;
         self.update(
             id,
-            "UPDATE clips SET trim_start_ms = ?2, trim_end_ms = ?3, game_volume = ?4, mic_volume = ?5, voice_volume = ?6
-             WHERE id = ?1",
-            params![id, trim.start_ms, trim.end_ms, volumes.game, volumes.mic, volumes.voice],
+            "UPDATE clips SET trim_start_ms = ?2, trim_end_ms = ?3, game_volume = ?4, mic_volume = ?5, voice_volume = ?6,
+             master_volume = ?7 WHERE id = ?1",
+            params![id, trim.start_ms, trim.end_ms, volumes.game, volumes.mic, volumes.voice, volumes.master],
         )
     }
 
@@ -314,7 +317,7 @@ pub fn validate_edit(trim: Trim, volumes: Volumes) -> Result<()> {
             return Err(AppError::InvalidInput(format!("trim start {start} ms is not before end {end} ms")));
         }
     }
-    for volume in [volumes.game, volumes.mic, volumes.voice] {
+    for volume in [volumes.game, volumes.mic, volumes.voice, volumes.master] {
         if !(0.0..=MAX_VOLUME).contains(&volume) {
             return Err(AppError::InvalidInput(format!("volume {volume} is outside 0..={MAX_VOLUME}")));
         }
@@ -461,7 +464,7 @@ mod tests {
         let f = Fixture::new();
         let c = f.add("a.mp4", 1, None);
         f.lib
-            .update_edit(&c.id, Trim { start_ms: Some(1_500), end_ms: Some(20_000) }, Volumes { game: 0.8, mic: 1.5, voice: 0.4 })
+            .update_edit(&c.id, Trim { start_ms: Some(1_500), end_ms: Some(20_000) }, Volumes { game: 0.8, mic: 1.5, voice: 0.4, master: 0.6 })
             .unwrap();
         f.lib.set_game(&c.id, Some("Active Matter"), Some(2_887_580)).unwrap();
         f.lib.rename(&c.id, "Nice shot").unwrap();

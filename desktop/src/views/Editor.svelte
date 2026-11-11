@@ -35,6 +35,7 @@
   let gameVolume = $state(100);
   let micVolume = $state(100);
   let voiceVolume = $state(100);
+  let masterVolume = $state(100);
   /** The thumbnail's frame; null = automatic. */
   let thumb = $state<number | null>(null);
   /** The edit as last loaded or saved; `dirty` compares against it. */
@@ -66,6 +67,7 @@
       gameVolume: gameVolume / 100,
       micVolume: micVolume / 100,
       voiceVolume: voiceVolume / 100,
+      masterVolume: masterVolume / 100,
     };
   });
 
@@ -76,6 +78,7 @@
         edit.gameVolume !== stored.gameVolume ||
         edit.micVolume !== stored.micVolume ||
         edit.voiceVolume !== stored.voiceVolume ||
+        edit.masterVolume !== stored.masterVolume ||
         thumb !== storedThumb),
   );
 
@@ -97,6 +100,7 @@
       gameVolume = percent(d.clip.gameVolume);
       micVolume = percent(d.clip.micVolume);
       voiceVolume = percent(d.clip.voiceVolume ?? 1);
+      masterVolume = percent(d.clip.masterVolume ?? 1);
       thumb = d.clip.thumbnailMs;
       position = trim.start;
       data = d;
@@ -143,15 +147,16 @@
     };
   });
 
-  // Playback gain: the sliders' 0–100% is HTMLMediaElement's 0.0–1.0.
+  // Playback gain: the sliders' 0–100% is HTMLMediaElement's 0.0–1.0; Master scales every track.
+  const gain = (track: number) => (track / 100) * (masterVolume / 100);
   $effect(() => {
-    if (gameAudio) gameAudio.volume = gameVolume / 100;
+    if (gameAudio) gameAudio.volume = gain(gameVolume);
   });
   $effect(() => {
-    if (micAudio) micAudio.volume = micVolume / 100;
+    if (micAudio) micAudio.volume = gain(micVolume);
   });
   $effect(() => {
-    if (voiceAudio) voiceAudio.volume = voiceVolume / 100;
+    if (voiceAudio) voiceAudio.volume = gain(voiceVolume);
   });
 
   function audios(): HTMLAudioElement[] {
@@ -293,6 +298,7 @@
           gameVolume: next.gameVolume,
           micVolume: next.micVolume,
           voiceVolume: next.voiceVolume,
+          masterVolume: next.masterVolume,
           uploadId: null,
           uploadOffset: null,
         };
@@ -443,6 +449,20 @@
 
     <div class="panel">
       <div class="mixer">
+        <label class="volume master" title="The whole clip: every track together">
+          <span class="vol-label"><Icon name="volume" size={17} /> Master</span>
+          <input
+            class="range"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            bind:value={masterVolume}
+            style:--fill="{masterVolume}%"
+            aria-label="Master volume"
+          />
+          <output>{masterVolume}%</output>
+        </label>
         <label class="volume">
           <span class="vol-label"><Icon name="volume" size={17} /> Game</span>
           <input
@@ -701,6 +721,12 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem 2.25rem;
+  }
+
+  /* Master sits apart from the per-track sliders. */
+  .volume.master {
+    padding-right: 2.25rem;
+    border-right: 1px solid var(--border);
   }
 
   .volume {

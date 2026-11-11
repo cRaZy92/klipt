@@ -58,6 +58,8 @@ pub struct Clip {
     /// Voice chat has its own audio track, after the game and mic tracks.
     pub has_voice: bool,
     pub voice_volume: f32,
+    /// The whole clip's volume, applied after the tracks are mixed.
+    pub master_volume: f32,
 }
 
 impl Clip {
@@ -121,10 +123,12 @@ pub struct Volumes {
     pub game: f32,
     pub mic: f32,
     pub voice: f32,
+    /// The whole mix.
+    pub master: f32,
 }
 
 impl Default for Volumes {
     fn default() -> Self {
-        Volumes { game: 1.0, mic: 1.0, voice: 1.0 }
+        Volumes { game: 1.0, mic: 1.0, voice: 1.0, master: 1.0 }
     }
 }

@@ -33,6 +33,8 @@ export interface ClipView {
   /** Voice chat (Discord…) has its own track. */
   hasVoice: boolean;
   voiceVolume: number;
+  /** The whole clip's volume, applied after mixing. */
+  masterVolume: number;
   /** The thumbnail's frame (ms into the video); null = automatic. */
   thumbnailMs: number | null;
   fileMissing: boolean;
@@ -180,6 +182,8 @@ export interface EditInput {
   micVolume: number;
   /** 0.0–1.0; voice chat (Linux clips that have it). */
   voiceVolume: number;
+  /** 0.0–1.0; the whole mix. */
+  masterVolume: number;
 }
 
 export interface ExportProgress {

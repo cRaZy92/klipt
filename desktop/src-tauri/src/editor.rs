@@ -94,6 +94,7 @@ pub fn current_edit(clip: &Clip) -> Edit {
         game_volume: clip.game_volume,
         mic_volume: clip.mic_volume,
         voice_volume: clip.voice_volume,
+        master_volume: clip.master_volume,
     }
 }
 
@@ -109,13 +110,13 @@ pub fn save_edit(library: &Library, uploads: &Uploads, cache_dir: &Path, id: &st
     // Drop the old cut's upload export first: if that fails, the edit isn't saved either, so a
     // retry still sees a changed edit and cleans up (instead of resuming the old cut's upload).
     let (trim, volumes) =
-        (Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms }, Volumes { game: edit.game_volume, mic: edit.mic_volume, voice: edit.voice_volume });
+        (Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms }, Volumes { game: edit.game_volume, mic: edit.mic_volume, voice: edit.voice_volume, master: edit.master_volume });
     crate::library::validate_edit(trim, volumes)?;
     forget_upload_export(library, cache_dir, id)?;
     library.update_edit(
         id,
         Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms },
-        Volumes { game: edit.game_volume, mic: edit.mic_volume, voice: edit.voice_volume },
+        Volumes { game: edit.game_volume, mic: edit.mic_volume, voice: edit.voice_volume, master: edit.master_volume },
     )?;
     Ok(true)
 }
@@ -301,7 +302,7 @@ mod tests {
     }
 
     fn cut(start: u64, end: u64) -> Edit {
-        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0 }
+        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0 }
     }
 
     #[test]
@@ -329,7 +330,7 @@ mod tests {
     #[test]
     fn saving_a_full_clip_edit_without_any_cache_works() {
         let f = Fixture::new();
-        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7 };
+        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9 };
         assert!(save_edit(&f.lib, &Uploads::default(), &f.cache(), &f.clip.id, edit).unwrap());
         assert_eq!(current_edit(&f.lib.get(&f.clip.id).unwrap()), edit);
     }

@@ -711,6 +711,7 @@ mod tests {
                 thumbnail_ms: None,
                 has_voice: false,
                 voice_volume: 1.0,
+                master_volume: 1.0,
             },
             file_missing: false,
             thumb_path: None,

@@ -657,6 +657,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
             game_volume: clip.game_volume,
             mic_volume: clip.mic_volume,
             voice_volume: clip.voice_volume,
+            master_volume: clip.master_volume,
         };
         tauri::async_runtime::spawn_blocking(move || {
             export::export(&tools, &input, &cache_dir, &clip_id, &edit, tracks, |p| {
@@ -794,8 +795,16 @@ fn edit_from(
     game_volume: f32,
     mic_volume: f32,
     voice_volume: Option<f32>,
+    master_volume: Option<f32>,
 ) -> Edit {
-    Edit { trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume: voice_volume.unwrap_or(1.0) }
+    Edit {
+        trim_start_ms,
+        trim_end_ms,
+        game_volume,
+        mic_volume,
+        voice_volume: voice_volume.unwrap_or(1.0),
+        master_volume: master_volume.unwrap_or(1.0),
+    }
 }
 
 /// Saves the trim and volumes (the clip file is untouched). No trim is `null` start/end. Refused
@@ -812,10 +821,11 @@ pub fn save_edit(
     game_volume: f32,
     mic_volume: f32,
     voice_volume: Option<f32>,
+    master_volume: Option<f32>,
     thumbnail_ms: Option<u64>,
 ) -> Result<()> {
     let cache_dir = cache_dir(&app)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume);
     let clip = {
         let library = lock(&state.library);
         editor::save_edit(&library, &uploads, &cache_dir, &id, edit)?;
@@ -860,6 +870,7 @@ pub async fn export_copy(
     game_volume: f32,
     mic_volume: f32,
     voice_volume: Option<f32>,
+    master_volume: Option<f32>,
 ) -> Result<()> {
     let (clip, tools) = {
         let state = app.state::<AppState>();
@@ -875,7 +886,7 @@ pub async fn export_copy(
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
     let guard = app.state::<Uploads>().try_begin(&id).map_err(|_| AppError::ClipBusy)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume);
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, export::Tracks::of(&clip), |p| {
@@ -995,6 +1006,7 @@ mod tests {
             thumbnail_ms: None,
             has_voice: false,
             voice_volume: 1.0,
+            master_volume: 1.0,
         }
     }
 

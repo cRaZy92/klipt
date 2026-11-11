@@ -140,4 +140,14 @@
       toast('Failed: ' + (e.message || 'error'));
     }
   });
+
+  // Game chips: drop the art when Steam has none, so the chip shows just its name.
+  // Errors don't bubble, hence the capture listener; the sweep catches any that failed before this ran.
+  function dropBrokenArt(img) {
+    if (img.matches && img.matches('img.chip-art')) img.remove();
+  }
+  document.addEventListener('error', function (ev) { dropBrokenArt(ev.target); }, true);
+  document.querySelectorAll('img.chip-art').forEach(function (img) {
+    if (img.complete && img.naturalWidth === 0) dropBrokenArt(img);
+  });
 })();

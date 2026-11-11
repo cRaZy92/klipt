@@ -17,6 +17,7 @@ import { SharePage } from './pages/share.js';
 import { MePage } from './pages/me.js';
 import { NotFoundPage } from './pages/notFound.js';
 import { UserPage } from './pages/user.js';
+import { createSteamArt, parseAppId } from './steamArt.js';
 
 /**
  * Only same-site absolute paths: one leading slash, no `//`, no backslashes, and printable ASCII
@@ -45,7 +46,17 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     maxAge: '5m',
   });
 
-  const html = (reply: FastifyReply, body: string, code = 200) =>
+  // Game chip art: a redirect to the game's Steam header image. Logged-in only, like the chips,
+  // so strangers can't make the server query Steam.
+  const steamArt = createSteamArt();
+  app.get('/steam-art/:appId', async (req, reply) => {
+    const appId = parseAppId((req.params as { appId: string }).appId);
+    const url = req.user && appId !== null ? await steamArt(appId) : null;
+    if (!url) return reply.code(404).header('cache-control', 'private, max-age=600').send();
+    return reply.header('cache-control', 'private, max-age=86400').redirect(url, 302);
+  });
+
+  const html =(reply: FastifyReply, body: string, code = 200) =>
     reply.code(code).header('content-type', 'text/html; charset=utf-8').header('cache-control', 'private, no-cache').send(body);
 
   const notFound = (req: FastifyRequest, reply: FastifyReply) => html(reply, NotFoundPage({ user: req.user }) as string, 404);

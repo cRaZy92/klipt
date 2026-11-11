@@ -104,7 +104,7 @@ describe('web pages', () => {
     const res = await get('/?game=Valorant', a.cookie);
     expect(res.body).toContain('Val One');
     expect(res.body).not.toContain('Cs One');
-    expect(res.body).toContain('steam/apps/730/header.jpg');
+    expect(res.body).toContain('src="/steam-art/730"');
   });
 
   it('escapes user strings', async () => {

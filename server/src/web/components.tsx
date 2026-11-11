@@ -45,8 +45,9 @@ export function formatGB(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
+/** Our redirect to the game's Steam header art (the real URL needs a lookup: see steamArt.ts). */
 export function steamHeader(appId: number): string {
-  return `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/header.jpg`;
+  return `/steam-art/${appId}`;
 }
 
 export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {

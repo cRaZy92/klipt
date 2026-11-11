@@ -19,7 +19,9 @@ export interface TestApp {
   close(): Promise<void>;
 }
 
-export async function makeTestApp(opts: { maxUploadMb?: number } = {}): Promise<TestApp> {
+export async function makeTestApp(
+  opts: { maxUploadMb?: number; logStream?: { write(line: string): void } } = {},
+): Promise<TestApp> {
   const dataDir = await mkdtemp(join(tmpdir(), 'klipt-test-'));
   const env: Record<string, string> = {
     BASE_URL: 'http://localhost',
@@ -29,7 +31,7 @@ export async function makeTestApp(opts: { maxUploadMb?: number } = {}): Promise<
   if (opts.maxUploadMb !== undefined) env.MAX_UPLOAD_MB = String(opts.maxUploadMb);
   const config = loadConfig(env);
   const db = await createTestDb();
-  const app = await buildApp({ config, db });
+  const app = await buildApp({ config, db, logger: !!opts.logStream, logStream: opts.logStream });
   return {
     app,
     db,

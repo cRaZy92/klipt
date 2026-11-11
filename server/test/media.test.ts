@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -74,6 +74,24 @@ describe('media', () => {
     const err = await makeThumbnail(remuxed, join(dir, 't.jpg'), info.durationMs).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(MediaError);
     expect(err).toMatchObject({ code: 'corrupt_video' });
+  });
+
+  it('treats a full disk as a server problem, not a corrupt video', async () => {
+    const src = await makeFixtureVideo(dir);
+    const fake = join(dir, 'ffmpeg');
+    await writeFile(fake, '#!/bin/sh\necho "av_interleaved_write_frame(): No space left on device" >&2\nexit 1\n');
+    await chmod(fake, 0o755);
+    const saved = process.env.FFMPEG_PATH;
+    try {
+      process.env.FFMPEG_PATH = fake;
+      const err = await remuxFaststart(src, join(dir, 'o.mp4')).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(MediaError);
+      expect(String((err as Error).message)).toContain('No space left on device');
+    } finally {
+      if (saved === undefined) delete process.env.FFMPEG_PATH;
+      else process.env.FFMPEG_PATH = saved;
+    }
   });
 
   it('reports a missing binary as a non-media error', async () => {

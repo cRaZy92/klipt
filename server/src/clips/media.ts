@@ -26,9 +26,17 @@ const ffprobeBin = () => process.env.FFPROBE_PATH || 'ffprobe';
 const RUN_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
- * Runs ffmpeg/ffprobe. A non-zero exit means the tool rejected the input, so it becomes a
- * MediaError('corrupt_video'). Anything else (spawn failure such as ENOENT/ENOSPC, a timeout
- * kill, an output overflow) is an operational problem and stays a plain Error.
+ * ffmpeg errors that are the server's fault, not the video's: a full or read-only disk, missing
+ * permissions, no memory. These must not get an upload deleted as a corrupt video.
+ */
+const SERVER_FAULT =
+  /No space left on device|Disk quota exceeded|Read-only file system|Permission denied|Cannot allocate memory|Too many open files/i;
+
+/**
+ * Runs ffmpeg/ffprobe. A non-zero exit usually means the tool rejected the input, so it becomes a
+ * MediaError('corrupt_video'), unless stderr shows a server-side fault (SERVER_FAULT). Anything
+ * else (spawn failure such as ENOENT/ENOSPC, a timeout kill, an output overflow) is an
+ * operational problem and stays a plain Error.
  */
 function run(bin: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -39,7 +47,8 @@ function run(bin: string, args: string[]): Promise<string> {
       (err, stdout, stderr) => {
         if (!err) return resolve(stdout);
         const detail = `${bin} failed: ${stderr || err.message}`;
-        if (typeof err.code === 'number' && err.code !== 0) reject(new MediaError('corrupt_video', detail));
+        const rejected = typeof err.code === 'number' && err.code !== 0 && !SERVER_FAULT.test(stderr);
+        if (rejected) reject(new MediaError('corrupt_video', detail));
         else reject(new Error(detail, { cause: err }));
       },
     );

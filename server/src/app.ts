@@ -1,4 +1,4 @@
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { HealthResponse } from '@klipt/shared';
 import type { Config } from './config.js';
 import type { Db } from './db/client.js';
@@ -15,11 +15,28 @@ export interface AppDeps {
   db: Db;
   /** Enables Fastify's pino logger (on in production, off in tests). */
   logger?: boolean;
+  /** Where log lines go when `logger` is on (stdout by default; tests capture them). */
+  logStream?: { write(line: string): void };
+}
+
+/**
+ * The URL as logged: the matched route pattern (`/c/:id`), never the real path. Paths carry
+ * link-only share ids and invite codes, and anyone with server logs could open those.
+ */
+export function loggedUrl(req: Pick<FastifyRequest, 'routeOptions'>): string {
+  return req.routeOptions?.url ?? '(no route)';
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: deps.logger ?? false,
+    logger: deps.logger
+      ? {
+          ...(deps.logStream ? { stream: deps.logStream } : {}),
+          serializers: {
+            req: (req: FastifyRequest) => ({ method: req.method, url: loggedUrl(req), remoteAddress: req.ip }),
+          },
+        }
+      : false,
     trustProxy: (_addr: string, hop: number) => hop < deps.config.trustProxyHops,
   });
   app.decorate('config', deps.config);

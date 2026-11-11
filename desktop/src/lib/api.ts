@@ -255,6 +255,12 @@ export interface FeedClip {
   processing?: "queued" | "running" | null;
 }
 
+/** What "Check for updates" found. On Linux `command` installs it (run in a terminal). */
+export type UpdateCheck =
+  | { status: "available"; version: string; command: string | null }
+  | { status: "upToDate" }
+  | { status: "unsupported"; reason: string };
+
 /** How an import from a folder went (`import-finished`). */
 export interface ImportSummary {
   imported: number;
@@ -411,6 +417,8 @@ export const api = {
   /** Opens the Klipt website in the browser; `path` like `/me`. */
   /** Downloads and installs the waiting update, then restarts Klipt. */
   installUpdate: () => invoke<void>("install_update"),
+  /** Checks for a newer Klipt now; a found one also shows the update banner. */
+  checkForUpdate: () => invoke<UpdateCheck>("check_for_update"),
   /** Which Klipt this is (Settings → About). */
   appInfo: () => invoke<{ version: string; commit: string | null; dev: boolean; platform: string }>("app_info"),
   /** The website's home page, or `url` (a link on the server, e.g. a clip's share link). */

@@ -132,6 +132,7 @@ pub fn run() {
             feed_watch::mark_feed_seen,
             server_clips::clip_viewers,
             update::install_update,
+            update::check_for_update,
             update::app_info,
             commands::upload_clip,
             commands::open_editor,

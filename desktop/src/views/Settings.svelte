@@ -14,6 +14,7 @@
     type Resolution,
     type Settings,
     type SettingsSaved,
+    type UpdateCheck,
   } from "../lib/api";
   import { bufferLabel, formatSize, hotkeyLabel } from "../lib/format";
   import { acceleratorFromKeydown } from "../lib/hotkey";
@@ -260,6 +261,44 @@
   ] as const;
   type Tab = (typeof TABS)[number]["id"];
   let tab = $state<Tab>("recording");
+
+  // Settings → About: "Check for updates".
+  let updateCheck = $state<{ checking: boolean; result: UpdateCheck | null; error: string | null; installing: boolean }>({
+    checking: false,
+    result: null,
+    error: null,
+    installing: false,
+  });
+
+  async function checkForUpdate() {
+    Object.assign(updateCheck, { checking: true, result: null, error: null });
+    try {
+      updateCheck.result = await api.checkForUpdate();
+    } catch (e) {
+      updateCheck.error = errorMessage(e);
+    } finally {
+      updateCheck.checking = false;
+    }
+  }
+
+  async function installFoundUpdate() {
+    updateCheck.installing = true;
+    try {
+      await api.installUpdate(); // restarts Klipt when it succeeds
+    } catch (e) {
+      updateCheck.installing = false;
+      toast(errorMessage(e), "error");
+    }
+  }
+
+  async function copyFoundCommand(command: string) {
+    try {
+      await api.copyText(command);
+      toast("Command copied. Paste it into a terminal.", "success");
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    }
+  }
 
   const FIELD_TAB: Record<string, Tab> = {
     micEnabled: "audio",
@@ -732,6 +771,35 @@
           {/if}
         </p>
       {/await}
+      <div class="update-check">
+        <button class="btn" onclick={checkForUpdate} disabled={updateCheck.checking || updateCheck.installing}>
+          {#if updateCheck.checking}<span class="spinner"></span> Checking…{:else}<Icon name="retry" size={16} /> Check for updates{/if}
+        </button>
+        {#if updateCheck.result?.status === "upToDate"}
+          <span class="update-result ok"><Icon name="check" size={16} /> You have the latest version.</span>
+        {:else if updateCheck.result?.status === "unsupported"}
+          <span class="update-result muted">{updateCheck.result.reason}</span>
+        {:else if updateCheck.error}
+          <span class="update-result error"><Icon name="alert" size={16} /> {updateCheck.error}</span>
+        {/if}
+      </div>
+      {#if updateCheck.result?.status === "available"}
+        {@const found = updateCheck.result}
+        <div class="update-found">
+          <span><Icon name="download" size={16} /> <strong>Klipt {found.version}</strong> is available.</span>
+          {#if found.command}
+            <span class="muted">To install it, run this in a terminal:</span>
+            <code title={found.command}>{found.command}</code>
+            <div><button class="btn btn-sm btn-primary" onclick={() => copyFoundCommand(found.command!)}>Copy command</button></div>
+          {:else}
+            <div>
+              <button class="btn btn-sm btn-primary" onclick={installFoundUpdate} disabled={updateCheck.installing}>
+                {#if updateCheck.installing}<span class="spinner"></span> Installing…{:else}Restart to install{/if}
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </section>
     {/if}
   </div>
@@ -879,6 +947,59 @@
 
   .about strong {
     color: var(--text);
+  }
+
+  .update-check {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.9rem;
+    margin-top: 0.75rem;
+  }
+
+  .update-result {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+  }
+
+  .update-result.ok {
+    color: var(--success);
+  }
+
+  .update-result.error {
+    color: var(--danger, #ff5c70);
+  }
+
+  .update-result.muted,
+  .update-found .muted {
+    color: var(--text-muted);
+  }
+
+  .update-found {
+    display: grid;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+  }
+
+  .update-found > span:first-child {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .update-found code {
+    overflow-x: auto;
+    padding: 0.4rem 0.55rem;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    font-size: 0.8rem;
+    white-space: nowrap;
   }
 
   h2 {

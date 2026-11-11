@@ -59,7 +59,7 @@ mod imp {
         });
     }
 
-    async fn check(app: &AppHandle) -> std::result::Result<Option<String>, tauri_plugin_updater::Error> {
+    pub(super) async fn check(app: &AppHandle) -> std::result::Result<Option<String>, tauri_plugin_updater::Error> {
         let Some(update) = app.updater()?.check().await? else { return Ok(None) };
         let version = update.version.clone();
         *app.state::<Pending>().0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(update);
@@ -180,6 +180,62 @@ pub fn app_info(app: AppHandle) -> AppInfo {
     }
 }
 
+/// What a manual check ("Check for updates" in Settings) found.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum CheckResult {
+    /// A newer version is out (the app's update banner shows it too).
+    #[serde(rename_all = "camelCase")]
+    Available { version: String, command: Option<String> },
+    UpToDate,
+    /// This build can't check; `reason` says why.
+    Unsupported { reason: String },
+}
+
+/// Checks for an update now. A found update is also announced like the periodic check does, so
+/// the banner comes back even after "Later".
+#[tauri::command]
+pub async fn check_for_update(app: AppHandle) -> Result<CheckResult> {
+    #[cfg(windows)]
+    {
+        use tauri::Emitter;
+        return match imp::check(&app).await {
+            Ok(Some(version)) => {
+                let _ = app.emit("update-available", Available { version: version.clone(), command: None });
+                Ok(CheckResult::Available { version, command: None })
+            }
+            Ok(None) => Ok(CheckResult::UpToDate),
+            Err(e) => Err(AppError::Network(format!("couldn't check for updates: {e}"))),
+        };
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use tauri::Emitter;
+        let Some(commit) = option_env!("KLIPT_COMMIT").filter(|c| !c.is_empty()) else {
+            let reason = if cfg!(debug_assertions) {
+                "Development builds don't check for updates."
+            } else {
+                "This build wasn't installed from the Klipt package, so it can't tell which version it is."
+            };
+            return Ok(CheckResult::Unsupported { reason: reason.into() });
+        };
+        return match newer_release(REPO_API, commit).await {
+            Ok(Some(version)) => {
+                let command = Some(LINUX_UPDATE_COMMAND.to_string());
+                let _ = app.emit("update-available", Available { version: version.clone(), command: command.clone() });
+                Ok(CheckResult::Available { version, command })
+            }
+            Ok(None) => Ok(CheckResult::UpToDate),
+            Err(e) => Err(AppError::Network(format!("couldn't check for updates: {e}"))),
+        };
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = app;
+        Ok(CheckResult::Unsupported { reason: "Updates aren't available on this system.".into() })
+    }
+}
+
 /// Starts the periodic update check (no-op on dev builds and other platforms).
 pub fn start(app: &AppHandle) {
     #[cfg(any(windows, target_os = "linux"))]
@@ -202,6 +258,7 @@ pub async fn install_update(app: AppHandle) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::CheckResult;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -234,6 +291,20 @@ mod tests {
     async fn quiet_when_the_build_has_the_release() {
         let server = github(0).await;
         assert_eq!(newer_release(&server.uri(), "abc123").await, Ok(None));
+    }
+
+    #[test]
+    fn check_results_serialize_for_the_ui() {
+        let available = CheckResult::Available { version: "0.2.0".into(), command: Some("sh x".into()) };
+        assert_eq!(
+            serde_json::to_value(available).unwrap(),
+            serde_json::json!({ "status": "available", "version": "0.2.0", "command": "sh x" })
+        );
+        assert_eq!(serde_json::to_value(CheckResult::UpToDate).unwrap(), serde_json::json!({ "status": "upToDate" }));
+        assert_eq!(
+            serde_json::to_value(CheckResult::Unsupported { reason: "r".into() }).unwrap(),
+            serde_json::json!({ "status": "unsupported", "reason": "r" })
+        );
     }
 
     #[tokio::test]

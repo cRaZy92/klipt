@@ -15,7 +15,19 @@ cd "$HOME"
 rm -rf /tmp/klipt-update
 git clone --depth 1 https://github.com/cRaZy92/klipt /tmp/klipt-update
 cd /tmp/klipt-update/packaging/aur
-makepkg -si --noconfirm
+# makepkg's own -s/-i run `sudo -k pacman`, which forgets the password and asks again. So this
+# installs the build dependencies and the finished package itself, with the password from above.
+deps=$(makepkg --printsrcinfo | sed -n 's/^[[:space:]]*\(make\)\{0,1\}depends = //p')
+# Only what's missing: pacman -T knows that e.g. rustup already provides rust and cargo.
+# shellcheck disable=SC2086 # one package name per word
+missing=$(pacman -T $deps || true)
+if [ -n "$missing" ]; then
+  # shellcheck disable=SC2086
+  sudo pacman -S --needed --noconfirm $missing
+fi
+makepkg --noconfirm
+# shellcheck disable=SC2046 # the package file paths
+sudo pacman -U --noconfirm $(makepkg --packagelist)
 
 echo
 echo "Klipt is updated. Quit Klipt from the tray and start it again to use the new version."

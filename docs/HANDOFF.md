@@ -2,7 +2,24 @@
 
 Read this first if you're a fresh Claude Code session picking up Klipt. Then read the files it links to.
 
-## Latest: Linux session (2026-11-10, CachyOS)
+## Latest: Linux session (2026-11-11) — releases, feed, review done
+
+- **Releases are automatic.** Every push to `main` that touches `desktop/**` makes CI publish a signed Windows
+  release `v0.1.<run number>` (installer + `latest.json`); installed copies show "Restart to install".
+  No tags. Signing key: owner's `~/.tauri/klipt.key`, GitHub secret `TAURI_SIGNING_PRIVATE_KEY`
+  (paste via `wl-copy < file`, not from terminal output — zsh's trailing `%` broke it once). See `docs/RELEASING.md`.
+- First release: **v0.1.8**. Next step: install it on Windows, check recording (libobs path) + game
+  detection (C9), then push any app change to `main` and confirm the in-app update works.
+- Linux: `packaging/aur/PKGBUILD` (`makepkg -si`), no CI build, no in-app updates.
+- Done this session: in-app Feed tab, final whole-branch review (Ready; 9 minors parked in
+  `.superpowers/sdd/2026-11-09-klipt-desktop/final-review.md`, local only), the four fix-before-merge
+  items, Task 13 (installer CI, PKGBUILD), Task 14 (updater), gsr encoder-failure retry (CUDA OOM no
+  longer pops the screen-share portal), settings scroll/tab fixes, website: game chips, responsive clip
+  page, Slovak dates.
+- Learned: KDE only delivers GlobalShortcuts presses for shortcuts bound in the current session — bind
+  on every launch (a "reuse" attempt broke the hotkey and was reverted).
+
+## Earlier: Linux session (2026-11-10, CachyOS)
 
 Owner was low on usage, so the goal switched to a working Linux prototype. Full per-task record (commits, rulings, deferred minors): `docs/superpowers/ledgers/desktop-sdd-progress-2026-11-10-linux.md`.
 

@@ -8,7 +8,7 @@ import { getAdminStats, isInviteActive, listActiveInvites, listAdminUsers } from
 import { toClip } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
 import { users } from '../db/schema.js';
-import { getClip, getUserStorage, listClips, listGames, InvalidCursorError, type Scope } from '../clips/repo.js';
+import { getClip, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
 import { InvitePage } from './pages/invite.js';
@@ -125,8 +125,9 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const found = /^[A-Za-z0-9_-]{12}$/.test(id) ? await getClip(db, id) : null;
     if (!found) return html(reply, NotFoundPage({ user: req.user, message: "This clip doesn't exist or was deleted." }) as string, 404);
     const canDelete = !!req.user && (req.user.id === found.clip.userId || req.user.isAdmin);
-    const clip = toClip(found.clip, found.owner, config.baseUrl);
-    return html(reply, SharePage({ user: req.user, clip, canDelete }) as string);
+    const clip = toClip(found.clip, found.owner, config.baseUrl, found.views);
+    const viewers = req.user?.id === found.clip.userId ? (await listViewers(db, clip.id)).map((v) => v.username) : undefined;
+    return html(reply, SharePage({ user: req.user, clip, canDelete, viewers }) as string);
   });
 
   app.get('/me', async (req, reply) => {

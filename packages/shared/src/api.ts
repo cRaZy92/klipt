@@ -86,6 +86,8 @@ export interface Clip {
   width: number;
   height: number;
   sizeBytes: number;
+  /** Friends who watched it (each once, never the owner) plus logged-out plays. */
+  views: number;
   createdAt: string;
   owner: { username: string };
   shareUrl: string;
@@ -109,4 +111,10 @@ export interface UpdateClipRequest {
   visibility?: Visibility;
   gameName?: string | null;
   steamAppId?: number | null;
+}
+
+/** `GET /api/clips/:id/viewers` (owner only): friends who watched the clip, first viewer first. */
+export interface ClipViewer {
+  username: string;
+  viewedAt: string;
 }

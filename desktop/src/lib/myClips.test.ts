@@ -15,7 +15,7 @@ function upload(id: string, at: number, extra: Partial<MyUpload> = {}): MyUpload
   return {
     id, title: id, gameName: "Deadlock", steamAppId: 1, durationMs: 1000, width: 1920, height: 1080,
     createdAt: new Date(at).toISOString(), owner: { username: "adam" }, shareUrl: `https://k/c/${id}`,
-    videoUrl: `https://k/media/${id}.mp4`, thumbnailUrl: `https://k/media/${id}.jpg`, visibility: "feed", ...extra,
+    videoUrl: `https://k/media/${id}.mp4`, thumbnailUrl: `https://k/media/${id}.jpg`, visibility: "feed", views: 0, ...extra,
   };
 }
 

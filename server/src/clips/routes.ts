@@ -10,12 +10,12 @@ import { requireUser } from '../auth/plugin.js';
 import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
 import { assertPlayable, makeThumbnail, MediaError, probeVideo, remuxFaststart } from './media.js';
 import { newClipId } from './ids.js';
-import { getClip, getUserStorage, InvalidCursorError, listClips, listGames } from './repo.js';
+import { getClip, getUserStorage, InvalidCursorError, listClips, listGames, listViewers, recordView } from './repo.js';
 
 type ClipRow = typeof clips.$inferSelect;
 
 /** Maps a clip row to its API shape. Shared by every clip endpoint. */
-export function toClip(row: ClipRow, owner: { username: string }, baseUrl: string): Clip {
+export function toClip(row: ClipRow, owner: { username: string }, baseUrl: string, views = 0): Clip {
   return {
     id: row.id,
     title: row.title,
@@ -26,6 +26,7 @@ export function toClip(row: ClipRow, owner: { username: string }, baseUrl: strin
     width: row.width,
     height: row.height,
     sizeBytes: row.sizeBytes,
+    views,
     createdAt: row.createdAt.toISOString(),
     owner: { username: owner.username },
     shareUrl: `${baseUrl}/c/${row.id}`,
@@ -91,7 +92,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (!q.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
       const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q });
-      return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl)), nextCursor };
+      return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl, i.views)), nextCursor };
     } catch (err) {
       if (err instanceof InvalidCursorError) return reply.code(400).send({ error: 'invalid_cursor' });
       throw err;
@@ -110,7 +111,23 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const p = idParam.safeParse(req.params);
     const found = p.success ? await getClip(db, p.data.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
-    return toClip(found.clip, found.owner, config.baseUrl);
+    return toClip(found.clip, found.owner, config.baseUrl, found.views);
+  });
+
+  // A play of the clip, from the website or the app. Open to logged-out visitors (share links),
+  // so it's rate limited per address.
+  app.post('/api/clips/:id/view', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    if (!p.success || !(await recordView(db, p.data.id, req.user?.id ?? null))) return reply.code(404).send({ error: 'not_found' });
+    return reply.code(204).send();
+  });
+
+  app.get('/api/clips/:id/viewers', { preHandler: requireUser }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const found = p.success ? await getClip(db, p.data.id) : null;
+    if (!found) return reply.code(404).send({ error: 'not_found' });
+    if (found.clip.userId !== req.user!.id) return reply.code(403).send({ error: 'forbidden' });
+    return listViewers(db, found.clip.id);
   });
 
   app.patch('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
@@ -125,7 +142,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (Object.keys(patch).length > 0) {
       [row] = (await db.update(clips).set(patch).where(eq(clips.id, row.id)).returning()) as [ClipRow];
     }
-    return toClip(row, found.owner, config.baseUrl);
+    return toClip(row, found.owner, config.baseUrl, found.views);
   });
 
   app.delete('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
@@ -173,7 +190,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const sendFinalized = async (clipId: string) => {
       const found = await getClip(db, clipId);
       if (!found) return reply.code(404).send({ error: 'not_found' });
-      return reply.code(200).send(toClip(found.clip, found.owner, config.baseUrl));
+      return reply.code(200).send(toClip(found.clip, found.owner, config.baseUrl, found.views));
     };
 
     const owned = await ownedUpload();

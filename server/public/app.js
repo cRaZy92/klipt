@@ -153,6 +153,13 @@
     }
   });
 
+  // Share page: the first play counts as a view (the server counts each friend once).
+  document.querySelectorAll('video[data-view-url]').forEach(function (video) {
+    video.addEventListener('play', function () {
+      fetch(video.dataset.viewUrl, { method: 'POST', credentials: 'same-origin' }).catch(function () {});
+    }, { once: true });
+  });
+
   // Game chips: drop the art when Steam has none, so the chip shows just its name.
   // Errors don't bubble, hence the capture listener; the sweep catches any that failed before this ran.
   function dropBrokenArt(img) {

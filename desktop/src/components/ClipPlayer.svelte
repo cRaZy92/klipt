@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, errorMessage, type FeedClip } from "../lib/api";
   import { navKey } from "../lib/clipNav";
-  import { hueOf, relativeDate } from "../lib/format";
+  import { hueOf, relativeDate, viewsLabel } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
@@ -16,6 +16,7 @@
     prev = null,
     next = null,
     onnavigate,
+    own = false,
   }: {
     clip: FeedClip;
     now: number;
@@ -23,7 +24,30 @@
     prev?: FeedClip | null;
     next?: FeedClip | null;
     onnavigate?: (clip: FeedClip) => void;
+    /** Your own upload: show which friends watched it. */
+    own?: boolean;
   } = $props();
+
+  // The first play of each clip counts as a view (the server ignores your own clips).
+  let counted: string | null = null;
+  function countView() {
+    if (counted === clip.id) return;
+    counted = clip.id;
+    api.recordView(clip.id).catch(() => {});
+  }
+
+  let viewers = $state<string[] | null>(null);
+  $effect(() => {
+    const id = clip.id;
+    viewers = null;
+    if (!own) return;
+    api
+      .clipViewers(id)
+      .then((list) => {
+        if (clip.id === id) viewers = list.map((v) => v.username);
+      })
+      .catch(() => {});
+  });
 
   let video = $state<HTMLVideoElement>();
   let ended = $state(false);
@@ -85,7 +109,14 @@
           {/if}
           <span aria-hidden="true">·</span>
           <span>{relativeDate(new Date(clip.createdAt), now)}</span>
+          {#if clip.views > 0}
+            <span aria-hidden="true">·</span>
+            <span>{viewsLabel(clip.views)}</span>
+          {/if}
         </div>
+        {#if viewers}
+          <div class="seen-by">{viewers.length > 0 ? `Seen by ${viewers.join(", ")}` : "No friends have watched it yet."}</div>
+        {/if}
       </div>
       <div class="tools">
         {#if onnavigate}
@@ -116,7 +147,10 @@
         controls
         autoplay
         onended={() => (ended = true)}
-        onplay={() => (ended = false)}
+        onplay={() => {
+          ended = false;
+          countView();
+        }}
       ></video>
       {#if ended && next}
         <div class="up-next" role="group" aria-label="Up next">
@@ -207,6 +241,15 @@
     margin-top: 0.1rem;
     color: var(--text-muted);
     font-size: 0.84rem;
+  }
+
+  .seen-by {
+    margin-top: 0.15rem;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .who {

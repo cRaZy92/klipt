@@ -68,6 +68,25 @@ describe('share page', () => {
     expect(res.body).toMatch(/<a[^>]*class="btn"[^>]*href="http:\/\/localhost\/media\/shareclip006\.mp4\?download=1"[^>]*>Download<\/a>/);
   });
 
+  it('shows the view count to everyone and who watched it to the owner only', async () => {
+    const owner = await createUser(t.db, { username: 'hana' });
+    const friend = await createUser(t.db, { username: 'ivan' });
+    await addClip(owner.id, 'shareclip007');
+    const page = async (userId?: string) =>
+      (await t.app.inject({ url: '/c/shareclip007', headers: userId ? { cookie: (await sessionFor(t.db, userId)).cookie } : {} })).body;
+    expect(await page(owner.id)).toContain('No friends have watched it yet.');
+    await t.app.inject({ method: 'POST', url: '/api/clips/shareclip007/view', headers: { cookie: (await sessionFor(t.db, friend.id)).cookie } });
+    await t.app.inject({ method: 'POST', url: '/api/clips/shareclip007/view' });
+    const mine = await page(owner.id);
+    expect(mine).toMatch(/data-role="views"> · 2 views</);
+    expect(mine).toMatch(/data-role="seen-by">Seen by ivan</);
+    const theirs = await page(friend.id);
+    expect(theirs).toContain('2 views');
+    expect(theirs).not.toContain('data-role="seen-by"');
+    expect(await page()).not.toContain('data-role="seen-by"');
+    expect(theirs).toContain('data-view-url="/api/clips/shareclip007/view"');
+  });
+
   it('shows Delete to the owner and admins only', async () => {
     const owner = await createUser(t.db, { username: 'erin' });
     const admin = await createUser(t.db, { username: 'root', isAdmin: true });

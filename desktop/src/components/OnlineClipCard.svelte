@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { MyUpload } from "../lib/api";
   import { menu } from "../lib/a11y";
-  import { formatDuration, hueOf, relativeDate } from "../lib/format";
+  import { formatDuration, hueOf, relativeDate, viewsLabel } from "../lib/format";
   import Icon from "./Icon.svelte";
   import "./clip-card.css";
 
@@ -78,6 +78,10 @@
       <span class="game" class:unknown={!upload.gameName}>{upload.gameName ?? "Unknown game"}</span>
       <span aria-hidden="true">·</span>
       <span class="when">{relativeDate(new Date(upload.createdAt), now)}</span>
+      {#if upload.views > 0}
+        <span aria-hidden="true">·</span>
+        <span class="when">{viewsLabel(upload.views)}</span>
+      {/if}
       {#if upload.visibility === "link"}
         <span aria-hidden="true">·</span>
         <span class="when" title="Only people with the link can see it">Link only</span>

@@ -213,6 +213,14 @@ export interface FeedClip {
   shareUrl: string;
   videoUrl: string;
   thumbnailUrl: string;
+  /** Friends who watched it (each once, never the owner) plus logged-out plays. */
+  views: number;
+}
+
+/** A friend who watched one of your uploads. */
+export interface ClipViewer {
+  username: string;
+  viewedAt: string;
 }
 
 /** One of your uploads on the server, for My clips. */
@@ -278,6 +286,10 @@ export const api = {
   feedClips: (game: string | null, cursor: string | null, search: string | null = null) =>
     invoke<FeedPage>("feed_clips", { game, cursor, search }),
   feedGames: () => invoke<FeedGame[]>("feed_games"),
+  /** Counts a play of a server clip (best effort). */
+  recordView: (id: string) => invoke<void>("record_view", { id }),
+  /** Friends who watched your upload, first viewer first. */
+  clipViewers: (id: string) => invoke<ClipViewer[]>("clip_viewers", { id }),
   copyText: (text: string) => invoke<void>("copy_text_to_clipboard", { text }),
   /** Opens the Klipt website in the browser; `path` like `/me`. */
   /** Downloads and installs the waiting update, then restarts Klipt. */

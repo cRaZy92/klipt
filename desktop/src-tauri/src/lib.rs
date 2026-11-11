@@ -117,6 +117,8 @@ pub fn run() {
             server_clips::update_upload,
             server_clips::delete_upload,
             server_clips::download_upload,
+            server_clips::record_view,
+            server_clips::clip_viewers,
             update::install_update,
             update::app_info,
             commands::upload_clip,

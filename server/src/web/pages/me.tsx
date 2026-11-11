@@ -1,13 +1,13 @@
 import type { GameCount, MyStorage, SessionInfo } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import type { ClipWithOwner } from '../../clips/repo.js';
-import { emptyText, formatDuration, formatSize, GameFilter, Pager, relativeDate, SearchBox } from '../components.js';
+import { emptyText, formatDuration, formatSize, GameFilter, Pager, relativeDate, SearchBox, viewsLabel } from '../components.js';
 import { Layout } from '../layout.js';
 
 import { esc as e } from '../escape.js';
 
 function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element {
-  const { clip } = props.item;
+  const { clip, views } = props.item;
   return (
     <li class="row" data-clip-id={clip.id}>
       <a class="row-thumb" href={`/c/${clip.id}`}>
@@ -19,6 +19,7 @@ function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element
         <div class="meta">
           {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
           <span>{relativeDate(clip.createdAt)}</span>
+          <span data-role="views">{viewsLabel(views)}</span>
           <span class="badge" data-role="visibility">{clip.visibility === 'feed' ? 'In feed' : 'Link only'}</span>
         </div>
         <div class="actions">

@@ -119,6 +119,26 @@ pub async fn delete_upload(app: AppHandle, id: String) -> Result<()> {
     Ok(())
 }
 
+/// Counts a play of server clip `id` (the server counts each friend once and never the owner).
+/// Best effort: a failure is only logged, the clip plays anyway.
+#[tauri::command]
+pub async fn record_view(app: AppHandle, id: String) -> Result<()> {
+    let id = checked_id(&id)?;
+    let (saved, client, _) = login(&app, LIST_TIMEOUT)?;
+    if let Err(e) = client.post_empty(&saved.token, &format!("/api/clips/{id}/view")).await {
+        eprintln!("klipt: can't count the view of {id}: {e}");
+    }
+    Ok(())
+}
+
+/// The friends who watched your upload `id`, first viewer first: the server's `ClipViewer[]`.
+#[tauri::command]
+pub async fn clip_viewers(app: AppHandle, id: String) -> Result<serde_json::Value> {
+    let id = checked_id(&id)?;
+    let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
+    client.get_json(&saved.token, &format!("/api/clips/{id}/viewers"), &[]).await.map_err(|e| failed(&data_dir, &saved, e))
+}
+
 /// Downloads your upload into the clips folder and adds it to the library, linked to the server
 /// copy (so it shows as uploaded and isn't listed twice).
 #[tauri::command]

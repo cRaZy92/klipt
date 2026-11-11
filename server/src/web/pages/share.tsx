@@ -2,7 +2,7 @@ import type { Clip } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import { esc as e } from '../escape.js';
 import { Layout } from '../layout.js';
-import { skDate } from '../components.js';
+import { skDate, viewsLabel } from '../components.js';
 
 function meta(attr: 'property' | 'name', key: string, value: string | number): string {
   return `<meta ${attr}="${key}" content="${e(String(value))}" />`;
@@ -28,7 +28,13 @@ export function shareHead(clip: Clip): string {
   ].join('\n');
 }
 
-export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete: boolean }): JSX.Element {
+export function SharePage(props: {
+  user: AuthUser | null;
+  clip: Clip;
+  canDelete: boolean;
+  /** Friends who watched it; only given to the owner. */
+  viewers?: string[];
+}): JSX.Element {
   const { clip } = props;
   return (
     <Layout title={clip.title} user={props.user} head={shareHead(clip)}>
@@ -38,6 +44,7 @@ export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete:
           {...{ playsinline: true, preload: "metadata" }}
           poster={e(clip.thumbnailUrl)}
           src={e(clip.videoUrl)}
+          data-view-url={`/api/clips/${e(clip.id)}/view`}
         ></video>
         <aside class="share-info">
         <h1>{e(clip.title)}</h1>
@@ -45,7 +52,15 @@ export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete:
           <a href={`/u/${encodeURIComponent(clip.owner.username)}`}>{e(clip.owner.username)}</a>
           {clip.gameName ? <span> · {e(clip.gameName)}</span> : ''}
           <span> · {skDate(clip.createdAt)}</span>
+          <span data-role="views"> · {viewsLabel(clip.views)}</span>
         </p>
+        {props.viewers ? (
+          <p class="meta seen-by" data-role="seen-by">
+            {props.viewers.length > 0 ? `Seen by ${props.viewers.map((v) => e(v)).join(', ')}` : 'No friends have watched it yet.'}
+          </p>
+        ) : (
+          ''
+        )}
         <div class="actions" data-clip-id={e(clip.id)}>
           <button type="button" class="btn" data-action="copy" data-url={e(clip.shareUrl)}>Copy link</button>
           <a class="btn" href={e(`${clip.videoUrl}?download=1`)} download="">Download</a>

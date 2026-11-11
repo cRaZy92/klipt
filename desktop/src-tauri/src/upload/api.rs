@@ -198,6 +198,16 @@ impl ApiClient {
         parse_json(resp).await
     }
 
+    /// An authenticated POST with no body, for actions that answer 204 (counting a view).
+    pub async fn post_empty(&self, token: &str, path: &str) -> Result<(), ApiError> {
+        let resp = self.http.post(self.url(path)).bearer_auth(token).send().await.map_err(network)?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(error_from(resp).await)
+        }
+    }
+
     /// An authenticated DELETE of an API path.
     pub async fn delete(&self, token: &str, path: &str) -> Result<(), ApiError> {
         let resp = self.http.delete(self.url(path)).bearer_auth(token).send().await.map_err(network)?;

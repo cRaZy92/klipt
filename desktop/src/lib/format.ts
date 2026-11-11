@@ -31,6 +31,11 @@ export function formatSize(bytes: number): string {
   return `${shown} ${unit}`;
 }
 
+/** "1 view", "12 views". */
+export function viewsLabel(views: number): string {
+  return views === 1 ? "1 view" : `${views} views`;
+}
+
 /** "9 Nov 2026" */
 export function formatDate(value: Date | number): string {
   const d = toDate(value);

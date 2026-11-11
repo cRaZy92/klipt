@@ -65,7 +65,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | Local storage cleanup      | **Done.** Settings → Clips folder shows its size; "Delete old clips from this PC" (off by default, 30 days) runs at startup, every 6 h and on save, keeping uploaded, favorite and uploading clips |
 | Leave voice chat out       | Game audio and voice/chat apps on separate tracks, so a clip can be shared without friends' voices |
 | Favorites and search       | **Done.** Star clips in My clips (Favorites filter); search by title and game in My clips, by title, game or friend in the Feed and on the website (`?q=`) |
-| Views and "seen by"        | A view count on each clip, and which friends watched it                                            |
+| Views and "seen by"        | **Done.** Each friend counts once (never the owner), plus every logged-out play; counts on the website and in the app; the owner sees "Seen by …" on the share page and in My clips |
 | Your storage on the server | **Done.** "N clips · 1.5 GB on the server" on the website's My clips and in Settings → Account; admins see it per user. No quotas |
 | Thumbnail handle           | A third handle in the editor's trim bar, dragged to any frame; that frame becomes the clip's thumbnail (Feed, website, Discord) |
 | Tag friends in a clip      | "With bob, alice": the clip shows on their profiles too, and the Feed gets an "I'm in it" filter  |

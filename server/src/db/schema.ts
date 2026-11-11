@@ -1,4 +1,4 @@
-import { bigint, boolean, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -59,10 +59,23 @@ export const clips = pgTable(
     width: integer('width').notNull(),
     height: integer('height').notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    /** Plays by visitors who weren't logged in (share links); logged-in viewers are in clip_views. */
+    anonViews: integer('anon_views').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
   },
   (t) => [
     index('clips_created_idx').on(t.createdAt.desc(), t.id.desc()),
     index('clips_game_idx').on(t.gameName),
   ],
+);
+
+/** Who has watched a clip: one row per logged-in viewer (never the owner), the first time they played it. */
+export const clipViews = pgTable(
+  'clip_views',
+  {
+    clipId: text('clip_id').notNull().references(() => clips.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    viewedAt: ts('viewed_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.clipId, t.userId] })],
 );

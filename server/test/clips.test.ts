@@ -164,6 +164,43 @@ describe('search', () => {
   });
 });
 
+describe('views', () => {
+  const view = (id: string, h?: Record<string, string>) =>
+    t.app.inject({ method: 'POST', url: `/api/clips/${id}/view`, headers: h ?? {} });
+  const viewsOf = async (id: string) => ((await t.app.inject({ url: `/api/clips/${id}`, headers: b.h })).json() as { views: number }).views;
+
+  it('counts each friend once, every logged-out play, and never the owner', async () => {
+    const id = await addClip(a.id, {}, false);
+    expect(await viewsOf(id)).toBe(0);
+    expect((await view(id, a.h)).statusCode).toBe(204); // the owner: not counted
+    expect((await view(id, b.h)).statusCode).toBe(204);
+    await view(id, b.h);
+    await view(id, admin.h);
+    await view(id);
+    await view(id);
+    expect(await viewsOf(id)).toBe(4);
+    const list = (await t.app.inject({ url: '/api/clips?scope=mine', headers: a.h })).json() as { items: { id: string; views: number }[] };
+    expect(list.items.find((c) => c.id === id)?.views).toBe(4);
+  });
+
+  it('404s for unknown clips', async () => {
+    expect((await view('doesnotexist', b.h)).statusCode).toBe(404);
+    expect((await view('bad!', b.h)).statusCode).toBe(404);
+  });
+
+  it('tells only the owner which friends watched, first viewer first', async () => {
+    const id = await addClip(a.id, {}, false);
+    await view(id, admin.h);
+    await view(id, b.h);
+    await view(id);
+    const res = await t.app.inject({ url: `/api/clips/${id}/viewers`, headers: a.h });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { username: string }[]).map((v) => v.username)).toEqual(['root', 'bob']);
+    expect((await t.app.inject({ url: `/api/clips/${id}/viewers`, headers: b.h })).statusCode).toBe(403);
+    expect((await t.app.inject({ url: `/api/clips/${id}/viewers` })).statusCode).toBe(401);
+  });
+});
+
 describe('my storage', () => {
   it('counts only your own clips, private ones included', async () => {
     await addClip(a.id, { sizeBytes: 3_000_000_000 }, false);

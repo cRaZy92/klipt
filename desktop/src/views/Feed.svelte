@@ -2,7 +2,7 @@
   import { onMount, untrack } from "svelte";
   import { api, errorCode, errorMessage, type FeedClip, type GameCount } from "../lib/api";
   import { neighbors } from "../lib/clipNav";
-  import { formatDuration, groupByDay, hueOf, relativeDate } from "../lib/format";
+  import { formatDuration, groupByDay, hueOf, relativeDate, viewsLabel } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "../components/Avatar.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
@@ -190,6 +190,10 @@
                       <span class="who">{clip.owner.username}</span>
                       <span aria-hidden="true">·</span>
                       <span>{relativeDate(new Date(clip.createdAt), now)}</span>
+                      {#if clip.views > 0}
+                        <span aria-hidden="true">·</span>
+                        <span>{viewsLabel(clip.views)}</span>
+                      {/if}
                     </div>
                   </div>
                 </div>

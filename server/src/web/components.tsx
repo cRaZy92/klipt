@@ -58,8 +58,13 @@ export function steamHeader(appId: number): string {
   return `/steam-art/${appId}`;
 }
 
+/** "1 view", "12 views". */
+export function viewsLabel(views: number): string {
+  return views === 1 ? '1 view' : `${views} views`;
+}
+
 export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
-  const { clip, owner } = props.item;
+  const { clip, owner, views } = props.item;
   return (
     <a class="card" href={`/c/${clip.id}`}>
       <div class="thumb">
@@ -72,6 +77,7 @@ export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
           {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
           <span>{e(owner.username)}</span>
           <span>{relativeDate(clip.createdAt)}</span>
+          {views > 0 ? <span data-role="views">{viewsLabel(views)}</span> : ''}
         </div>
       </div>
     </a>

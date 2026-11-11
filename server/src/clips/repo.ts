@@ -2,14 +2,19 @@ import { and, count, desc, eq, ilike, lt, or, sql, type SQL } from 'drizzle-orm'
 import type { GameCount, MyStorage } from '@klipt/shared';
 import type { AuthUser } from '../auth/sessions.js';
 import type { Db } from '../db/client.js';
-import { clips, users } from '../db/schema.js';
+import { clipViews, clips, users } from '../db/schema.js';
 
 export type ClipRow = typeof clips.$inferSelect;
 export type Scope = 'feed' | 'mine' | 'user';
 export interface ClipWithOwner {
   clip: ClipRow;
   owner: { username: string };
+  /** Friends who watched it plus logged-out plays. */
+  views: number;
 }
+
+/** A clip's view count: its logged-in viewers plus its logged-out plays. */
+const viewsExpr = sql<number>`(${clips.anonViews} + (select count(*) from ${clipViews} where ${clipViews.clipId} = ${clips.id}))::int`;
 
 export class InvalidCursorError extends Error {}
 
@@ -70,13 +75,13 @@ export async function listClips(
     conds.push(or(lt(clips.createdAt, c.createdAt), and(eq(clips.createdAt, c.createdAt), lt(clips.id, c.id))));
   }
   const rows = await db
-    .select({ clip: clips, owner: { username: users.username } })
+    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(and(...conds))
     .orderBy(desc(clips.createdAt), desc(clips.id))
     .limit(limit + 1);
-  const items = rows.slice(0, limit);
+  const items = rows.slice(0, limit).map((r) => ({ ...r, views: Number(r.views) }));
   const last = items[items.length - 1];
   const nextCursor = rows.length > limit && last ? encodeCursor(last.clip.createdAt, last.clip.id) : null;
   return { items, nextCursor };
@@ -110,11 +115,37 @@ export async function getUserStorage(db: Db, userId: string): Promise<MyStorage>
   return { clips: Number(row!.clips), bytes: Number(row!.bytes) };
 }
 
+/**
+ * Counts a play of `clipId`: a logged-in viewer once (never the owner), a logged-out one every
+ * time. False when the clip doesn't exist.
+ */
+export async function recordView(db: Db, clipId: string, viewerId: string | null): Promise<boolean> {
+  const [clip] = await db.select({ userId: clips.userId }).from(clips).where(eq(clips.id, clipId));
+  if (!clip) return false;
+  if (viewerId === null) {
+    await db.update(clips).set({ anonViews: sql`${clips.anonViews} + 1` }).where(eq(clips.id, clipId));
+  } else if (viewerId !== clip.userId) {
+    await db.insert(clipViews).values({ clipId, userId: viewerId }).onConflictDoNothing();
+  }
+  return true;
+}
+
+/** The friends who watched `clipId`, first viewer first. */
+export async function listViewers(db: Db, clipId: string): Promise<{ username: string; viewedAt: string }[]> {
+  const rows = await db
+    .select({ username: users.username, viewedAt: clipViews.viewedAt })
+    .from(clipViews)
+    .innerJoin(users, eq(users.id, clipViews.userId))
+    .where(eq(clipViews.clipId, clipId))
+    .orderBy(clipViews.viewedAt, users.username);
+  return rows.map((r) => ({ username: r.username, viewedAt: r.viewedAt.toISOString() }));
+}
+
 export async function getClip(db: Db, id: string): Promise<ClipWithOwner | null> {
   const [row] = await db
-    .select({ clip: clips, owner: { username: users.username } })
+    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(eq(clips.id, id));
-  return row ?? null;
+  return row ? { ...row, views: Number(row.views) } : null;
 }

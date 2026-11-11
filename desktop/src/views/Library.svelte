@@ -356,7 +356,7 @@
 {/if}
 
 {#if playing}
-  <ClipPlayer clip={playing} {now} onclose={() => (playing = null)} />
+  <ClipPlayer clip={playing} {now} own onclose={() => (playing = null)} />
 {/if}
 
 {#if deletingOnline}

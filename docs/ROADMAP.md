@@ -57,7 +57,7 @@ media kept on the server, and an unwritable clips folder refused in Settings.
 
 ## Planned features (chosen 2026-11-11)
 
-The owner picked these from a list of suggestions. None has a spec yet.
+The owner picked these from two lists of suggestions. None has a spec yet.
 
 | Feature                    | What it means                                                                                      |
 | -------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -67,9 +67,17 @@ The owner picked these from a list of suggestions. None has a spec yet.
 | Favorites and search       | Star clips in the library; search by title, game or friend in the library, Feed and website      |
 | Views and "seen by"        | A view count on each clip, and which friends watched it                                            |
 | Your storage on the server | Show each user how much server storage their clips use. No quotas                                  |
+| Thumbnail handle           | A third handle in the editor's trim bar, dragged to any frame; that frame becomes the clip's thumbnail (Feed, website, Discord) |
+| Tag friends in a clip      | "With bob, alice": the clip shows on their profiles too, and the Feed gets an "I'm in it" filter  |
+| Next clip suggestion       | When a clip ends in the Feed, suggest the next one (no autoplay); arrow keys move between clips  |
+| Download on the share page | A download button for the clip's video                                                             |
+| Screenshots                | A screenshot hotkey; screenshots live in the library next to clips, with a Clips / Screenshots filter (library, Feed, website) |
+| Profile stats              | Clips per game, total views, most-watched clip on each profile (builds on view counts)             |
 
 Turned down: a save-and-share hotkey (clips are always trimmed before sharing), choosing the clip
-length at save time, moment markers. Not now: automatic Discord posts, a weekly highlights page.
+length at save time, moment markers, autoplaying the next clip. Not now: automatic Discord posts, a
+weekly highlights page. Not picked (yet): keyboard trimming, re-trim after upload, loudness
+evening, links to a moment, per-game recording settings, recording the game's monitor.
 
 ## Later: after v1
 

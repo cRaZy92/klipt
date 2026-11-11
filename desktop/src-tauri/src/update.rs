@@ -81,9 +81,11 @@ mod imp {
 #[allow(dead_code)]
 const REPO_API: &str = "https://api.github.com/repos/cRaZy92/klipt";
 
-/// Rebuilds and installs the newest Klipt from a fresh clone (Linux package).
+/// Rebuilds and installs the newest Klipt from a fresh clone (Linux package). Starts with `cd ~`:
+/// run again from the folder an earlier run left the shell in, `rm` would delete the shell's own
+/// working directory and `git clone` would fail.
 #[allow(dead_code)]
-pub const LINUX_UPDATE_COMMAND: &str = "rm -rf /tmp/klipt-update && git clone --depth 1 \
+pub const LINUX_UPDATE_COMMAND: &str = "cd ~ && rm -rf /tmp/klipt-update && git clone --depth 1 \
 https://github.com/cRaZy92/klipt /tmp/klipt-update && cd /tmp/klipt-update/packaging/aur && makepkg -si";
 
 #[cfg(target_os = "linux")]

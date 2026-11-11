@@ -83,6 +83,12 @@ impl Library {
         let conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
+        // A damaged file can still open; find out now rather than on some later query.
+        let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        if check != "ok" {
+            let corrupt = rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT);
+            return Err(rusqlite::Error::SqliteFailure(corrupt, Some(check)).into());
+        }
         migrate(&conn)?;
         Ok(Library { conn, thumbs_dir: dir.join("thumbs") })
     }

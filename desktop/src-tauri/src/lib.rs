@@ -41,6 +41,10 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let state = state::AppState::init(data_dir.clone())?;
+            if let Some(notice) = &state.startup_notice {
+                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                app.dialog().message(notice).title("Klipt").kind(MessageDialogKind::Warning).show(|_| {});
+            }
             let settings = state.settings.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
             // Thumbnails (thumbs/ in the data dir, also in tauri.conf.json) and the clips folder
             // load in the UI through the asset protocol.

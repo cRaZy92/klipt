@@ -187,6 +187,7 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
         height: info.height,
         // Uploads have one mixed audio track.
         has_mic: false,
+        has_voice: false,
         game_name: info.game_name,
         steam_app_id: info.steam_app_id,
         exe: None,

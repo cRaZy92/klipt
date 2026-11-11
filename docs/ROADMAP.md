@@ -63,7 +63,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | -------------------------- | -------------------------------------------------------------------------------------------------- |
 | New clips from friends     | **Done.** The app checks the feed every 2 min; the Feed tab shows how many friends' clips are new since you last opened it; "Notify me when a friend shares a clip" (Settings → General, on by default) |
 | Local storage cleanup      | **Done.** Settings → Clips folder shows its size; "Delete old clips from this PC" (off by default, 30 days) runs at startup, every 6 h and on save, keeping uploaded, favorite and uploading clips |
-| Leave voice chat out       | Game audio and voice/chat apps on separate tracks, so a clip can be shared without friends' voices |
+| Leave voice chat out       | **Done (Linux).** Voice chat apps (Settings → Audio, default discord, vesktop) are recorded on their own track and left out of the game track; the editor has a Voice chat slider. Windows keeps voices in the game sound (OBS can't record "all but these apps") |
 | Favorites and search       | **Done.** Star clips in My clips (Favorites filter); search by title and game in My clips, by title, game or friend in the Feed and on the website (`?q=`) |
 | Views and "seen by"        | **Done.** Each friend counts once (never the owner), plus every logged-out play; counts on the website and in the app; the owner sees "Seen by …" on the share page and in My clips |
 | Your storage on the server | **Done.** "N clips · 1.5 GB on the server" on the website's My clips and in Settings → Account; admins see it per user. No quotas |

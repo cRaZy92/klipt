@@ -44,12 +44,23 @@ export function validateSettings(s: Settings): FieldError[] {
   }
   if (!s.hotkey.trim()) fail("hotkey", "Choose a shortcut for saving clips.");
   if (!s.outputDir) fail("outputDir", "Choose a folder for your clips.");
+  const badApp = (a: string) => !a.trim() || a.length > 64 || /[|:]/.test(a) || a.trim() !== a;
+  if (s.voiceApps.length > 10 || s.voiceApps.some(badApp)) fail("voiceApps", "List up to 10 app names, without | or : characters.");
   if (!inRange(s.cleanupDays, CLEANUP_DAYS_MIN, CLEANUP_DAYS_MAX)) fail("cleanupDays", "Keep clips for 1 to 365 days.");
   return errors;
+}
+
+/** "discord, Vesktop," → ["discord", "Vesktop"]. */
+export function parseAppList(text: string): string[] {
+  return text
+    .split(",")
+    .map((a) => a.trim())
+    .filter(Boolean);
 }
 
 /** True when both hold the same values (for the unsaved-changes guard). */
 export function sameSettings(a: Settings, b: Settings): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof Settings)[]);
-  return [...keys].every((k) => a[k] === b[k]);
+  // Arrays (voice apps) compare by content.
+  return [...keys].every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k]));
 }

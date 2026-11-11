@@ -77,6 +77,9 @@ pub struct Settings {
     pub cleanup_days: u32,
     /// A system notification when a friend uploads a clip.
     pub friend_notifications: bool,
+    /// Voice chat apps (as PipeWire names them) recorded on their own track, so a clip can be
+    /// shared without friends' voices. Linux only; empty = no separate track.
+    pub voice_apps: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -91,6 +94,7 @@ pub const DEFAULT_HOTKEY: &str = "Alt+Backquote";
 pub const BUFFER_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
 pub const BITRATE_KBPS_RANGE: std::ops::RangeInclusive<u32> = 2_000..=80_000;
 pub const FPS_CHOICES: [u32; 2] = [30, 60];
+pub const MAX_VOICE_APPS: usize = 10;
 pub const CLEANUP_DAYS_RANGE: std::ops::RangeInclusive<u32> = 1..=365;
 
 /// `<Videos>/Klipt`.
@@ -123,6 +127,7 @@ impl Default for Settings {
             cleanup_enabled: false,
             cleanup_days: 30,
             friend_notifications: true,
+            voice_apps: vec!["discord".into(), "vesktop".into()],
         }
     }
 }
@@ -212,6 +217,10 @@ impl Settings {
         if self.output_dir.as_os_str().is_empty() {
             fail("outputDir", "Choose a folder for your clips.");
         }
+        let bad_app = |a: &String| a.trim().is_empty() || a.len() > 64 || a.contains(['|', ':']) || a.trim() != a;
+        if self.voice_apps.len() > MAX_VOICE_APPS || self.voice_apps.iter().any(bad_app) {
+            fail("voiceApps", "List up to 10 app names, without | or : characters.");
+        }
         if !CLEANUP_DAYS_RANGE.contains(&self.cleanup_days) {
             fail("cleanupDays", "Keep clips for 1 to 365 days.");
         }
@@ -235,6 +244,7 @@ impl Settings {
                 "hotkey" => self.hotkey = defaults.hotkey.clone(),
                 "outputDir" => self.output_dir = defaults.output_dir.clone(),
                 "cleanupDays" => self.cleanup_days = defaults.cleanup_days,
+                "voiceApps" => self.voice_apps = defaults.voice_apps.clone(),
                 other => debug_assert!(false, "validate() returned a field this function doesn't reset: {other}"),
             }
         }
@@ -264,7 +274,8 @@ impl Effects {
             || old.buffer_seconds != new.buffer_seconds
             || old.mic_enabled != new.mic_enabled
             || old.mic_device_id != new.mic_device_id
-            || old.output_dir != new.output_dir;
+            || old.output_dir != new.output_dir
+            || old.voice_apps != new.voice_apps;
         let canonical = |accel: &str| crate::hotkey::normalize(accel).unwrap_or_else(|_| accel.trim().to_string());
         Effects {
             restart_recorder,
@@ -470,5 +481,20 @@ mod tests {
         let loaded = Settings::load(dir.path());
         assert!(loaded.cleanup_enabled);
         assert_eq!(loaded.cleanup_days, 30);
+    }
+
+    #[test]
+    fn voice_apps_default_to_discord_and_are_checked() {
+        assert_eq!(Settings::default().voice_apps, vec!["discord".to_string(), "vesktop".to_string()]);
+        let with = |apps: &[&str]| Settings { voice_apps: apps.iter().map(|a| a.to_string()).collect(), ..Settings::default() };
+        let ok = |s: Settings| s.validate().iter().all(|e| e.field != "voiceApps");
+        assert!(ok(with(&[])));
+        assert!(ok(with(&["TeamSpeak", "mumble"])));
+        assert!(!ok(with(&["a|b"])));
+        assert!(!ok(with(&["app:x"])));
+        assert!(!ok(with(&[" "])));
+        assert!(!ok(with(&["x"; 11])));
+        let old = Settings::default();
+        assert!(Effects::between(&old, &with(&["discord"])).restart_recorder);
     }
 }

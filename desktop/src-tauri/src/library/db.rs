@@ -43,11 +43,14 @@ const MIGRATIONS: &[&str] = &["
     ALTER TABLE clips ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
 ", "
     ALTER TABLE clips ADD COLUMN thumbnail_ms INTEGER NULL;
+", "
+    ALTER TABLE clips ADD COLUMN has_voice INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE clips ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
-                       visibility, upload_id, upload_offset, favorite, thumbnail_ms";
+                       visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -73,6 +76,8 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         upload_offset: row.get(19)?,
         favorite: row.get(20)?,
         thumbnail_ms: row.get(21)?,
+        has_voice: row.get(22)?,
+        voice_volume: row.get(23)?,
     })
 }
 
@@ -107,8 +112,8 @@ impl Library {
     pub fn insert(&self, clip: NewClip) -> Result<Clip> {
         let id = uuid::Uuid::new_v4().simple().to_string();
         self.conn.execute(
-            "INSERT INTO clips (id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, title)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO clips (id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, title, has_voice)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 id,
                 clip.path.to_string_lossy(),
@@ -121,6 +126,7 @@ impl Library {
                 clip.steam_app_id,
                 clip.exe,
                 clip.title,
+                clip.has_voice,
             ],
         )?;
         self.get(&id)
@@ -167,8 +173,9 @@ impl Library {
         validate_edit(trim, volumes)?;
         self.update(
             id,
-            "UPDATE clips SET trim_start_ms = ?2, trim_end_ms = ?3, game_volume = ?4, mic_volume = ?5 WHERE id = ?1",
-            params![id, trim.start_ms, trim.end_ms, volumes.game, volumes.mic],
+            "UPDATE clips SET trim_start_ms = ?2, trim_end_ms = ?3, game_volume = ?4, mic_volume = ?5, voice_volume = ?6
+             WHERE id = ?1",
+            params![id, trim.start_ms, trim.end_ms, volumes.game, volumes.mic, volumes.voice],
         )
     }
 
@@ -307,7 +314,7 @@ pub fn validate_edit(trim: Trim, volumes: Volumes) -> Result<()> {
             return Err(AppError::InvalidInput(format!("trim start {start} ms is not before end {end} ms")));
         }
     }
-    for volume in [volumes.game, volumes.mic] {
+    for volume in [volumes.game, volumes.mic, volumes.voice] {
         if !(0.0..=MAX_VOLUME).contains(&volume) {
             return Err(AppError::InvalidInput(format!("volume {volume} is outside 0..={MAX_VOLUME}")));
         }
@@ -330,6 +337,7 @@ mod tests {
             width: 1920,
             height: 1080,
             has_mic: false,
+            has_voice: false,
             game_name: game.map(|g| g.0.to_string()),
             steam_app_id: game.map(|g| g.1),
             exe: Some("game.exe".into()),
@@ -453,7 +461,7 @@ mod tests {
         let f = Fixture::new();
         let c = f.add("a.mp4", 1, None);
         f.lib
-            .update_edit(&c.id, Trim { start_ms: Some(1_500), end_ms: Some(20_000) }, Volumes { game: 0.8, mic: 1.5 })
+            .update_edit(&c.id, Trim { start_ms: Some(1_500), end_ms: Some(20_000) }, Volumes { game: 0.8, mic: 1.5, voice: 0.4 })
             .unwrap();
         f.lib.set_game(&c.id, Some("Active Matter"), Some(2_887_580)).unwrap();
         f.lib.rename(&c.id, "Nice shot").unwrap();
@@ -483,9 +491,9 @@ mod tests {
         let c = f.add("a.mp4", 1, None);
         let bad_trim = Trim { start_ms: Some(5_000), end_ms: Some(5_000) };
         assert!(matches!(f.lib.update_edit(&c.id, bad_trim, Volumes::default()), Err(AppError::InvalidInput(_))));
-        let bad_volume = Volumes { game: -0.1, mic: 1.0 };
+        let bad_volume = Volumes { game: -0.1, ..Volumes::default() };
         assert!(matches!(f.lib.update_edit(&c.id, Trim::default(), bad_volume), Err(AppError::InvalidInput(_))));
-        let nan_volume = Volumes { game: 1.0, mic: f32::NAN };
+        let nan_volume = Volumes { voice: f32::NAN, ..Volumes::default() };
         assert!(matches!(f.lib.update_edit(&c.id, Trim::default(), nan_volume), Err(AppError::InvalidInput(_))));
 
         assert!(matches!(f.lib.rename("nope", "x"), Err(AppError::ClipNotFound(_))));

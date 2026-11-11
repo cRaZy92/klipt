@@ -34,6 +34,7 @@
   let trim = $state<TrimRange>({ start: 0, end: 0 });
   let gameVolume = $state(100);
   let micVolume = $state(100);
+  let voiceVolume = $state(100);
   /** The thumbnail's frame; null = automatic. */
   let thumb = $state<number | null>(null);
   /** The edit as last loaded or saved; `dirty` compares against it. */
@@ -43,6 +44,7 @@
   let video = $state<HTMLVideoElement>();
   let gameAudio = $state<HTMLAudioElement>();
   let micAudio = $state<HTMLAudioElement>();
+  let voiceAudio = $state<HTMLAudioElement>();
   let playing = $state(false);
   let position = $state(0);
 
@@ -58,7 +60,13 @@
   /** The edit as the UI shows it now, in the shape it is saved. */
   const edit = $derived.by((): EditInput => {
     const t = savedTrim(trim, duration);
-    return { trimStartMs: t.start, trimEndMs: t.end, gameVolume: gameVolume / 100, micVolume: micVolume / 100 };
+    return {
+      trimStartMs: t.start,
+      trimEndMs: t.end,
+      gameVolume: gameVolume / 100,
+      micVolume: micVolume / 100,
+      voiceVolume: voiceVolume / 100,
+    };
   });
 
   const changed = $derived(
@@ -67,6 +75,7 @@
         edit.trimEndMs !== stored.trimEndMs ||
         edit.gameVolume !== stored.gameVolume ||
         edit.micVolume !== stored.micVolume ||
+        edit.voiceVolume !== stored.voiceVolume ||
         thumb !== storedThumb),
   );
 
@@ -87,6 +96,7 @@
       trim = clampTrim(d.clip.trimStartMs ?? 0, d.clip.trimEndMs ?? d.durationMs, d.durationMs);
       gameVolume = percent(d.clip.gameVolume);
       micVolume = percent(d.clip.micVolume);
+      voiceVolume = percent(d.clip.voiceVolume ?? 1);
       thumb = d.clip.thumbnailMs;
       position = trim.start;
       data = d;
@@ -140,9 +150,12 @@
   $effect(() => {
     if (micAudio) micAudio.volume = micVolume / 100;
   });
+  $effect(() => {
+    if (voiceAudio) voiceAudio.volume = voiceVolume / 100;
+  });
 
   function audios(): HTMLAudioElement[] {
-    return [gameAudio, micAudio].filter((a): a is HTMLAudioElement => !!a);
+    return [gameAudio, micAudio, voiceAudio].filter((a): a is HTMLAudioElement => !!a);
   }
 
   function syncAudio() {
@@ -279,6 +292,7 @@
           trimEndMs: next.trimEndMs,
           gameVolume: next.gameVolume,
           micVolume: next.micVolume,
+          voiceVolume: next.voiceVolume,
           uploadId: null,
           uploadOffset: null,
         };
@@ -392,6 +406,9 @@
       {#if data.micAudioUrl}
         <audio bind:this={micAudio} src={data.micAudioUrl} preload="auto"></audio>
       {/if}
+      {#if data.voiceAudioUrl}
+        <audio bind:this={voiceAudio} src={data.voiceAudioUrl} preload="auto"></audio>
+      {/if}
     </div>
 
     <div class="timeline">
@@ -454,6 +471,22 @@
               aria-label="Mic volume"
             />
             <output>{micVolume}%</output>
+          </label>
+        {/if}
+        {#if data.voiceAudioPath}
+          <label class="volume" title="Discord and other voice chat. Turn it down to share the clip without your friends' voices.">
+            <span class="vol-label"><Icon name="users" size={17} /> Voice chat</span>
+            <input
+              class="range"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              bind:value={voiceVolume}
+              style:--fill="{voiceVolume}%"
+              aria-label="Voice chat volume"
+            />
+            <output>{voiceVolume}%</output>
           </label>
         {/if}
       </div>

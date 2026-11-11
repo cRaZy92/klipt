@@ -39,6 +39,12 @@ pub enum Target {
     Portal,
 }
 
+/// One gsr audio source made of several apps: `app:discord|app:vesktop`. A missing app is fine;
+/// gsr records silence for it.
+fn app_sources(kind: &str, apps: &[String]) -> String {
+    apps.iter().map(|a| format!("{kind}:{a}")).collect::<Vec<_>>().join("|")
+}
+
 /// The gsr command line (without the program name), in the decision record's order.
 pub fn build_args(cfg: &RecordConfig, target: &Target, portal_token: &Path) -> Vec<String> {
     let mut args: Vec<String> = vec!["-w".into()];
@@ -58,10 +64,16 @@ pub fn build_args(cfg: &RecordConfig, target: &Target, portal_token: &Path) -> V
     }
     args.extend(["-k", "h264", "-bm", "cbr", "-q"].map(String::from));
     args.push(cfg.bitrate_kbps.to_string());
-    args.extend(["-ac", "aac", "-a", "default_output"].map(String::from));
+    args.extend(["-ac", "aac", "-a"].map(String::from));
+    // Tracks: game (all desktop sound, minus voice apps), then the mic, then voice apps.
+    args.push(if cfg.voice_track() { app_sources("app-inverse", &cfg.voice_apps) } else { "default_output".into() });
     if cfg.mic {
         args.push("-a".into());
         args.push(cfg.mic_device_id.clone().unwrap_or_else(|| "default_input".into()));
+    }
+    if cfg.voice_track() {
+        args.push("-a".into());
+        args.push(app_sources("app", &cfg.voice_apps));
     }
     args.extend(["-c", "mp4", "-r"].map(String::from));
     args.push(cfg.buffer_seconds.to_string());
@@ -491,6 +503,7 @@ mod tests {
             mic: true,
             mic_device_id: None,
             output_dir: "/home/u/Videos/Klipt".into(),
+            voice_apps: Vec::new(),
         }
     }
 
@@ -533,6 +546,19 @@ mod tests {
             strings(
                 "-w HDMI-A-1 -f 60 -k h264 -bm cbr -q 35000 -ac aac -a default_output -a alsa_input.usb-mic \
                  -c mp4 -r 30 -replay-storage ram -o /home/u/Videos/Klipt"
+            )
+        );
+    }
+
+    #[test]
+    fn voice_apps_get_their_own_track_after_the_mic() {
+        let c = RecordConfig { voice_apps: vec!["discord".into(), "vesktop".into()], ..cfg() };
+        let args = build_args(&c, &Target::Monitor("DP-1".into()), Path::new("/t"));
+        assert_eq!(
+            args,
+            strings(
+                "-w DP-1 -f 60 -k h264 -bm cbr -q 20000 -ac aac -a app-inverse:discord|app-inverse:vesktop \
+                 -a default_input -a app:discord|app:vesktop -c mp4 -r 30 -replay-storage ram -o /home/u/Videos/Klipt"
             )
         );
     }

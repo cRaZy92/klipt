@@ -40,6 +40,9 @@ pub struct RecordConfig {
     /// None = the default microphone.
     pub mic_device_id: Option<String>,
     pub output_dir: PathBuf,
+    /// Voice chat apps recorded on their own track and left out of the game track (gsr only;
+    /// empty = no voice track).
+    pub voice_apps: Vec<String>,
 }
 
 impl RecordConfig {
@@ -53,7 +56,14 @@ impl RecordConfig {
             mic: s.mic_enabled,
             mic_device_id: s.mic_device_id.clone(),
             output_dir: s.output_dir.clone(),
+            // Only gsr (Linux) can record "everything except these apps".
+            voice_apps: if cfg!(target_os = "linux") { s.voice_apps.clone() } else { Vec::new() },
         }
+    }
+
+    /// Whether clips get a voice chat track (after the game and mic tracks).
+    pub fn voice_track(&self) -> bool {
+        !self.voice_apps.is_empty()
     }
 }
 
@@ -160,13 +170,18 @@ pub fn process_saved_clip(library: &Mutex<Library>, tools: Option<&Tools>, saved
     let title = saved.game.game_name.clone().unwrap_or_else(|| {
         saved.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Clip".into())
     });
+    // The tracks asked for, checked against what the file really has (game, mic, voice).
+    let tracks = probe.as_ref().map(|p| p.audio_tracks);
+    let has_mic = saved.has_mic && tracks.is_none_or(|n| n >= 2);
+    let has_voice = saved.has_voice && tracks.is_none_or(|n| n >= 2 + u32::from(has_mic));
     let new = NewClip {
         path: saved.path.clone(),
         created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0),
         duration_ms,
         width: probe.as_ref().map_or(0, |p| p.width),
         height: probe.as_ref().map_or(0, |p| p.height),
-        has_mic: probe.as_ref().map_or(saved.has_mic, |p| p.audio_tracks >= 2),
+        has_mic,
+        has_voice,
         game_name: saved.game.game_name,
         steam_app_id: saved.game.steam_app_id,
         exe: saved.game.exe,
@@ -285,7 +300,7 @@ mod tests {
         let view = process_saved_clip(
             &library,
             None,
-            SavedClip { path: path.clone(), duration_ms: Some(30_000), game, has_mic: true },
+            SavedClip { path: path.clone(), duration_ms: Some(30_000), game, has_mic: true, has_voice: false },
         )
         .unwrap();
         assert_eq!(view.clip.path, path);
@@ -299,7 +314,7 @@ mod tests {
         let untagged = process_saved_clip(
             &library,
             None,
-            SavedClip { path: dir.path().join("b.mp4"), duration_ms: None, game: Detected::default(), has_mic: false },
+            SavedClip { path: dir.path().join("b.mp4"), duration_ms: None, game: Detected::default(), has_mic: false, has_voice: false },
         )
         .unwrap();
         assert_eq!(untagged.clip.title, "b");

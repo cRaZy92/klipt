@@ -1,5 +1,5 @@
-//! Exporting a clip for upload: the video is stream-copied (trimmed), and the game and mic audio
-//! tracks are mixed into one AAC track at the user's chosen volumes.
+//! Exporting a clip for upload: the video is stream-copied (trimmed), and the game, mic and voice
+//! chat audio tracks are mixed into one AAC track at the user's chosen volumes.
 
 use std::ffi::OsString;
 use std::fs;
@@ -17,6 +17,26 @@ pub struct Edit {
     pub trim_end_ms: Option<u64>,
     pub game_volume: f32,
     pub mic_volume: f32,
+    pub voice_volume: f32,
+}
+
+/// Which audio tracks besides the game (always track 0) a clip has, by track index.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Tracks {
+    pub mic: Option<u32>,
+    pub voice: Option<u32>,
+}
+
+impl Tracks {
+    pub fn of(clip: &crate::library::Clip) -> Tracks {
+        Tracks { mic: clip.mic_track(), voice: clip.voice_track() }
+    }
+
+    /// Drops tracks the file doesn't actually have (`audio_tracks` counts them all).
+    pub fn present_in(self, audio_tracks: u32) -> Tracks {
+        let keep = |t: Option<u32>| t.filter(|i| *i < audio_tracks);
+        Tracks { mic: keep(self.mic), voice: keep(self.voice) }
+    }
 }
 
 fn volume(v: f32) -> f32 {
@@ -33,19 +53,23 @@ fn seconds(ms: u64) -> String {
 
 /// The ffmpeg arguments (without the program name) for exporting `input` to `output`.
 /// A trim start before `-i` snaps to the keyframe at or before it; `-to` is then relative to it.
-pub fn export_args(input: &Path, output: &Path, edit: &Edit, has_mic: bool) -> Result<Vec<String>> {
+pub fn export_args(input: &Path, output: &Path, edit: &Edit, tracks: Tracks) -> Result<Vec<String>> {
     let start = edit.trim_start_ms;
     if let Some(end) = edit.trim_end_ms {
         if end <= start.unwrap_or(0) {
             return Err(AppError::InvalidInput("the trim end must be after the trim start".into()));
         }
     }
-    let game = volume(edit.game_volume);
-    let graph = if has_mic {
-        let mic = volume(edit.mic_volume);
-        format!("[0:a:0]volume={game}[a0];[0:a:1]volume={mic}[a1];[a0][a1]amix=inputs=2:normalize=0[aout]")
+    let mut inputs = vec![(0, volume(edit.game_volume))];
+    inputs.extend(tracks.mic.map(|t| (t, volume(edit.mic_volume))));
+    inputs.extend(tracks.voice.map(|t| (t, volume(edit.voice_volume))));
+    let graph = if inputs.len() == 1 {
+        format!("[0:a:0]volume={}[aout]", inputs[0].1)
     } else {
-        format!("[0:a:0]volume={game}[aout]")
+        let filters: Vec<String> =
+            inputs.iter().enumerate().map(|(i, (track, vol))| format!("[0:a:{track}]volume={vol}[a{i}]")).collect();
+        let labels: String = (0..inputs.len()).map(|i| format!("[a{i}]")).collect();
+        format!("{};{labels}amix=inputs={}:normalize=0[aout]", filters.join(";"), inputs.len())
     };
 
     let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-y"].map(String::from).into();
@@ -75,12 +99,12 @@ pub fn export(
     cache_dir: &Path,
     clip_id: &str,
     edit: &Edit,
-    has_mic: bool,
+    tracks: Tracks,
     mut progress: impl FnMut(f32),
 ) -> Result<PathBuf> {
     let info = probe(tools, input)?;
-    // Never fail on a missing mic track; never mix a track that isn't there.
-    let has_mic = has_mic && info.audio_tracks >= 2;
+    // Never fail on a missing mic or voice track; never mix a track that isn't there.
+    let tracks = tracks.present_in(info.audio_tracks);
 
     let start = edit.trim_start_ms.unwrap_or(0);
     let end = edit.trim_end_ms.unwrap_or(info.duration_ms).min(info.duration_ms.max(1));
@@ -91,7 +115,7 @@ pub fn export(
     let out = dir.join(format!("{clip_id}.mp4"));
     let temp = dir.join(format!("{clip_id}.tmp.mp4"));
 
-    let args = export_args(input, &temp, edit, has_mic)?;
+    let args = export_args(input, &temp, edit, tracks)?;
     let result = run(tools, &args, expected_us, &mut progress).and_then(|_| match fs::metadata(&temp) {
         Ok(meta) if meta.len() > 0 => Ok(fs::rename(&temp, &out)?),
         _ => Err(AppError::ToolFailed { tool: "ffmpeg", detail: "export produced no output".into() }),
@@ -146,13 +170,34 @@ mod tests {
     use crate::ffmpeg::tests::{fixture, tools};
     use std::io::Read;
 
+    const MIC: Tracks = Tracks { mic: Some(1), voice: None };
+
+    #[test]
+    fn args_with_mic_and_voice_mix_three_tracks() {
+        let tracks = Tracks { mic: Some(1), voice: Some(2) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), tracks).unwrap().join(" ");
+        assert!(joined.contains(
+            "[0:a:0]volume=1[a0];[0:a:1]volume=0.5[a1];[0:a:2]volume=0.25[a2];[a0][a1][a2]amix=inputs=3:normalize=0[aout]"
+        ), "{joined}");
+        let voice_only = Tracks { mic: None, voice: Some(1) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), voice_only).unwrap().join(" ");
+        assert!(joined.contains("[0:a:1]volume=0.25[a1];[a0][a1]amix=inputs=2"), "{joined}");
+    }
+
+    #[test]
+    fn tracks_the_file_lacks_are_dropped() {
+        let both = Tracks { mic: Some(1), voice: Some(2) };
+        assert_eq!(both.present_in(2), MIC);
+        assert_eq!(both.present_in(1), Tracks::default());
+    }
+
     fn edit(start: Option<u64>, end: Option<u64>) -> Edit {
-        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5 }
+        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25 }
     }
 
     #[test]
     fn args_with_a_mic() {
-        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(Some(2000), Some(4000)), true).unwrap();
+        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(Some(2000), Some(4000)), MIC).unwrap();
         assert_eq!(
             args.join(" "),
             "-hide_banner -nostdin -y -ss 2.000 -i in.mp4 -to 2.000 -map 0:v:0 -c:v copy -filter_complex \
@@ -164,7 +209,7 @@ mod tests {
     // Review Focus 5: no mic track, the mix comes from one track.
     #[test]
     fn args_without_a_mic_or_trim() {
-        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(None, None), false).unwrap();
+        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(None, None), Tracks::default()).unwrap();
         assert_eq!(
             args.join(" "),
             "-hide_banner -nostdin -y -i in.mp4 -map 0:v:0 -c:v copy -filter_complex [0:a:0]volume=1[aout] \
@@ -174,12 +219,12 @@ mod tests {
 
     #[test]
     fn volumes_are_clamped_and_bad_ranges_rejected() {
-        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0 };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, true).unwrap().join(" ");
+        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0 };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, MIC).unwrap().join(" ");
         assert!(joined.contains("volume=2[a0]") && joined.contains("volume=0[a1]") && joined.contains("-to 1.500"));
         for (s, e) in [(Some(4000), Some(2000)), (Some(2000), Some(2000)), (None, Some(0))] {
             assert!(matches!(
-                export_args(Path::new("i"), Path::new("o"), &edit(s, e), true),
+                export_args(Path::new("i"), Path::new("o"), &edit(s, e), MIC),
                 Err(AppError::InvalidInput(_))
             ));
         }
@@ -213,7 +258,7 @@ mod tests {
     fn exports_a_trimmed_mixed_faststart_clip() {
         let cache = tempfile::tempdir().unwrap();
         let mut reports = vec![];
-        let out = export(&tools(), fixture(), cache.path(), "clip-1", &edit(Some(2000), Some(4000)), true, |p| {
+        let out = export(&tools(), fixture(), cache.path(), "clip-1", &edit(Some(2000), Some(4000)), MIC, |p| {
             reports.push(p)
         })
         .unwrap();
@@ -244,17 +289,36 @@ mod tests {
             .unwrap();
         assert!(status.success());
         // has_mic claims a mic that isn't there; no trim at all.
-        let out = export(&tools(), &one, cache.path(), "c", &edit(None, None), true, |_| {}).unwrap();
+        let out = export(&tools(), &one, cache.path(), "c", &edit(None, None), MIC, |_| {}).unwrap();
         let p = probe(&tools(), &out).unwrap();
         assert_eq!(p.audio_tracks, 1);
         assert!((5_900..=6_200).contains(&p.duration_ms), "{}", p.duration_ms);
+    }
+
+    #[test]
+    fn exports_game_mic_and_voice_mixed_into_one_track() {
+        let cache = tempfile::tempdir().unwrap();
+        // Three audio tracks: the fixture's two plus its game track again as "voice".
+        let three = cache.path().join("three.mp4");
+        let status = Command::new(&tools().ffmpeg)
+            .args(["-nostdin", "-loglevel", "error", "-y", "-i"])
+            .arg(fixture())
+            .args(["-map", "0:v:0", "-map", "0:a:0", "-map", "0:a:1", "-map", "0:a:0", "-c", "copy"])
+            .arg(&three)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(probe(&tools(), &three).unwrap().audio_tracks, 3);
+        let tracks = Tracks { mic: Some(1), voice: Some(2) };
+        let out = export(&tools(), &three, cache.path(), "v", &edit(Some(1000), Some(3000)), tracks, |_| {}).unwrap();
+        assert_eq!(probe(&tools(), &out).unwrap().audio_tracks, 1);
     }
 
     // Review Focus 4: a missing input is an error and leaves nothing behind.
     #[test]
     fn missing_input_is_an_error() {
         let cache = tempfile::tempdir().unwrap();
-        let r = export(&tools(), &cache.path().join("nope.mp4"), cache.path(), "x", &edit(None, None), true, |_| {});
+        let r = export(&tools(), &cache.path().join("nope.mp4"), cache.path(), "x", &edit(None, None), MIC, |_| {});
         assert!(matches!(r, Err(AppError::ToolFailed { .. })));
         assert!(!cache.path().join("exports").join("x.mp4").exists());
     }

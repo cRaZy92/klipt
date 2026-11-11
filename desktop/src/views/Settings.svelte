@@ -25,6 +25,7 @@
     CLEANUP_DAYS_MIN,
     PRESET_KBPS,
     bitrateKbps,
+    parseAppList,
     estimateRamMb,
     sameSettings,
     validateSettings,
@@ -256,6 +257,7 @@
   const FIELD_TAB: Record<string, Tab> = {
     micEnabled: "audio",
     micDeviceId: "audio",
+    voiceApps: "audio",
     hotkey: "hotkey",
     outputDir: "clips",
     cleanupDays: "clips",
@@ -500,6 +502,28 @@
           <small class="help">Klipt couldn't list your microphones, so it uses the default one.</small>
         {/if}
       </label>
+      {#await api.appInfo() then info}
+        {#if info.platform === "linux"}
+          <label class="row">
+            <span class="label">Voice chat apps</span>
+            <input
+              class="input"
+              value={draft.voiceApps.join(", ")}
+              onchange={(e) => (draft.voiceApps = parseAppList(e.currentTarget.value))}
+              placeholder="discord, vesktop"
+              aria-invalid={!!fieldErrors.voiceApps}
+            />
+            {#if fieldErrors.voiceApps}
+              <small class="error">{fieldErrors.voiceApps}</small>
+            {:else}
+              <small class="help">
+                Recorded on their own track, so you can turn your friends' voices down before sharing. Leave it
+                empty to record voice chat with the game sound.
+              </small>
+            {/if}
+          </label>
+        {/if}
+      {/await}
     </section>
 
     {:else if tab === "hotkey"}

@@ -386,6 +386,7 @@ mod tests {
             mic: false,
             mic_device_id: None,
             output_dir: "C:\\Users\\a\\Videos\\Klipt".into(),
+            voice_apps: Vec::new(),
         }
     }
 

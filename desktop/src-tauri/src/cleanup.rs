@@ -133,6 +133,7 @@ mod tests {
             width: 1920,
             height: 1080,
             has_mic: false,
+            has_voice: false,
             game_name: None,
             steam_app_id: None,
             exe: None,

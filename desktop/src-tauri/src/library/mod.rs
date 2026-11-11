@@ -23,6 +23,8 @@ pub struct NewClip {
     pub steam_app_id: Option<u32>,
     pub exe: Option<String>,
     pub title: String,
+    /// Voice chat apps (Discord…) were recorded on their own track (Linux).
+    pub has_voice: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -53,6 +55,21 @@ pub struct Clip {
     pub favorite: bool,
     /// The thumbnail's frame (ms into the video file); `None` = automatic.
     pub thumbnail_ms: Option<u64>,
+    /// Voice chat has its own audio track, after the game and mic tracks.
+    pub has_voice: bool,
+    pub voice_volume: f32,
+}
+
+impl Clip {
+    /// The audio track index of the mic, if the clip has one (the game is always track 0).
+    pub fn mic_track(&self) -> Option<u32> {
+        self.has_mic.then_some(1)
+    }
+
+    /// The audio track index of voice chat, if the clip has one: right after the game and mic.
+    pub fn voice_track(&self) -> Option<u32> {
+        self.has_voice.then_some(if self.has_mic { 2 } else { 1 })
+    }
 }
 
 /// A clip as the library screen shows it.
@@ -103,10 +120,11 @@ pub struct Trim {
 pub struct Volumes {
     pub game: f32,
     pub mic: f32,
+    pub voice: f32,
 }
 
 impl Default for Volumes {
     fn default() -> Self {
-        Volumes { game: 1.0, mic: 1.0 }
+        Volumes { game: 1.0, mic: 1.0, voice: 1.0 }
     }
 }

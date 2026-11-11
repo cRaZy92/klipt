@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Settings } from "./api";
-import { bitrateKbps, estimateRamMb, sameSettings, validateSettings } from "./settings";
+import { bitrateKbps, estimateRamMb, parseAppList, sameSettings, validateSettings } from "./settings";
 
 const defaults: Settings = {
   recordingMode: "always",
@@ -22,6 +22,7 @@ const defaults: Settings = {
   cleanupEnabled: false,
   cleanupDays: 30,
   friendNotifications: true,
+  voiceApps: ["discord", "vesktop"],
 };
 
 const fields = (patch: Partial<Settings>) => validateSettings({ ...defaults, ...patch }).map((e) => e.field);
@@ -112,5 +113,19 @@ describe("cleanup days", () => {
     expect(fields({ cleanupDays: 0 })).toEqual(["cleanupDays"]);
     expect(fields({ cleanupDays: 366 })).toEqual(["cleanupDays"]);
     expect(fields({ cleanupDays: 2.5 })).toEqual(["cleanupDays"]);
+  });
+});
+
+describe("voice chat apps", () => {
+  it("parses a comma list and checks the names", () => {
+    expect(parseAppList(" discord, Vesktop ,, ")).toEqual(["discord", "Vesktop"]);
+    expect(fields({ voiceApps: [] })).toEqual([]);
+    expect(fields({ voiceApps: ["a|b"] })).toEqual(["voiceApps"]);
+    expect(fields({ voiceApps: Array(11).fill("x") })).toEqual(["voiceApps"]);
+  });
+
+  it("compares lists by content for unsaved changes", () => {
+    expect(sameSettings(defaults, { ...defaults, voiceApps: ["discord", "vesktop"] })).toBe(true);
+    expect(sameSettings(defaults, { ...defaults, voiceApps: ["discord"] })).toBe(false);
   });
 });

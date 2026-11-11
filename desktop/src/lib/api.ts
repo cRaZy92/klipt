@@ -30,6 +30,9 @@ export interface ClipView {
   uploadOffset: number | null;
   /** Starred; the automatic cleanup never deletes it. */
   favorite: boolean;
+  /** Voice chat (Discord…) has its own track. */
+  hasVoice: boolean;
+  voiceVolume: number;
   /** The thumbnail's frame (ms into the video); null = automatic. */
   thumbnailMs: number | null;
   fileMissing: boolean;
@@ -78,6 +81,8 @@ export interface Settings {
   cleanupDays: number;
   /** A system notification when a friend shares a clip. */
   friendNotifications: boolean;
+  /** Voice chat apps recorded on their own track (Linux); empty = recorded with the game. */
+  voiceApps: string[];
 }
 
 export interface FieldError {
@@ -156,9 +161,12 @@ export interface EditorData {
   gameAudioPath: string;
   /** Null when the clip has no mic track. */
   micAudioPath: string | null;
+  /** Null when the clip has no voice chat track. */
+  voiceAudioPath: string | null;
   videoUrl: string;
   gameAudioUrl: string;
   micAudioUrl: string | null;
+  voiceAudioUrl: string | null;
   durationMs: number;
 }
 
@@ -170,6 +178,8 @@ export interface EditInput {
   gameVolume: number;
   /** 0.0–1.0 */
   micVolume: number;
+  /** 0.0–1.0; voice chat (Linux clips that have it). */
+  voiceVolume: number;
 }
 
 export interface ExportProgress {
@@ -307,7 +317,7 @@ export const api = {
   /** Downloads and installs the waiting update, then restarts Klipt. */
   installUpdate: () => invoke<void>("install_update"),
   /** Which Klipt this is (Settings → About). */
-  appInfo: () => invoke<{ version: string; commit: string | null; dev: boolean }>("app_info"),
+  appInfo: () => invoke<{ version: string; commit: string | null; dev: boolean; platform: string }>("app_info"),
   /** The website's home page, or `url` (a link on the server, e.g. a clip's share link). */
   openWebsite: (url?: string) => invoke<void>("open_website", { url: url ?? null }),
   openEditor: (id: string) => invoke<EditorData>("open_editor", { id }),

@@ -650,15 +650,16 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
         }
         progress(app, id, "exporting", 0, 1000);
         let (tools, input, cache_dir) = (job.tools.clone(), clip.path.clone(), job.cache_dir.clone());
-        let (clip_id, has_mic, export_app) = (clip.id.clone(), clip.has_mic, app.clone());
+        let (clip_id, tracks, export_app) = (clip.id.clone(), export::Tracks::of(clip), app.clone());
         let edit = Edit {
             trim_start_ms: clip.trim_start_ms,
             trim_end_ms: clip.trim_end_ms,
             game_volume: clip.game_volume,
             mic_volume: clip.mic_volume,
+            voice_volume: clip.voice_volume,
         };
         tauri::async_runtime::spawn_blocking(move || {
-            export::export(&tools, &input, &cache_dir, &clip_id, &edit, has_mic, |p| {
+            export::export(&tools, &input, &cache_dir, &clip_id, &edit, tracks, |p| {
                 progress(&export_app, &clip_id, "exporting", (p * 1000.0) as u64, 1000);
             })
         })
@@ -727,10 +728,13 @@ pub struct EditorData {
     pub game_audio_path: PathBuf,
     /// None when the clip has no mic track: the editor hides the Mic slider.
     pub mic_audio_path: Option<PathBuf>,
+    /// None when the clip has no voice chat track: the editor hides the Voice chat slider.
+    pub voice_audio_path: Option<PathBuf>,
     /// Loopback HTTP URLs for the media elements (WebKitGTK can't stream media from `asset://`).
     pub video_url: String,
     pub game_audio_url: String,
     pub mic_audio_url: Option<String>,
+    pub voice_audio_url: Option<String>,
     pub duration_ms: u64,
 }
 
@@ -748,11 +752,11 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     }
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
-    let (input, has_mic, stored_ms) = (clip.path.clone(), clip.has_mic, clip.duration_ms);
-    let (game, mic, duration_ms) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
-        let (game, mic) = editor::prepare_audio(&tools, &input, has_mic, &cache_dir, &id)?;
+    let (input, tracks, stored_ms) = (clip.path.clone(), export::Tracks::of(&clip), clip.duration_ms);
+    let (game, mic, voice, duration_ms) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
+        let (game, mic, voice) = editor::prepare_audio(&tools, &input, tracks, &cache_dir, &id)?;
         let duration_ms = if stored_ms > 0 { stored_ms } else { crate::ffmpeg::probe(&tools, &input)?.duration_ms };
-        Ok((game, mic, duration_ms))
+        Ok((game, mic, voice, duration_ms))
     })
     .await
     .map_err(|e| AppError::Internal(format!("editor setup failed: {e}")))??;
@@ -760,7 +764,7 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     // Only these files, not their folders: the clip may be outside the current clips folder (it
     // was saved before the folder changed), and the cache folder holds other clips' files.
     let scope = app.asset_protocol_scope();
-    for file in [&clip.path, &game].into_iter().chain(mic.as_ref()) {
+    for file in [&clip.path, &game].into_iter().chain(mic.as_ref()).chain(voice.as_ref()) {
         if let Err(e) = scope.allow_file(file) {
             eprintln!("klipt: can't allow {} in the asset scope: {e}", file.display());
         }
@@ -769,20 +773,29 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     let video_url = media.url_for(&clip.path);
     let game_audio_url = media.url_for(&game);
     let mic_audio_url = mic.as_deref().map(|m| media.url_for(m));
+    let voice_audio_url = voice.as_deref().map(|v| media.url_for(v));
     Ok(EditorData {
         video_url,
         game_audio_url,
         mic_audio_url,
+        voice_audio_url,
         video_path: clip.path.clone(),
         clip: ClipView { clip, file_missing: false, thumb_path: thumb.is_file().then_some(thumb) },
         game_audio_path: game,
         mic_audio_path: mic,
+        voice_audio_path: voice,
         duration_ms,
     })
 }
 
-fn edit_from(trim_start_ms: Option<u64>, trim_end_ms: Option<u64>, game_volume: f32, mic_volume: f32) -> Edit {
-    Edit { trim_start_ms, trim_end_ms, game_volume, mic_volume }
+fn edit_from(
+    trim_start_ms: Option<u64>,
+    trim_end_ms: Option<u64>,
+    game_volume: f32,
+    mic_volume: f32,
+    voice_volume: Option<f32>,
+) -> Edit {
+    Edit { trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume: voice_volume.unwrap_or(1.0) }
 }
 
 /// Saves the trim and volumes (the clip file is untouched). No trim is `null` start/end. Refused
@@ -798,10 +811,11 @@ pub fn save_edit(
     trim_end_ms: Option<u64>,
     game_volume: f32,
     mic_volume: f32,
+    voice_volume: Option<f32>,
     thumbnail_ms: Option<u64>,
 ) -> Result<()> {
     let cache_dir = cache_dir(&app)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume);
     let clip = {
         let library = lock(&state.library);
         editor::save_edit(&library, &uploads, &cache_dir, &id, edit)?;
@@ -845,6 +859,7 @@ pub async fn export_copy(
     trim_end_ms: Option<u64>,
     game_volume: f32,
     mic_volume: f32,
+    voice_volume: Option<f32>,
 ) -> Result<()> {
     let (clip, tools) = {
         let state = app.state::<AppState>();
@@ -860,10 +875,10 @@ pub async fn export_copy(
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
     let guard = app.state::<Uploads>().try_begin(&id).map_err(|_| AppError::ClipBusy)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume);
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, clip.has_mic, |p| {
+        let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, export::Tracks::of(&clip), |p| {
             emit(&worker_app, events::EXPORT_PROGRESS, ExportProgressEvent { id: &id, progress: p });
         })?;
         editor::move_file(&staged, &dest_path)
@@ -978,6 +993,8 @@ mod tests {
             upload_offset: None,
             favorite: false,
             thumbnail_ms: None,
+            has_voice: false,
+            voice_volume: 1.0,
         }
     }
 

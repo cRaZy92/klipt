@@ -61,6 +61,8 @@ pub struct SavedClip {
     /// The game detected when the save was requested.
     pub game: Detected,
     pub has_mic: bool,
+    /// Voice chat was recorded on its own track.
+    pub has_voice: bool,
 }
 
 /// What the supervisor tells the app (the Tauri sink turns these into events for the UI).
@@ -420,7 +422,7 @@ impl Supervisor {
                     Some(pending) => pending.game,
                     None => (self.deps.detect_game)(),
                 };
-                let saved = SavedClip { path, duration_ms, game, has_mic: self.cfg.mic };
+                let saved = SavedClip { path, duration_ms, game, has_mic: self.cfg.mic, has_voice: self.cfg.voice_track() };
                 match (self.deps.process_clip)(saved) {
                     Ok(view) => self.emit(SupervisorEvent::ClipSaved(view)),
                     Err(e) => {
@@ -678,6 +680,7 @@ mod tests {
             mic: true,
             mic_device_id: None,
             output_dir: "/clips".into(),
+            voice_apps: Vec::new(),
         }
     }
 
@@ -706,6 +709,8 @@ mod tests {
                 upload_offset: None,
                 favorite: false,
                 thumbnail_ms: None,
+                has_voice: false,
+                voice_volume: 1.0,
             },
             file_missing: false,
             thumb_path: None,

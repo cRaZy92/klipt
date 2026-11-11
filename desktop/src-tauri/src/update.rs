@@ -166,6 +166,8 @@ pub struct AppInfo {
     commit: Option<String>,
     /// A `pnpm tauri dev` build: its version means nothing.
     dev: bool,
+    /// `linux` or `windows` (Rust's `std::env::consts::OS`).
+    platform: &'static str,
 }
 
 #[tauri::command]
@@ -174,6 +176,7 @@ pub fn app_info(app: AppHandle) -> AppInfo {
         version: app.package_info().version.to_string(),
         commit: option_env!("KLIPT_COMMIT").filter(|c| !c.is_empty()).map(|c| c.chars().take(7).collect()),
         dev: cfg!(debug_assertions),
+        platform: std::env::consts::OS,
     }
 }
 

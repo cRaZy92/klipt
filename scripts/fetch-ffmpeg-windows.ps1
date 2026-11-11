@@ -17,13 +17,25 @@ $ProgressPreference = 'SilentlyContinue'
 
 $headers = @{ 'User-Agent' = 'klipt-fetch-ffmpeg' }
 if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
-$uri = if ($Tag -eq 'latest') { 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest' }
-       else { "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$Tag" }
-$release = Invoke-RestMethod -Headers $headers -Uri $uri
-$asset = $release.assets |
-  Where-Object { $_.name -match '^ffmpeg-n[0-9.]+-latest-win64-gpl-[0-9.]+\.zip$' } |
-  Sort-Object name -Descending | Select-Object -First 1
-if (-not $asset) { throw "no win64 GPL release build in BtbN release $($release.tag_name)" }
+$pattern = '^ffmpeg-n[0-9].*-win64-gpl-[0-9.]+\.zip$' # release-branch builds (nX.Y…), not master or shared
+# BtbN re-publishes its daily releases, so a release can briefly have no assets: take the newest
+# release (or -Tag) that has the build, and retry a few times.
+$asset = $null
+for ($try = 1; $try -le 4 -and -not $asset; $try++) {
+  try {
+    $releases = if ($Tag -eq 'latest') {
+      Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=10'
+    } else {
+      @(Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$Tag")
+    }
+    foreach ($r in $releases) {
+      $asset = $r.assets | Where-Object { $_.name -match $pattern } | Sort-Object name -Descending | Select-Object -First 1
+      if ($asset) { $release = $r; break }
+    }
+  } catch { Write-Host "attempt $try failed: $_" }
+  if (-not $asset) { Start-Sleep -Seconds (15 * $try) }
+}
+if (-not $asset) { throw "no win64 GPL release build found in BtbN's recent releases" }
 Write-Host "ffmpeg: $($asset.name) from $($release.tag_name)"
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) "klipt-ffmpeg"

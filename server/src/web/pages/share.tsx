@@ -31,7 +31,7 @@ export function SharePage(props: { user: AuthUser | null; clip: Clip; canDelete:
   const { clip } = props;
   return (
     <Layout title={clip.title} user={props.user} head={shareHead(clip)}>
-      <div class="share">
+      <div class="share" style={`--ar:${clip.width > 0 && clip.height > 0 ? `${clip.width}/${clip.height}` : '16/9'}`}>
         <video
           controls
           {...{ playsinline: true, preload: "metadata" }}

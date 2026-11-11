@@ -80,13 +80,11 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
   .topbar { padding: 10px 12px; }
 }
 
-/* Clip page: the video as tall as the window allows, details in a sidebar on the right. */
+/* Clip page: the video at its own aspect ratio (no black bars), as big as the window allows;
+   the details sit beside it when at least ~280px is left over, otherwise they wrap underneath. */
 .container:has(> .share) { max-width: 1800px; }
-.share { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
-.share video { display: block; width: 100%; height: calc(100vh - 130px); min-height: 240px; background: #000; border-radius: 12px; object-fit: contain; }
+.share { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.share video { display: block; flex: 0 1 auto; aspect-ratio: var(--ar, 16/9); width: min(100%, calc((100vh - 130px) * var(--ar, 16/9))); height: auto; background: #000; border-radius: 12px; }
+.share-info { flex: 1 1 280px; min-width: 0; }
 .share-info h1 { margin-top: 0; font-size: 1.5rem; overflow-wrap: anywhere; }
 .share-info .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-@media (max-width: 900px) {
-  .share { grid-template-columns: 1fr; }
-  .share video { height: auto; max-height: 75vh; }
-}

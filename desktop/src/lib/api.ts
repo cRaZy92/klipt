@@ -28,6 +28,8 @@ export interface ClipView {
   visibility: Visibility | null;
   uploadId: string | null;
   uploadOffset: number | null;
+  /** Starred; the automatic cleanup never deletes it. */
+  favorite: boolean;
   fileMissing: boolean;
   thumbPath: string | null;
 }
@@ -251,6 +253,7 @@ export const api = {
   listGames: () => invoke<GameCount[]>("list_games"),
   renameClip: (id: string, title: string) => invoke<void>("rename_clip", { id, title }),
   setClipGame: (id: string, name: string | null) => invoke<void>("set_clip_game", { id, name }),
+  setClipFavorite: (id: string, favorite: boolean) => invoke<void>("set_clip_favorite", { id, favorite }),
   deleteClip: (id: string, deleteFile: boolean) => invoke<void>("delete_clip", { id, deleteFile }),
   showInFolder: (id: string) => invoke<void>("show_in_folder", { id }),
   /** All your uploads, newest first; null when not logged in. */
@@ -266,7 +269,9 @@ export const api = {
   copyShareLink: (id: string) => invoke<string>("copy_share_link", { id }),
   uploadClip: (id: string, title: string, visibility: Visibility) =>
     invoke<void>("upload_clip", { id, title, visibility }),
-  feedClips: (game: string | null, cursor: string | null) => invoke<FeedPage>("feed_clips", { game, cursor }),
+  /** One page of the feed; `search` matches title, game and uploader on the server. */
+  feedClips: (game: string | null, cursor: string | null, search: string | null = null) =>
+    invoke<FeedPage>("feed_clips", { game, cursor, search }),
   feedGames: () => invoke<FeedGame[]>("feed_games"),
   copyText: (text: string) => invoke<void>("copy_text_to_clipboard", { text }),
   /** Opens the Klipt website in the browser; `path` like `/me`. */

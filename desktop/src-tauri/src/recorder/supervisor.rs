@@ -704,6 +704,7 @@ mod tests {
                 visibility: None,
                 upload_id: None,
                 upload_offset: None,
+                favorite: false,
             },
             file_missing: false,
             thumb_path: None,

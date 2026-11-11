@@ -137,6 +137,21 @@ describe('web pages', () => {
     expect((await get('/u/nobody', b.cookie)).statusCode).toBe(404);
   });
 
+  it('searches the feed, my clips and user pages, keeping the search in chips', async () => {
+    const a = await mk('alice');
+    await addClip(a.u.id, { title: 'Clutch ace', gameName: 'CS2' });
+    await addClip(a.u.id, { title: 'Team wipe', gameName: 'CS2' });
+    for (const path of ['/', '/me', '/u/alice']) {
+      const body = (await get(`${path}?q=ace`, a.cookie)).body;
+      expect(body, path).toContain('Clutch ace');
+      expect(body, path).not.toContain('Team wipe');
+      expect(body, path).toMatch(/<input[^>]*type="search"[^>]*name="q"[^>]*value="ace"/);
+      expect(body, path).toContain(`?game=CS2&amp;q=ace`);
+    }
+    const none = (await get('/?q=%3Cnothing%3E', a.cookie)).body;
+    expect(none).toContain('No clips match “&lt;nothing&gt;”.');
+  });
+
   it('me page shows how much server storage your clips use', async () => {
     const a = await mk('alice');
     const b = await mk('bob');

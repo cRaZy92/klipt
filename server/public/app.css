@@ -28,6 +28,9 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .btn.small { padding: 5px 10px; font-size: .85rem; }
 .btn.danger { color: var(--danger); } .btn.danger:hover { border-color: var(--danger); }
 
+.search { display: flex; gap: 8px; margin-bottom: 12px; max-width: 520px; }
+.search input { flex: 1; min-width: 0; font: inherit; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
+.search input:focus { outline: none; border-color: var(--accent); }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; }
 .chip { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); font-size: .9rem; white-space: nowrap; transition: border-color .12s, color .12s; }
 .chip:hover { color: var(--text); border-color: var(--muted); }

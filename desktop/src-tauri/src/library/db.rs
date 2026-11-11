@@ -39,11 +39,13 @@ const MIGRATIONS: &[&str] = &["
     );
     CREATE INDEX clips_created_at ON clips (created_at);
     CREATE INDEX clips_game_name ON clips (game_name);
+", "
+    ALTER TABLE clips ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
-                       visibility, upload_id, upload_offset";
+                       visibility, upload_id, upload_offset, favorite";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -67,6 +69,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         visibility: row.get(17)?,
         upload_id: row.get(18)?,
         upload_offset: row.get(19)?,
+        favorite: row.get(20)?,
     })
 }
 
@@ -180,6 +183,11 @@ impl Library {
             return Err(AppError::InvalidInput("empty title".into()));
         }
         self.update(id, "UPDATE clips SET title = ?2 WHERE id = ?1", params![id, title])
+    }
+
+    /// Stars or unstars a clip. Favorites are never deleted by the automatic cleanup.
+    pub fn set_favorite(&self, id: &str, favorite: bool) -> Result<()> {
+        self.update(id, "UPDATE clips SET favorite = ?2 WHERE id = ?1", params![id, favorite])
     }
 
     /// Remembers (or with `None`, forgets) how far a tus upload got, so a restart can resume it.
@@ -487,6 +495,37 @@ mod tests {
         let f = Fixture::new();
         let c = f.add("a.mp4", 1, None);
         assert!(f.lib.insert(new_clip(&c.path, 2, None)).is_err());
+    }
+
+    #[test]
+    fn favorites_start_off_and_can_be_toggled() {
+        let f = Fixture::new();
+        let c = f.add("fav.mp4", 1, None);
+        assert!(!c.favorite);
+        f.lib.set_favorite(&c.id, true).unwrap();
+        assert!(f.lib.get(&c.id).unwrap().favorite);
+        f.lib.set_favorite(&c.id, false).unwrap();
+        assert!(!f.lib.get(&c.id).unwrap().favorite);
+        assert!(matches!(f.lib.set_favorite("nope", true), Err(AppError::ClipNotFound(_))));
+    }
+
+    #[test]
+    fn an_old_library_gains_the_favorite_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute(
+                "INSERT INTO clips (id, path, created_at, duration_ms, width, height, has_mic, title)
+                 VALUES ('old', '/x.mp4', 1, 1000, 1920, 1080, 0, 'Old')",
+                [],
+            )
+            .unwrap();
+        }
+        let lib = Library::open(&path).unwrap();
+        assert!(!lib.get("old").unwrap().favorite);
     }
 }
 

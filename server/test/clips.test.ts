@@ -146,6 +146,24 @@ describe('update and delete', () => {
   });
 });
 
+describe('search', () => {
+  it('matches every word against the title, game or uploader, ignoring case', async () => {
+    const ace = await addClip(a.id, { title: 'Clutch ACE on Mirage', gameName: 'Counter-Strike 2' }, false);
+    const wipe = await addClip(b.id, { title: 'Team wipe', gameName: 'Active Matter' }, false);
+    await addClip(b.id, { title: 'Boring', gameName: null }, false);
+    await addClip(b.id, { title: 'ace but hidden', visibility: 'link' }, false);
+    const ids = async (q: string) =>
+      ((await t.app.inject({ url: `/api/clips?q=${encodeURIComponent(q)}`, headers: a.h })).json() as { items: { id: string }[] }).items.map((c) => c.id);
+    expect(await ids('ace')).toEqual([ace]);
+    expect(await ids('counter mirage')).toEqual([ace]);
+    expect(await ids('matter')).toEqual([wipe]);
+    expect(await ids('BOB wipe')).toEqual([wipe]);
+    expect(await ids('ace wipe')).toEqual([]);
+    expect(await ids('100%')).toEqual([]);
+    expect(await ids('  ')).toHaveLength(3);
+  });
+});
+
 describe('my storage', () => {
   it('counts only your own clips, private ones included', async () => {
     await addClip(a.id, { sizeBytes: 3_000_000_000 }, false);

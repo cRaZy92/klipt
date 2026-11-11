@@ -101,6 +101,7 @@ pub fn run() {
             commands::list_games,
             commands::rename_clip,
             commands::set_clip_game,
+            commands::set_clip_favorite,
             commands::delete_clip,
             commands::show_in_folder,
             commands::copy_share_link,

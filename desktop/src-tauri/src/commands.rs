@@ -422,6 +422,12 @@ pub fn rename_clip(state: State<'_, AppState>, id: String, title: String) -> Res
     lock(&state.library).rename(&id, &title)
 }
 
+/// Stars or unstars a clip.
+#[tauri::command]
+pub fn set_clip_favorite(state: State<'_, AppState>, id: String, favorite: bool) -> Result<()> {
+    lock(&state.library).set_favorite(&id, favorite)
+}
+
 /// Tags a clip with a game (`None` or blank = Unknown). Tagging an Unknown clip also remembers
 /// its exe, so the next clip of that game is named automatically.
 #[tauri::command]
@@ -917,6 +923,7 @@ mod tests {
             visibility: None,
             upload_id: None,
             upload_offset: None,
+            favorite: false,
         }
     }
 
@@ -1040,9 +1047,15 @@ pub(crate) fn keep_own_media(page: &mut serde_json::Value, client: &ApiClient) {
 
 /// One page of the shared feed: the server's `ClipList`.
 #[tauri::command]
-pub async fn feed_clips(app: AppHandle, game: Option<String>, cursor: Option<String>) -> Result<serde_json::Value> {
+pub async fn feed_clips(
+    app: AppHandle,
+    game: Option<String>,
+    cursor: Option<String>,
+    search: Option<String>,
+) -> Result<serde_json::Value> {
     let mut query = vec![("scope", "feed".to_string())];
     query.extend(game.filter(|g| !g.is_empty()).map(|g| ("game", g)));
+    query.extend(search.map(|s| s.trim().chars().take(100).collect::<String>()).filter(|s| !s.is_empty()).map(|s| ("q", s)));
     query.extend(cursor.filter(|c| !c.is_empty()).map(|c| ("cursor", c)));
     let (mut page, client) = server_get(&app, "/api/clips", query).await?;
     keep_own_media(&mut page, &client);

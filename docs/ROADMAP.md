@@ -64,7 +64,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | New clips from friends     | A "new" count on the Feed tab since you last looked; optional desktop notification when a friend uploads |
 | Local storage cleanup      | Settings shows the clips folder's size; optional "delete local clips older than N days" that keeps uploaded and favorite clips |
 | Leave voice chat out       | Game audio and voice/chat apps on separate tracks, so a clip can be shared without friends' voices |
-| Favorites and search       | Star clips in the library; search by title, game or friend in the library, Feed and website      |
+| Favorites and search       | **Done.** Star clips in My clips (Favorites filter); search by title and game in My clips, by title, game or friend in the Feed and on the website (`?q=`) |
 | Views and "seen by"        | A view count on each clip, and which friends watched it                                            |
 | Your storage on the server | **Done.** "N clips · 1.5 GB on the server" on the website's My clips and in Settings → Account; admins see it per user. No quotas |
 | Thumbnail handle           | A third handle in the editor's trim bar, dragged to any frame; that frame becomes the clip's thumbnail (Feed, website, Discord) |

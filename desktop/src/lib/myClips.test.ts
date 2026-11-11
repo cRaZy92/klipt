@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ClipView, MyUpload } from "./api";
-import { gameCounts, isUploaded, mergeClips, visibleClips } from "./myClips";
+import { gameCounts, isUploaded, matchesSearch, mergeClips, visibleClips } from "./myClips";
 
 function local(id: string, at: number, extra: Partial<ClipView> = {}): ClipView {
   return {
     id, path: `/clips/${id}.mp4`, createdAt: at, durationMs: 1000, width: 1920, height: 1080, hasMic: false,
     gameName: "Deadlock", steamAppId: 1, exe: null, title: id, trimStartMs: null, trimEndMs: null,
     gameVolume: 1, micVolume: 1, serverClipId: null, shareUrl: null, visibility: null, uploadId: null,
-    uploadOffset: null, fileMissing: false, thumbPath: null, ...extra,
+    uploadOffset: null, favorite: false, fileMissing: false, thumbPath: null, ...extra,
   };
 }
 
@@ -64,5 +64,31 @@ describe("visibleClips", () => {
       { name: "Deadlock", steamAppId: 1, count: 2 },
       { name: "CS2", steamAppId: 1, count: 1 },
     ]);
+  });
+});
+
+describe("favorites and search", () => {
+  it("Favorites shows only starred clips on this PC", () => {
+    const items = mergeClips([local("star", 2, { favorite: true }), local("plain", 1)], [upload("S1", 1)]);
+    expect(visibleClips(items, "favorites", null, "newestFirst").map((i) => i.key)).toEqual(["l:star"]);
+  });
+
+  it("matches every word in the title or game, ignoring case and accents", () => {
+    const items = mergeClips(
+      [local("a", 3, { title: "Clutch ACE", gameName: "Counter-Strike 2" }), local("b", 2, { title: "Útek z väzenia", gameName: null })],
+      [upload("S1", 1, { title: "Team wipe", gameName: "Active Matter" })],
+    );
+    const keys = (q: string) => visibleClips(items, "all", null, "newestFirst", q).map((i) => i.key);
+    expect(keys("ace")).toEqual(["l:a"]);
+    expect(keys("counter clutch")).toEqual(["l:a"]);
+    expect(keys("matter")).toEqual(["s:S1"]);
+    expect(keys("utek vazenia")).toEqual(["l:b"]);
+    expect(keys("ace wipe")).toEqual([]);
+    expect(keys("  ")).toHaveLength(3);
+  });
+
+  it("matchesSearch works on plain text", () => {
+    expect(matchesSearch(["Žltý Kôň", null], "zlty kon")).toBe(true);
+    expect(matchesSearch(["x"], "y")).toBe(false);
   });
 });

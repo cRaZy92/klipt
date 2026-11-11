@@ -1,7 +1,7 @@
 import type { GameCount, MyStorage, SessionInfo } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import type { ClipWithOwner } from '../../clips/repo.js';
-import { formatDuration, formatSize, GameFilter, Pager, relativeDate } from '../components.js';
+import { emptyText, formatDuration, formatSize, GameFilter, Pager, relativeDate, SearchBox } from '../components.js';
 import { Layout } from '../layout.js';
 
 import { esc as e } from '../escape.js';
@@ -46,6 +46,7 @@ export function MePage(props: {
   nextCursor: string | null;
   games: GameCount[];
   game?: string;
+  search?: string;
   sessions: SessionInfo[];
   storage: MyStorage;
   baseUrl: string;
@@ -61,13 +62,14 @@ export function MePage(props: {
       ) : (
         ''
       )}
-      <GameFilter games={props.games} active={props.game} basePath="/me" />
+      <SearchBox basePath="/me" search={props.search} game={props.game} />
+      <GameFilter games={props.games} active={props.game} basePath="/me" search={props.search} />
       {props.items.length === 0 ? (
-        <p class="empty">You haven't uploaded any clips yet.</p>
+        <p class="empty">{e(emptyText(props.search, "You haven't uploaded any clips yet."))}</p>
       ) : (
         <ul class="rows">{props.items.map((item) => <MyClipRow item={item} baseUrl={props.baseUrl} />)}</ul>
       )}
-      <Pager nextCursor={props.nextCursor} basePath="/me" game={props.game} />
+      <Pager nextCursor={props.nextCursor} basePath="/me" game={props.game} search={props.search} />
       <h2>Sessions</h2>
       <ul class="rows plain">
         {props.sessions.map((s) => (

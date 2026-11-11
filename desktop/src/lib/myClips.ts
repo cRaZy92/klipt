@@ -3,8 +3,8 @@
 
 import type { ClipView, GameCount, MyUpload, Sort } from "./api";
 
-/** Where a clip is: everything, the clips on this PC, or the ones on the server. */
-export type Place = "all" | "local" | "uploaded";
+/** Where a clip is: everything, the clips on this PC, the ones on the server, or starred ones. */
+export type Place = "all" | "local" | "uploaded" | "favorites";
 
 export type MyClip =
   | { kind: "local"; key: string; clip: ClipView; at: number; game: string | null; steamAppId: number | null }
@@ -44,14 +44,33 @@ export function isUploaded(item: MyClip): boolean {
 export function matchesPlace(item: MyClip, place: Place): boolean {
   if (place === "local") return item.kind === "local";
   if (place === "uploaded") return isUploaded(item);
+  if (place === "favorites") return item.kind === "local" && item.clip.favorite;
   return true;
 }
 
-/** The clips to show: in `place`, of `game` (null: any), in `sort` order. */
-export function visibleClips(items: MyClip[], place: Place, game: string | null, sort: Sort): MyClip[] {
+/** Lower case without accents, so "utek" finds "Útek". */
+function fold(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+/** Every word of `search` appears in one of `fields` (case and accents ignored); blank matches all. */
+export function matchesSearch(fields: (string | null | undefined)[], search: string): boolean {
+  const words = fold(search).split(/\s+/).filter(Boolean);
+  const haystack = fields.filter(Boolean).map((f) => fold(f!));
+  return words.every((w) => haystack.some((f) => f.includes(w)));
+}
+
+function titleOf(item: MyClip): string {
+  return item.kind === "local" ? item.clip.title : item.upload.title;
+}
+
+/** The clips to show: in `place`, of `game` (null: any), matching `search`, in `sort` order. */
+export function visibleClips(items: MyClip[], place: Place, game: string | null, sort: Sort, search = ""): MyClip[] {
   const dir = sort === "newestFirst" ? -1 : 1;
   return items
-    .filter((i) => matchesPlace(i, place) && (game === null || i.game === game))
+    .filter(
+      (i) => matchesPlace(i, place) && (game === null || i.game === game) && matchesSearch([titleOf(i), i.game], search),
+    )
     .sort((a, b) => dir * (a.at - b.at) || a.key.localeCompare(b.key));
 }
 

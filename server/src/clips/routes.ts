@@ -70,6 +70,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     scope: z.enum(['feed', 'mine', 'user']).default('feed'),
     username: z.string().max(64).optional(),
     game: z.string().max(100).optional(),
+    q: z.string().max(100).optional(),
     cursor: z.string().max(512).optional(),
     limit: z.coerce.number().int().min(1).max(60).optional(),
   });
@@ -89,7 +90,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const q = listQuery.safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
-      const { items, nextCursor } = await listClips(db, req.user!, q.data);
+      const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q });
       return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl)), nextCursor };
     } catch (err) {
       if (err instanceof InvalidCursorError) return reply.code(400).send({ error: 'invalid_cursor' });

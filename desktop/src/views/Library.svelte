@@ -9,6 +9,7 @@
   import Icon from "../components/Icon.svelte";
   import Keys from "../components/Keys.svelte";
   import Modal from "../components/Modal.svelte";
+  import SearchInput from "../components/SearchInput.svelte";
   import OnlineClipCard from "../components/OnlineClipCard.svelte";
   import UploadDialog from "../components/UploadDialog.svelte";
 
@@ -32,6 +33,7 @@
   let place = $state<Place>("all");
   let game = $state<string | null>(null);
   let sort = $state<Sort>("newestFirst");
+  let search = $state("");
   let loaded = $state(false);
   let loadError = $state<string | null>(null);
   let now = $state(Date.now());
@@ -47,7 +49,7 @@
 
   const items = $derived(mergeClips(local, uploads ?? []));
   const games = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
-  const visible = $derived(visibleClips(items, place, game, sort));
+  const visible = $derived(visibleClips(items, place, game, sort, search));
   const groups = $derived(groupByDay(visible, (i) => i.at, now));
 
   $effect(() => {
@@ -124,6 +126,13 @@
     setTimeout(() => (saving = false), 1500);
   }
 
+  async function toggleFavorite(clip: ClipView) {
+    const favorite = !clip.favorite;
+    // Shown at once; put back if the library refuses.
+    local = local.map((c) => (c.id === clip.id ? { ...c, favorite } : c));
+    if (!(await act(() => api.setClipFavorite(clip.id, favorite)))) void loadLocal();
+  }
+
   async function copyLink(clip: ClipView) {
     await act(() => api.copyShareLink(clip.id), "Link copied!");
   }
@@ -196,6 +205,7 @@
     { value: "all", label: "All" },
     { value: "local", label: "On this PC" },
     { value: "uploaded", label: "Uploaded" },
+    { value: "favorites", label: "Favorites" },
   ];
 </script>
 
@@ -230,6 +240,7 @@
         </button>
       {/each}
     </div>
+    <SearchInput bind:value={search} placeholder="Search by title or game" label="Search my clips" />
     {#if uploadsError}
       <p class="uploads-error">
         <Icon name="alert" size={15} /> Couldn't load your uploads.
@@ -248,10 +259,14 @@
       <p>{loadError}</p>
       <button class="btn" onclick={load}><Icon name="retry" size={16} /> Try again</button>
     </div>
-  {:else if loaded && visible.length === 0 && (game || place !== "all")}
+  {:else if loaded && visible.length === 0 && (game || place !== "all" || search.trim())}
     <div class="empty">
-      <div class="empty-icon"><Icon name="film" size={28} /></div>
-      {#if place === "uploaded" && uploads === null && !uploadsError}
+      <div class="empty-icon"><Icon name={place === "favorites" && !search.trim() ? "star" : "film"} size={28} /></div>
+      {#if search.trim()}
+        <p>No clips match “{search.trim()}”.</p>
+      {:else if place === "favorites"}
+        <p>No favorites yet. Star a clip to keep it here.</p>
+      {:else if place === "uploaded" && uploads === null && !uploadsError}
         <p>Log in to see your uploads.</p>
       {:else if game}
         <p>No clips for this game here.</p>
@@ -304,6 +319,7 @@
                   onrename={() => (renaming = { kind: "local", id: clip.id, value: clip.title })}
                   onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
                   onremove={() => (removing = { clip, deleteFile: false })}
+                  onfavorite={() => toggleFavorite(clip)}
                   onshowfolder={() => act(() => api.showInFolder(clip.id))}
                   oncopy={() => copyLink(clip)}
                 />

@@ -85,17 +85,33 @@ function href(base: string, params: Record<string, string | null | undefined>): 
   return s ? `${base}?${s}` : base;
 }
 
-export function GameFilter(props: { games: GameCount[]; active?: string; basePath: string }): JSX.Element {
+/** A search box for the list at `basePath`; the game filter is kept. */
+export function SearchBox(props: { basePath: string; search?: string; game?: string }): JSX.Element {
+  return (
+    <form class="search" method="get" action={e(props.basePath)} role="search">
+      <input type="search" name="q" value={e(props.search ?? '')} placeholder="Search by title, game or friend" aria-label="Search clips" maxlength="100" />
+      {props.game ? <input type="hidden" name="game" value={e(props.game)} /> : ''}
+      <button type="submit" class="btn">Search</button>
+    </form>
+  );
+}
+
+/** The empty-list text: a search that found nothing says so. */
+export function emptyText(search: string | undefined, otherwise: string): string {
+  return search ? `No clips match “${search}”.` : otherwise;
+}
+
+export function GameFilter(props: { games: GameCount[]; active?: string; basePath: string; search?: string }): JSX.Element {
   if (props.games.length === 0) return '';
   return (
     <div class="chips">
-      <a class={`chip${props.active ? '' : ' active'}`} href={props.basePath}>
+      <a class={`chip${props.active ? '' : ' active'}`} href={e(href(props.basePath, { q: props.search }))}>
         All
       </a>
       {props.games.map((g) => (
         <a
           class={`chip${props.active === g.gameName ? ' active' : ''}`}
-          href={e(href(props.basePath, { game: g.gameName }))}
+          href={e(href(props.basePath, { game: g.gameName, q: props.search }))}
           title={e(g.gameName)}
         >
           {g.steamAppId ? <img class="chip-art" src={steamHeader(g.steamAppId)} alt="" loading="lazy" /> : ''}
@@ -107,11 +123,11 @@ export function GameFilter(props: { games: GameCount[]; active?: string; basePat
   );
 }
 
-export function Pager(props: { nextCursor: string | null; basePath: string; game?: string }): JSX.Element {
+export function Pager(props: { nextCursor: string | null; basePath: string; game?: string; search?: string }): JSX.Element {
   if (!props.nextCursor) return '';
   return (
     <div class="pager">
-      <a class="btn" href={e(href(props.basePath, { game: props.game, cursor: props.nextCursor }))}>
+      <a class="btn" href={e(href(props.basePath, { game: props.game, q: props.search, cursor: props.nextCursor }))}>
         Older clips
       </a>
     </div>

@@ -1,7 +1,7 @@
 import type { GameCount } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import type { ClipWithOwner } from '../../clips/repo.js';
-import { ClipGrid, GameFilter, Pager } from '../components.js';
+import { ClipGrid, emptyText, GameFilter, Pager, SearchBox } from '../components.js';
 import { Layout } from '../layout.js';
 
 export function FeedPage(props: {
@@ -10,13 +10,15 @@ export function FeedPage(props: {
   nextCursor: string | null;
   games: GameCount[];
   game?: string;
+  search?: string;
 }): JSX.Element {
   return (
     <Layout title="Feed" user={props.user}>
       <h1>Feed</h1>
-      <GameFilter games={props.games} active={props.game} basePath="/" />
-      <ClipGrid items={props.items} empty="No clips yet. Upload one from the Klipt desktop app." />
-      <Pager nextCursor={props.nextCursor} basePath="/" game={props.game} />
+      <SearchBox basePath="/" search={props.search} game={props.game} />
+      <GameFilter games={props.games} active={props.game} basePath="/" search={props.search} />
+      <ClipGrid items={props.items} empty={emptyText(props.search, 'No clips yet. Upload one from the Klipt desktop app.')} />
+      <Pager nextCursor={props.nextCursor} basePath="/" game={props.game} search={props.search} />
     </Layout>
   );
 }

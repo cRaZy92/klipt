@@ -8,6 +8,7 @@
   import ClipPlayer from "../components/ClipPlayer.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import Icon from "../components/Icon.svelte";
+  import SearchInput from "../components/SearchInput.svelte";
 
   let {
     server = null,
@@ -21,6 +22,7 @@
   let clips = $state<FeedClip[]>([]);
   let games = $state<GameCount[]>([]);
   let game = $state<string | null>(null);
+  let search = $state("");
   let cursor = $state<string | null>(null);
   let loading = $state(false);
   let loaded = $state(false);
@@ -53,7 +55,7 @@
     loading = true;
     if (!more) loadError = null;
     try {
-      const page = await api.feedClips(game, more ? cursor : null);
+      const page = await api.feedClips(game, more ? cursor : null, search.trim() || null);
       if (id !== request) return;
       clips = more ? [...clips, ...page.items] : page.items;
       cursor = page.nextCursor;
@@ -115,6 +117,16 @@
     </div>
   </header>
 
+  <div class="filters">
+    <SearchInput
+      bind:value={search}
+      placeholder="Search by title, game or friend"
+      label="Search the feed"
+      delay={300}
+      onsearch={() => void load()}
+    />
+  </div>
+
   {#if games.length > 0}
     <GameFilter {games} selected={game} onselect={selectGame} />
   {/if}
@@ -143,7 +155,9 @@
   {:else if clips.length === 0}
     <div class="empty">
       <div class="empty-icon"><Icon name="users" size={28} /></div>
-      {#if game}
+      {#if search.trim()}
+        <p>No clips match “{search.trim()}”.</p>
+      {:else if game}
         <p>No clips for this game yet.</p>
       {:else}
         <h2>Nothing shared yet</h2>
@@ -207,6 +221,10 @@
 {/if}
 
 <style>
+  .filters {
+    margin-bottom: 0.75rem;
+  }
+
   .refresh-icon {
     display: inline-grid;
   }

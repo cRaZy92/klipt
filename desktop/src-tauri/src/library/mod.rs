@@ -49,6 +49,8 @@ pub struct Clip {
     pub visibility: Option<String>,
     pub upload_id: Option<String>,
     pub upload_offset: Option<u64>,
+    /// Starred: shown under Favorites and never deleted by the automatic cleanup.
+    pub favorite: bool,
 }
 
 /// A clip as the library screen shows it.

@@ -314,3 +314,41 @@
   border: none;
   border-top: 1px solid var(--border);
 }
+
+/* Favorite star: always shown when starred, on hover or focus otherwise. */
+.clip-card .star {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  background: rgba(12, 10, 20, 0.7);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    transform 0.15s var(--ease-out);
+}
+
+.clip-card:hover .star,
+.clip-card .star:focus-visible,
+.clip-card .star.on {
+  opacity: 1;
+}
+
+.clip-card .star:hover {
+  transform: scale(1.08);
+}
+
+.clip-card .star.on {
+  color: #ffc53d;
+}

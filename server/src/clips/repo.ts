@@ -1,4 +1,4 @@
-import { and, count, desc, eq, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { GameCount, MyStorage } from '@klipt/shared';
 import type { AuthUser } from '../auth/sessions.js';
 import type { Db } from '../db/client.js';
@@ -41,14 +41,30 @@ function scopeCondition(viewer: AuthUser, scope: Scope, username?: string): SQL 
   return isSelf ? owner : and(owner, eq(clips.visibility, 'feed'))!;
 }
 
+/**
+ * Search: every word must appear (case-insensitive) in the title, the game or the uploader's name.
+ * Blank text matches everything.
+ */
+export function searchCondition(text: string | undefined): SQL | undefined {
+  const words = (text ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 8);
+  if (words.length === 0) return undefined;
+  return and(
+    ...words.map((word) => {
+      const pattern = `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      return or(ilike(clips.title, pattern), ilike(clips.gameName, pattern), ilike(users.username, pattern));
+    }),
+  );
+}
+
 export async function listClips(
   db: Db,
   viewer: AuthUser,
-  q: { scope: Scope; username?: string; game?: string; cursor?: string; limit?: number },
+  q: { scope: Scope; username?: string; game?: string; search?: string; cursor?: string; limit?: number },
 ): Promise<{ items: ClipWithOwner[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(Math.trunc(q.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
   const conds: (SQL | undefined)[] = [scopeCondition(viewer, q.scope, q.username)];
   if (q.game) conds.push(eq(clips.gameName, q.game));
+  conds.push(searchCondition(q.search));
   if (q.cursor) {
     const c = decodeCursor(q.cursor);
     conds.push(or(lt(clips.createdAt, c.createdAt), and(eq(clips.createdAt, c.createdAt), lt(clips.id, c.id))));

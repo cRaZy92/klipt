@@ -17,6 +17,7 @@
     onremove,
     onshowfolder,
     oncopy,
+    onfavorite,
   }: {
     clip: ClipView;
     /** The time relative dates are counted from (ticks once a minute). */
@@ -31,6 +32,8 @@
     onremove: () => void;
     onshowfolder: () => void;
     oncopy: () => void;
+    /** Stars or unstars the clip; without it there's no star. */
+    onfavorite?: () => void;
   } = $props();
 
   let menuOpen = $state(false);
@@ -74,6 +77,18 @@
       <span class="badge badge-uploaded"><Icon name="check" size={13} /> Uploaded</span>
     {/if}
     <span class="duration">{formatDuration(clip.durationMs)}</span>
+    {#if onfavorite}
+      <button
+        class="star"
+        class:on={clip.favorite}
+        onclick={onfavorite}
+        aria-pressed={clip.favorite}
+        aria-label={clip.favorite ? "Remove from favorites" : "Add to favorites"}
+        title={clip.favorite ? "Favorite: kept by the automatic cleanup" : "Add to favorites"}
+      >
+        <Icon name={clip.favorite ? "starFilled" : "star"} size={16} />
+      </button>
+    {/if}
 
     {#if job && (busy || job.status === "failed" || job.status === "needsLogin")}
       <div class="overlay">

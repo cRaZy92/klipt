@@ -1,6 +1,7 @@
 # Klipt — Session Handoff
 
 Read this first if you're a fresh Claude Code session picking up Klipt. Then read the files it links to.
+What's left and in what order: `docs/ROADMAP.md`.
 
 ## Latest: Linux session (2026-11-11) — releases, feed, review done
 

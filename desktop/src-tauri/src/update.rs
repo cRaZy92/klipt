@@ -81,12 +81,12 @@ mod imp {
 #[allow(dead_code)]
 const REPO_API: &str = "https://api.github.com/repos/cRaZy92/klipt";
 
-/// Rebuilds and installs the newest Klipt from a fresh clone (Linux package). Starts with `cd ~`:
-/// run again from the folder an earlier run left the shell in, `rm` would delete the shell's own
-/// working directory and `git clone` would fail.
+/// Rebuilds and installs the newest Klipt (Linux package) by running the repo's newest
+/// `packaging/aur/update.sh`: it asks for the password once at the start, clones, builds and
+/// installs without further questions.
 #[allow(dead_code)]
-pub const LINUX_UPDATE_COMMAND: &str = "cd ~ && rm -rf /tmp/klipt-update && git clone --depth 1 \
-https://github.com/cRaZy92/klipt /tmp/klipt-update && cd /tmp/klipt-update/packaging/aur && makepkg -si";
+pub const LINUX_UPDATE_COMMAND: &str =
+    "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/cRaZy92/klipt/main/packaging/aur/update.sh)\"";
 
 #[cfg(target_os = "linux")]
 mod imp {

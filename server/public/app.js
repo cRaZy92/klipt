@@ -36,9 +36,16 @@
     weak_password: 'Passwords need at least 8 characters.',
     invalid_invite: 'This invite link is no longer valid.',
     rate_limited: 'Too many attempts. Try again in a minute.',
+    unauthorized: 'You are logged out. Log in again and retry.',
+    forbidden: "You don't have permission to do that.",
+    not_found: 'That no longer exists. Reload the page.',
+    cannot_disable_self: "You can't disable your own account.",
+    invalid_request: "That didn't work. Reload the page and try again.",
   };
   function friendly(err) {
     if (err.status === 429) return MESSAGES.rate_limited;
+    // fetch itself failed: no response at all.
+    if (err.status === undefined && err instanceof TypeError) return "Can't reach Klipt. Check your connection.";
     return MESSAGES[err.message] || 'Something went wrong. Please try again.';
   }
 
@@ -107,13 +114,18 @@
         var vis = btn.dataset.visibility === 'feed' ? 'link' : 'feed';
         await api('PATCH', '/api/clips/' + clipRow.dataset.clipId, { visibility: vis });
         btn.dataset.visibility = vis;
-        btn.textContent = vis === 'feed' ? 'In feed' : 'Link only';
+        btn.textContent = vis === 'feed' ? 'Hide from feed' : 'Show in feed';
+        var badge = clipRow.querySelector('[data-role=visibility]');
+        if (badge) badge.textContent = vis === 'feed' ? 'In feed' : 'Link only';
         toast(vis === 'feed' ? 'Now visible in the feed' : 'Now link-only');
       } else if (action === 'delete') {
         if (!confirm('Delete this clip? This cannot be undone.')) return;
         await api('DELETE', '/api/clips/' + clipRow.dataset.clipId);
         if (btn.dataset.redirect) { location.assign(safeNext(btn.dataset.redirect)); return; }
+        var list = clipRow.parentElement;
         clipRow.remove();
+        // The last one on the page: reload for the empty state (or the next page of clips).
+        if (list && !list.querySelector('[data-clip-id]')) { location.reload(); return; }
         toast('Deleted');
       } else if (action === 'revoke-session') {
         var s = btn.closest('[data-session-id]');
@@ -137,7 +149,7 @@
         location.reload();
       }
     } catch (e) {
-      toast('Failed: ' + (e.message || 'error'));
+      toast(friendly(e));
     }
   });
 

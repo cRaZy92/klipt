@@ -18,6 +18,7 @@ export function AdminPage(props: { user: AuthUser; stats: AdminStats; invites: I
 
       <h2>Invites</h2>
       <button type="button" class="btn primary" data-action="create-invite">Create invite</button>
+      {props.invites.length === 0 ? <p class="empty">No open invites. Create one and send the link to a friend.</p> : ''}
       <ul class="rows plain" id="invites">
         {props.invites.map((i) => (
           <li class="row" data-code={e(i.code)}>

@@ -19,12 +19,19 @@ function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element
         <div class="meta">
           {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
           <span>{relativeDate(clip.createdAt)}</span>
+          <span class="badge" data-role="visibility">{clip.visibility === 'feed' ? 'In feed' : 'Link only'}</span>
         </div>
         <div class="actions">
           <button type="button" class="btn small" data-action="copy" data-url={e(`${props.baseUrl}/c/${clip.id}`)}>Copy link</button>
           <button type="button" class="btn small" data-action="rename" data-title={e(clip.title)}>Rename</button>
-          <button type="button" class="btn small" data-action="visibility" data-visibility={clip.visibility}>
-            {clip.visibility === 'feed' ? 'In feed' : 'Link only'}
+          <button
+            type="button"
+            class="btn small"
+            data-action="visibility"
+            data-visibility={clip.visibility}
+            title="Feed clips are listed for everyone logged in; link-only clips open only from their link"
+          >
+            {clip.visibility === 'feed' ? 'Hide from feed' : 'Show in feed'}
           </button>
           <button type="button" class="btn small danger" data-action="delete">Delete</button>
         </div>

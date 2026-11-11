@@ -137,6 +137,17 @@ describe('web pages', () => {
     expect((await get('/u/nobody', b.cookie)).statusCode).toBe(404);
   });
 
+  it('me page says where each clip is visible and the button says what it does', async () => {
+    const a = await mk('alice');
+    await addClip(a.u.id, { title: 'Pub' });
+    await addClip(a.u.id, { title: 'Priv', visibility: 'link' });
+    const body = (await get('/me', a.cookie)).body;
+    expect(body).toContain('Hide from feed');
+    expect(body).toContain('Show in feed');
+    expect(body).toMatch(/data-role="visibility">In feed</);
+    expect(body).toMatch(/data-role="visibility">Link only</);
+  });
+
   it('admin page is admin only', async () => {
     const a = await mk('alice');
     const adm = await mk('boss', true);
@@ -145,6 +156,7 @@ describe('web pages', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Create invite');
     expect(res.body).toContain('GB');
+    expect(res.body).toContain('No open invites');
   });
 
   it('invite page validates code', async () => {

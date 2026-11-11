@@ -35,7 +35,10 @@ build() {
 package() {
   cd klipt
   install -Dm755 desktop/target/release/klipt-desktop "$pkgdir/usr/bin/klipt-desktop"
-  install -Dm644 packaging/aur/app.klipt.desktop.desktop "$pkgdir/usr/share/applications/app.klipt.desktop.desktop"
+  # The file name is the app id KDE knows Klipt by (portal shortcuts, autostart). It must not end
+  # in ".desktop" before the extension: KDE takes such ids for desktop files and never stores
+  # their shortcuts. desktop/src-tauri/src/autostart_linux.rs uses the same name.
+  install -Dm644 packaging/aur/app.klipt.Klipt.desktop "$pkgdir/usr/share/applications/app.klipt.Klipt.desktop"
   install -Dm644 desktop/src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/app.klipt.desktop.png"
   install -Dm644 desktop/src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/app.klipt.desktop.png"
   install -Dm644 desktop/src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/app.klipt.desktop.png"

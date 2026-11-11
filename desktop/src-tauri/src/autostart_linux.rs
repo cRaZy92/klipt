@@ -3,17 +3,21 @@
 //! KDE's portal knows an app by the name of the `.desktop` file that started it. The plugin names
 //! its autostart file `Klipt.desktop`, so a login start ran as app "Klipt": the GlobalShortcuts
 //! portal refused it ("An app id is required") and the save hotkey never worked after a reboot.
-//! Named after the app id, like the menu entry, both starts are the same app to KDE and share one
-//! shortcut registration.
+//! Named like the menu entry (`app.klipt.Klipt`), both starts are the same app to KDE and share
+//! one shortcut registration.
+//!
+//! The id is not the Tauri identifier `app.klipt.desktop`: KDE's shortcut service takes ids ending
+//! in `.desktop` for desktop files and never stored Klipt's shortcut, so KDE asked for it again on
+//! every start.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The app id (tauri.conf.json `identifier`), which is also the menu entry's name.
-const FILE_NAME: &str = "app.klipt.desktop.desktop";
-/// What the autostart plugin wrote before; removed so Klipt doesn't start twice.
-const OLD_FILE_NAME: &str = "Klipt.desktop";
+/// The app id KDE knows Klipt by: the menu entry's file name (packaging/aur).
+const FILE_NAME: &str = "app.klipt.Klipt.desktop";
+/// Autostart entries earlier versions wrote; removed so Klipt doesn't start twice.
+const OLD_FILE_NAMES: &[&str] = &["Klipt.desktop", "app.klipt.desktop.desktop"];
 
 fn autostart_dir() -> io::Result<PathBuf> {
     dirs::config_dir().map(|d| d.join("autostart")).ok_or_else(|| io::Error::other("no config directory"))
@@ -25,7 +29,9 @@ pub fn apply(enabled: bool) -> io::Result<()> {
 }
 
 fn apply_in(dir: &Path, enabled: bool, exe: &Path) -> io::Result<()> {
-    remove_if_present(&dir.join(OLD_FILE_NAME))?;
+    for old in OLD_FILE_NAMES {
+        remove_if_present(&dir.join(old))?;
+    }
     let file = dir.join(FILE_NAME);
     if !enabled {
         return remove_if_present(&file);
@@ -68,10 +74,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let autostart = dir.path().join("autostart");
         fs::create_dir_all(&autostart).unwrap();
-        fs::write(autostart.join(OLD_FILE_NAME), "old").unwrap();
+        for old in OLD_FILE_NAMES {
+            fs::write(autostart.join(old), "old").unwrap();
+        }
 
         apply_in(&autostart, true, Path::new("/usr/bin/klipt-desktop")).unwrap();
-        assert!(!autostart.join(OLD_FILE_NAME).exists(), "old entry removed");
+        for old in OLD_FILE_NAMES {
+            assert!(!autostart.join(old).exists(), "{old} removed");
+        }
         let text = fs::read_to_string(autostart.join(FILE_NAME)).unwrap();
         assert!(text.contains("\nExec=/usr/bin/klipt-desktop --autostart\n"), "{text}");
         assert!(text.contains("\nName=Klipt\n"), "{text}");
@@ -84,9 +94,10 @@ mod tests {
 
     #[test]
     fn the_entry_matches_the_menu_entrys_app_id() {
-        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        assert_eq!(format!("{}.desktop", conf["identifier"].as_str().unwrap()), FILE_NAME);
-        assert!(include_str!("../../../packaging/aur/PKGBUILD").contains(FILE_NAME), "menu entry has the same name");
+        let pkgbuild = include_str!("../../../packaging/aur/PKGBUILD");
+        assert!(pkgbuild.contains(&format!("/usr/share/applications/{FILE_NAME}")), "menu entry has the same name");
+        let id = FILE_NAME.strip_suffix(".desktop").unwrap();
+        assert!(!id.ends_with(".desktop"), "KDE won't store shortcuts for an id ending in .desktop");
     }
 
     #[test]

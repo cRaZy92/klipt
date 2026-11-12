@@ -249,6 +249,19 @@ export async function getClip(db: Db, id: string, viewerId?: string | null): Pro
   return row ? { ...row, views: Number(row.views), tagged: row.tagged ?? [], favorite: !!row.favorite } : null;
 }
 
+/**
+ * Who invites a visitor that signs up from the share link of `clipId`: the clip's owner, unless
+ * the clip is gone or the owner is disabled (then the link can't sign anyone up).
+ */
+export async function shareInviter(db: Db, clipId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: users.id })
+    .from(clips)
+    .innerJoin(users, eq(users.id, clips.userId))
+    .where(and(eq(clips.id, clipId), isNull(users.disabledAt)));
+  return row?.id ?? null;
+}
+
 /** Stars or unstars `clipId` for `userId`. False when the clip doesn't exist. */
 export async function setFavorite(db: Db, clipId: string, userId: string, favorite: boolean): Promise<boolean> {
   const [clip] = await db.select({ id: clips.id }).from(clips).where(eq(clips.id, clipId));

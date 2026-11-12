@@ -72,6 +72,7 @@ The owner picked these from two lists of suggestions. None has a spec yet.
 | Next clip suggestion       | **Done (desktop Feed).** When a clip ends, "Up next" offers the next one (Play next / Replay, no autoplay); ← → and header arrows move between clips |
 | Download on the share page | **Done.** A Download button saves the video as "<title>.mp4" (`/media/<id>.mp4?download=1`)       |
 | Screenshots                | **Done (needs a Windows check).** A screenshot shortcut (default Alt+Shift+`, Settings → Hotkey) or the Screenshot button saves a PNG next to the clips; Clips / Screenshots filters in My clips, the Feed and on the website; screenshots upload and get a share page. Windows grabs the desktop with ffmpeg gdigrab: exclusive-fullscreen games may come out black |
+| Sign up from a share link  | **Done (website).** Logged-out visitors see a "Create an account" form beside the clip; the owner is recorded as the inviter (an invite row used on the spot). `SHARE_SIGNUP=off` turns it off; a disabled owner's links can't sign anyone up |
 | Profile stats              | **Done (website).** Profiles show clips, total views and the most-watched clip (over what the viewer may see); clips per game are the game chips' counts |
 
 Turned down: a save-and-share hotkey (clips are always trimmed before sharing), choosing the clip

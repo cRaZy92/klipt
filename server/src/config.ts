@@ -11,6 +11,8 @@ export interface Config {
   secureCookies: boolean;
   /** Number of trusted reverse-proxy hops in front of the server (X-Forwarded-For). */
   trustProxyHops: number;
+  /** Logged-out visitors of a share link can create an account from it (the clip's owner invites them). */
+  shareSignup: boolean;
   /** Server-side compression of uploaded clips (H.264, so they play everywhere). */
   transcode: { enabled: boolean; crf: number; preset: string; threads: number };
 }
@@ -28,6 +30,7 @@ const envSchema = z.object({
   TRUST_PROXY_HOPS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(10).default(1)),
   ADMIN_USERNAME: z.preprocess(emptyToUndefined, z.string().optional()),
   ADMIN_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
+  SHARE_SIGNUP: z.preprocess(emptyToUndefined, z.enum(['on', 'off']).default('on')),
   TRANSCODE: z.preprocess(emptyToUndefined, z.enum(['on', 'off']).default('on')),
   TRANSCODE_CRF: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(51).default(23)),
   TRANSCODE_PRESET: z.preprocess(emptyToUndefined, z.enum(X264_PRESETS).default('medium')),
@@ -54,6 +57,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     adminPassword: e.ADMIN_PASSWORD,
     trustProxyHops: e.TRUST_PROXY_HOPS,
     secureCookies: baseUrl.startsWith('https://'),
+    shareSignup: e.SHARE_SIGNUP === 'on',
     transcode: { enabled: e.TRANSCODE === 'on', crf: e.TRANSCODE_CRF, preset: e.TRANSCODE_PRESET, threads: e.TRANSCODE_THREADS },
   };
 }

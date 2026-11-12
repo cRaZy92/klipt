@@ -20,7 +20,7 @@ export interface TestApp {
 }
 
 export async function makeTestApp(
-  opts: { maxUploadMb?: number; logStream?: { write(line: string): void }; transcode?: boolean } = {},
+  opts: { maxUploadMb?: number; logStream?: { write(line: string): void }; transcode?: boolean; shareSignup?: boolean } = {},
 ): Promise<TestApp> {
   const dataDir = await mkdtemp(join(tmpdir(), 'klipt-test-'));
   const env: Record<string, string> = {
@@ -31,6 +31,7 @@ export async function makeTestApp(
     TRANSCODE: opts.transcode ? 'on' : 'off',
   };
   if (opts.maxUploadMb !== undefined) env.MAX_UPLOAD_MB = String(opts.maxUploadMb);
+  if (opts.shareSignup !== undefined) env.SHARE_SIGNUP = opts.shareSignup ? 'on' : 'off';
   const config = loadConfig(env);
   const db = await createTestDb();
   const app = await buildApp({ config, db, logger: !!opts.logStream, logStream: opts.logStream });

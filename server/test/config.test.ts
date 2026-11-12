@@ -11,6 +11,13 @@ describe('loadConfig', () => {
     expect(c.secureCookies).toBe(true);
     expect(c.trustProxyHops).toBe(1);
     expect(c.transcode).toEqual({ enabled: true, crf: 23, preset: 'medium', threads: 2 });
+    expect(c.shareSignup).toBe(true);
+  });
+
+  it('turns signup from share links off and refuses bad values', () => {
+    const base = { BASE_URL: 'http://localhost', DATABASE_URL: 'postgres://x' };
+    expect(loadConfig({ ...base, SHARE_SIGNUP: 'off' }).shareSignup).toBe(false);
+    expect(() => loadConfig({ ...base, SHARE_SIGNUP: 'no' })).toThrow(/SHARE_SIGNUP/);
   });
 
   it('reads the compression settings and refuses bad ones', () => {

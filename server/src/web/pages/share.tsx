@@ -43,12 +43,35 @@ export function shareHead(clip: Clip): string {
   ].join('\n');
 }
 
+/** Beside the clip for logged-out visitors: make an account right here, invited by the clip's owner. */
+function JoinCard(props: { clip: Clip }): JSX.Element {
+  const { clip } = props;
+  const here = `/c/${encodeURIComponent(clip.id)}`;
+  return (
+    <section class="join-card" aria-labelledby="join-title">
+      <h2 id="join-title">Create an account</h2>
+      <form data-form="register" data-next={e(here)} class="form">
+        <input type="hidden" name="clipId" value={e(clip.id)} />
+        <label>Username<input name="username" autocomplete="username" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="3-24 letters, numbers or underscores" /></label>
+        <label>Password<input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="1024" /></label>
+        <p class="error" role="alert" hidden></p>
+        <button class="btn primary" type="submit">Create account</button>
+      </form>
+      <p class="join-login">
+        Already have an account? <a href={e(`/login?next=${encodeURIComponent(here)}`)}>Log in</a>
+      </p>
+    </section>
+  );
+}
+
 export function SharePage(props: {
   user: AuthUser | null;
   clip: Clip;
   canDelete: boolean;
   /** Friends who watched it; only given to the owner. */
   viewers?: string[];
+  /** Offer a logged-out visitor an account, invited by the clip's owner. */
+  signup?: boolean;
 }): JSX.Element {
   const { clip } = props;
   return (
@@ -108,6 +131,7 @@ export function SharePage(props: {
             ''
           )}
         </div>
+        {props.signup && !props.user ? <JoinCard clip={clip} /> : ''}
         </aside>
       </div>
     </Layout>

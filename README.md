@@ -19,6 +19,7 @@ Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, up
    | `TRANSCODE_CRF` | Optional. Compression quality, default `23`. Lower is better quality and bigger files (`20` ≈ near the original, `26` ≈ noticeably smaller). |
    | `TRANSCODE_PRESET` | Optional. x264 speed, default `medium`. `fast` uses less CPU for slightly bigger files; `slow` saves ~2% more for ~40% more CPU time. |
    | `TRANSCODE_THREADS` | Optional. CPU threads compression may use, default `2`, so it leaves the rest of the server alone (it also runs at low priority). On an i5-10600KF expect roughly 1.5 minutes of work per minute of 1080p60 clip with 2 threads. |
+   | `SHARE_SIGNUP` | Optional. `on` (default) lets someone who opens a share link without an account make one right there, invited by the clip's owner; `off` keeps sign-up to admin invite links only. |
    | `TRUST_PROXY_HOPS` | Optional. How many reverse proxies sit in front of Klipt, default `1`. Use `1` behind Dokploy/Traefik, `0` if Klipt is exposed directly with no proxy, `2` if Cloudflare is in front of Traefik. |
 
 3. **Without Dokploy's Traefik** (e.g. a Pangolin tunnel): skip the Domains tab and point the tunnel at `<Dokploy host IP>:<KLIPT_PORT>` with HTTPS terminated by the tunnel; keep `TRUST_PROXY_HOPS=1` (Pangolin's proxy is one hop). **With Dokploy's Traefik:** open the **Domains** tab, add your domain, and set service name `server`, port `3000`, and enable **HTTPS** (Let's Encrypt). Point the domain's DNS at your Dokploy server first.
@@ -31,6 +32,8 @@ Open your `BASE_URL`, sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`. The admi
 ## Inviting friends
 
 Klipt is invite-only. As admin, open the admin page, create an invite, and send the invite link to your friend. They pick a username and password and are in. Invites can be revoked from the same page.
+
+Share links count as invites too: someone who opens a clip's link without an account sees a "Create an account" form beside the clip, and the clip's owner is recorded as their inviter. Anyone who has a clip's link can therefore make an account. Set `SHARE_SIGNUP=off` to turn this off. Disabling a user (admin page → Users) stops their links from signing anyone up.
 
 ## Where your data lives
 

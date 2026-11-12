@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clips } from '../src/db/schema.js';
+import { eq } from 'drizzle-orm';
+import { clips, invites, users } from '../src/db/schema.js';
 import { createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
 
 let t: TestApp;
@@ -99,5 +100,76 @@ describe('share page', () => {
     expect(await view(admin.id)).toMatch(deleteButton);
     expect(await view(other.id)).not.toContain('data-action="delete"');
     expect(await view()).not.toContain('data-action="delete"');
+  });
+});
+
+describe('signing up from a share link', () => {
+  const register = (payload: Record<string, unknown>) => t.app.inject({ method: 'POST', url: '/api/register', payload });
+  const joinForm = /<form data-form="register" data-next="\/c\/joinclip0001"[\s\S]*name="clipId" value="joinclip0001"/;
+
+  it('offers logged-out visitors an account beside the clip, not logged-in ones', async () => {
+    const owner = await createUser(t.db, { username: 'kim' });
+    await addClip(owner.id, 'joinclip0001', { visibility: 'link' });
+    const page = await get('/c/joinclip0001');
+    expect(page.body).toContain('Create an account');
+    expect(page.body).toMatch(joinForm);
+    expect(page.body).toContain('href="/login?next=%2Fc%2Fjoinclip0001"');
+    const { cookie } = await sessionFor(t.db, owner.id);
+    const mine = await t.app.inject({ url: '/c/joinclip0001', headers: { cookie } });
+    expect(mine.body).not.toContain('data-form="register"');
+  });
+
+  it('creates the account, logs it in and records the clip owner as the inviter', async () => {
+    const owner = await createUser(t.db, { username: 'lena' });
+    await addClip(owner.id, 'joinclip0001');
+    const res = await register({ clipId: 'joinclip0001', username: 'Newbie', password: 'password123' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ username: 'Newbie', isAdmin: false });
+    const cookie = res.cookies.find((c) => c.name === 'klipt_session');
+    const me = await t.app.inject({ url: '/api/me', headers: { cookie: `klipt_session=${cookie!.value}` } });
+    expect(me.json()).toMatchObject({ username: 'Newbie' });
+    const [inv] = await t.db.select().from(invites);
+    expect(inv).toMatchObject({ createdBy: owner.id, usedBy: (me.json() as { id: string }).id });
+    // The same link keeps working for the next friend.
+    expect((await register({ clipId: 'joinclip0001', username: 'Second', password: 'password123' })).statusCode).toBe(200);
+    expect(await t.db.select().from(invites)).toHaveLength(2);
+  });
+
+  it('keeps the usual username and password rules', async () => {
+    const owner = await createUser(t.db, { username: 'mila' });
+    await addClip(owner.id, 'joinclip0001');
+    expect((await register({ clipId: 'joinclip0001', username: 'MILA', password: 'password123' })).json()).toEqual({ error: 'username_taken' });
+    expect((await register({ clipId: 'joinclip0001', username: 'a b', password: 'password123' })).json()).toEqual({ error: 'invalid_username' });
+    expect((await register({ clipId: 'joinclip0001', username: 'newone', password: 'short' })).json()).toEqual({ error: 'weak_password' });
+    expect(await t.db.select().from(invites)).toEqual([]);
+  });
+
+  it('refuses unknown or deleted clips, both or neither code, and disabled owners', async () => {
+    const owner = await createUser(t.db, { username: 'nora' });
+    await addClip(owner.id, 'joinclip0001');
+    await addClip(owner.id, 'joinclip0002');
+    const ok = { username: 'joiner', password: 'password123' };
+    expect((await register({ ...ok, clipId: 'nosuchclip01' })).json()).toEqual({ error: 'invalid_share' });
+    expect((await register({ ...ok, clipId: 'bad' })).json()).toEqual({ error: 'invalid_request' });
+    expect((await register(ok)).json()).toEqual({ error: 'invalid_request' });
+    expect((await register({ ...ok, clipId: 'joinclip0001', inviteCode: 'x' })).json()).toEqual({ error: 'invalid_request' });
+
+    const { headers } = await sessionFor(t.db, owner.id);
+    await t.app.inject({ method: 'DELETE', url: '/api/clips/joinclip0002', headers });
+    expect((await register({ ...ok, clipId: 'joinclip0002' })).json()).toEqual({ error: 'invalid_share' });
+
+    await t.db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, owner.id));
+    expect((await get('/c/joinclip0001')).body).not.toContain('data-form="register"');
+    expect((await register({ ...ok, clipId: 'joinclip0001' })).json()).toEqual({ error: 'invalid_share' });
+    expect(await t.db.select().from(users).where(eq(users.usernameKey, 'joiner'))).toEqual([]);
+  });
+
+  it('is off with SHARE_SIGNUP=off', async () => {
+    await t.close();
+    t = await makeTestApp({ shareSignup: false });
+    const owner = await createUser(t.db, { username: 'olga' });
+    await addClip(owner.id, 'joinclip0001');
+    expect((await get('/c/joinclip0001')).body).not.toContain('data-form="register"');
+    expect((await register({ clipId: 'joinclip0001', username: 'joiner', password: 'password123' })).json()).toEqual({ error: 'invalid_share' });
   });
 });

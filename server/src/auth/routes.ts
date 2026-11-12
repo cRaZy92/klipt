@@ -1,19 +1,26 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import type { DesktopLoginResponse, Me, SessionInfo } from '@klipt/shared';
+import { shareInviter } from '../clips/repo.js';
 import { invites, sessions, users } from '../db/schema.js';
 import { authRateLimit, requireUser, SESSION_COOKIE, setSessionCookie } from './plugin.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { activeInvite } from '../admin/queries.js';
 import { createSession, listSessions, revokeSession } from './sessions.js';
 
-const registerBody = z.object({
-  inviteCode: z.string().min(1).max(100),
-  username: z.string(),
-  password: z.string().max(1024),
-});
+const registerBody = z
+  .object({
+    /** An invite link an admin made. */
+    inviteCode: z.string().min(1).max(100).optional(),
+    /** Or a clip's share link: its owner is the inviter. */
+    clipId: z.string().regex(/^[A-Za-z0-9_-]{12}$/).optional(),
+    username: z.string(),
+    password: z.string().max(1024),
+  })
+  .refine((b) => (b.inviteCode === undefined) !== (b.clipId === undefined));
 const USERNAME_RE = /^[A-Za-z0-9_]{3,24}$/;
 
 const loginBody = z.object({
@@ -57,7 +64,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/register', { config: { rateLimit: authRateLimit } }, async (req, reply) => {
     const parsed = registerBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
-    const { inviteCode, username, password } = parsed.data;
+    const { inviteCode, clipId, username, password } = parsed.data;
     if (!USERNAME_RE.test(username)) return reply.code(400).send({ error: 'invalid_username' });
     if (password.length < 8) return reply.code(400).send({ error: 'weak_password' });
     const passwordHash = await hashPassword(password);
@@ -72,22 +79,32 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     try {
       user = await db.transaction(async (tx) => {
         const now = new Date();
-        const claimed = await tx
-          .update(invites)
-          .set({ usedAt: now })
-          .where(
-            and(eq(invites.code, inviteCode), activeInvite(now)),
-          )
-          .returning({ code: invites.code });
-        if (claimed.length === 0) throw new Fail(400, 'invalid_invite');
+        let inviter: string | null = null;
+        if (inviteCode !== undefined) {
+          const claimed = await tx
+            .update(invites)
+            .set({ usedAt: now })
+            .where(and(eq(invites.code, inviteCode), activeInvite(now)))
+            .returning({ code: invites.code });
+          if (claimed.length === 0) throw new Fail(400, 'invalid_invite');
+        } else {
+          inviter = config.shareSignup ? await shareInviter(tx, clipId!) : null;
+          if (!inviter) throw new Fail(400, 'invalid_share');
+        }
         const inserted = await tx
           .insert(users)
           .values({ username, usernameKey: username.toLowerCase(), passwordHash })
           .onConflictDoNothing({ target: users.usernameKey })
           .returning();
         if (inserted.length === 0) throw new Fail(409, 'username_taken');
-        await tx.update(invites).set({ usedBy: inserted[0]!.id }).where(eq(invites.code, inviteCode));
-        return inserted[0]!;
+        const created = inserted[0]!;
+        if (inviteCode !== undefined) {
+          await tx.update(invites).set({ usedBy: created.id }).where(eq(invites.code, inviteCode));
+        } else {
+          // Kept like an invite from the clip's owner, used on the spot: every account has an inviter.
+          await tx.insert(invites).values({ code: nanoid(16), createdBy: inviter!, expiresAt: now, usedAt: now, usedBy: created.id });
+        }
+        return created;
       });
     } catch (e) {
       if (e instanceof Fail) return reply.code(e.status).send({ error: e.code });

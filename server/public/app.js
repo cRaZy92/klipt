@@ -36,6 +36,7 @@
     invalid_username: 'Usernames are 3-24 letters, numbers or underscores.',
     weak_password: 'Passwords need at least 8 characters.',
     invalid_invite: 'This invite link is no longer valid.',
+    invalid_share: "This clip can't be used to sign up anymore. Ask a friend for an invite link.",
     rate_limited: 'Too many attempts. Try again in a minute.',
     unauthorized: 'You are logged out. Log in again and retry.',
     forbidden: "You don't have permission to do that.",
@@ -81,7 +82,10 @@
       if (form.dataset.form === 'login') {
         await api('POST', '/api/auth/login', { username: data.username, password: data.password, client: 'web' });
       } else {
-        await api('POST', '/api/register', { inviteCode: data.inviteCode, username: data.username, password: data.password });
+        // From an admin's invite link, or from a clip's share page (its owner invites).
+        var reg = { username: data.username, password: data.password };
+        if (data.clipId) reg.clipId = data.clipId; else reg.inviteCode = data.inviteCode;
+        await api('POST', '/api/register', reg);
       }
       location.assign(safeNext(form.dataset.next));
     } catch (e) {

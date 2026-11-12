@@ -283,6 +283,13 @@ impl Library {
         Ok(())
     }
 
+    /// The server clip ids local clips were uploaded as, each once.
+    pub fn server_clip_ids(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT DISTINCT server_clip_id FROM clips WHERE server_clip_id IS NOT NULL")?;
+        let ids = stmt.query_map([], |row| row.get(0))?.collect::<std::result::Result<Vec<String>, _>>()?;
+        Ok(ids)
+    }
+
     /// The server copy was deleted: local clips uploaded as it count as not uploaded again.
     pub fn unlink_server_clip(&self, server_clip_id: &str) -> Result<()> {
         self.conn.execute(
@@ -513,6 +520,24 @@ mod tests {
 
         f.lib.set_game(&c.id, None, None).unwrap();
         assert_eq!(f.lib.get(&c.id).unwrap().game_name, None);
+    }
+
+    #[test]
+    fn server_clip_ids_lists_linked_clips_and_unlink_clears_them() {
+        let f = Fixture::new();
+        let a = f.add("a.mp4", 1, None);
+        let b = f.add("b.mp4", 2, None);
+        f.add("c.mp4", 3, None);
+        f.lib.mark_uploaded(&a.id, "srv-a", "https://s/c/a", "feed").unwrap();
+        f.lib.mark_uploaded(&b.id, "srv-b", "https://s/c/b", "link").unwrap();
+        let mut ids = f.lib.server_clip_ids().unwrap();
+        ids.sort();
+        assert_eq!(ids, ["srv-a", "srv-b"]);
+
+        f.lib.unlink_server_clip("srv-a").unwrap();
+        assert_eq!(f.lib.server_clip_ids().unwrap(), ["srv-b"]);
+        let got = f.lib.get(&a.id).unwrap();
+        assert_eq!((got.server_clip_id, got.share_url, got.visibility), (None, None, None));
     }
 
     #[test]

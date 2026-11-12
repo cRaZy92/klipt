@@ -58,6 +58,7 @@ pub async fn my_uploads(app: AppHandle) -> Result<Option<Vec<Value>>> {
     };
     let mut items = Vec::new();
     let mut cursor: Option<String> = None;
+    let mut complete = false;
     for _ in 0..MAX_PAGES {
         let mut query = vec![("scope", "mine".to_string()), ("limit", PAGE_SIZE.to_string())];
         query.extend(cursor.take().map(|c| ("cursor", c)));
@@ -69,10 +70,39 @@ pub async fn my_uploads(app: AppHandle) -> Result<Option<Vec<Value>>> {
         }
         cursor = page.get("nextCursor").and_then(Value::as_str).filter(|c| !c.is_empty()).map(String::from);
         if cursor.is_none() {
+            complete = true;
             break;
         }
     }
+    if complete {
+        forget_deleted_uploads(&app, &client, &saved, &items).await;
+    }
     Ok(Some(items))
+}
+
+/// Local clips whose server copy was deleted elsewhere (another PC, the website) count as not
+/// uploaded again. `uploads` is the full list; a linked id missing from it is checked on its own,
+/// so a clip whose upload finished after the list was fetched keeps its link, and only a 404
+/// unlinks. Best effort: errors only mean the link is checked again next time.
+async fn forget_deleted_uploads(app: &AppHandle, client: &ApiClient, saved: &Auth, uploads: &[Value]) {
+    let listed: std::collections::HashSet<&str> =
+        uploads.iter().filter_map(|u| u.get("id").and_then(Value::as_str)).collect();
+    let linked = match crate::commands::lock(&app.state::<AppState>().library).server_clip_ids() {
+        Ok(ids) => ids,
+        Err(e) => return eprintln!("klipt: can't read uploaded clips: {e}"),
+    };
+    for id in linked.iter().filter(|id| !listed.contains(id.as_str())) {
+        let Ok(id) = checked_id(id) else { continue };
+        match client.get_json(&saved.token, &format!("/api/clips/{id}"), &[]).await {
+            Err(crate::upload::ApiError::Server { status: 404, .. }) => {
+                if let Err(e) = crate::commands::lock(&app.state::<AppState>().library).unlink_server_clip(id) {
+                    eprintln!("klipt: can't unlink deleted upload {id}: {e}");
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("klipt: can't check upload {id}: {e}"),
+        }
+    }
 }
 
 /// Renames the server copy and/or changes who can see it. Returns the updated clip.

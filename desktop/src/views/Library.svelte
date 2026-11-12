@@ -94,6 +94,10 @@
       if (mine !== uploadsRequest) return;
       uploads = list;
       uploadsError = null;
+      // A local clip linked to an upload missing from the list may have been unlinked just now
+      // (deleted on another PC or the website): reload so it stops showing as uploaded.
+      const ids = new Set((list ?? []).map((u) => u.id));
+      if (list && local.some((c) => c.serverClipId && !ids.has(c.serverClipId))) void loadLocal();
     } catch (e) {
       if (mine === uploadsRequest) uploadsError = errorMessage(e);
     }

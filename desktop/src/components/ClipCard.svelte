@@ -4,6 +4,7 @@
   import { forgetUpload, fraction, isBusy, retryUpload, statusLabel, uploads } from "../lib/uploads.svelte";
   import { menu } from "../lib/a11y";
   import Icon from "./Icon.svelte";
+  import ProcessingPill from "./ProcessingPill.svelte";
   import "./clip-card.css";
 
   let {
@@ -19,6 +20,8 @@
     oncopy,
     onfavorite,
     onview,
+    onplay,
+    processing = null,
     thumbVersion = 0,
   }: {
     clip: ClipView;
@@ -40,6 +43,10 @@
     thumbVersion?: number;
     /** Shows a screenshot full size (screenshots have no editor). */
     onview?: () => void;
+    /** Plays the uploaded copy (what friends see); once a clip is uploaded, the picture plays it. */
+    onplay?: () => void;
+    /** The server is still compressing the uploaded copy. */
+    processing?: "queued" | "running" | null;
   } = $props();
 
   let menuOpen = $state(false);
@@ -79,8 +86,12 @@
       <button class="open" onclick={onview} aria-label="View {clip.title}">
         <span class="open-pill"><Icon name="image" size={15} /> View</span>
       </button>
+    {:else if onplay}
+      <button class="open" onclick={onplay} aria-label="Play {clip.title}">
+        <span class="open-pill"><Icon name="play" size={15} /> Play</span>
+      </button>
     {:else if onedit && !clip.fileMissing}
-      <!-- The whole picture opens the editor, which is also where the clip plays. -->
+      <!-- Not uploaded yet: the whole picture opens the editor, which is also where the clip plays. -->
       <button class="open" onclick={onedit} disabled={busy} aria-label="Edit {clip.title}">
         <span class="open-pill"><Icon name="scissors" size={15} /> Edit</span>
       </button>
@@ -90,6 +101,7 @@
     {:else if uploaded}
       <span class="badge badge-uploaded"><Icon name="check" size={13} /> Uploaded</span>
     {/if}
+    <ProcessingPill state={processing} />
     {#if clip.kind === "screenshot"}
       <span class="duration" title="Screenshot"><Icon name="image" size={13} /></span>
     {:else}

@@ -58,6 +58,8 @@
   let thumbVersion = $state<Record<string, number>>({});
 
   const items = $derived(mergeClips(local, uploads ?? []));
+  /** A local clip's uploaded copy, by server id: its card plays that copy and shows its compression. */
+  const uploadById = $derived(new Map((uploads ?? []).map((u) => [u.id, u])));
   const games = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
   const visible = $derived(visibleClips(items, place, game, sort, search, media));
   const groups = $derived(groupByDay(visible, (i) => i.at, now));
@@ -124,6 +126,14 @@
       clearInterval(timer);
       stops.forEach((stop) => stop());
     };
+  });
+
+  // While the server compresses one of your uploads, check back so its "Queued" / "Processing"
+  // pill goes away once it's done.
+  $effect(() => {
+    if (!uploads?.some((u) => u.processing === "queued" || u.processing === "running")) return;
+    const timer = setInterval(() => void loadUploads(), 15_000);
+    return () => clearInterval(timer);
   });
 
   async function act(action: () => Promise<unknown>, success?: string) {
@@ -385,6 +395,7 @@
             {#each group.items as item, i (item.key)}
               {#if item.kind === "local"}
                 {@const clip = item.clip}
+                {@const served = clip.serverClipId ? uploadById.get(clip.serverClipId) : undefined}
                 <ClipCard
                   {clip}
                   {now}
@@ -392,6 +403,8 @@
                   onupload={() => (uploading = clip)}
                   onedit={clip.kind === "screenshot" ? undefined : onedit ? () => onedit(clip) : undefined}
                   onview={clip.kind === "screenshot" ? () => (viewing = clip) : undefined}
+                  onplay={served ? () => (playing = served) : undefined}
+                  processing={served?.processing}
                   onrename={() => (renaming = { kind: "local", id: clip.id, value: clip.title })}
                   onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
                   onremove={() => (removing = { clip, deleteFile: false })}

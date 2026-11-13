@@ -24,7 +24,14 @@ pub struct Edit {
     pub master_volume: f32,
     /// The other audio tracks, by track index; a track not listed plays at 1.
     pub extra_volumes: BTreeMap<u32, f32>,
+    /// Blur the picture (re-encoded at most 720p): a clip where only the sound matters.
+    pub blur_video: bool,
 }
+
+/// How strong "Blur video" is: a Gaussian sigma at 720p. Shapes and colours stay, details don't.
+pub const BLUR_SIGMA: u32 = 8;
+/// The tallest a blurred clip is encoded: more detail would only be blurred away.
+const BLUR_MAX_HEIGHT: u32 = 720;
 
 /// Which audio tracks besides the game (always track 0) a clip has, by track index.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -65,7 +72,8 @@ fn seconds(ms: u64) -> String {
 
 /// The ffmpeg arguments (without the program name) for exporting `input` to `output`.
 /// A trim start before `-i` snaps to the keyframe at or before it; `-to` is then relative to it.
-pub fn export_args(input: &Path, output: &Path, edit: &Edit, tracks: &Tracks) -> Result<Vec<String>> {
+/// The video is copied as it is, or with `edit.blur_video` blurred and encoded with `encoder`.
+pub fn export_args(input: &Path, output: &Path, edit: &Edit, tracks: &Tracks, encoder: &[&str]) -> Result<Vec<String>> {
     let start = edit.trim_start_ms;
     if let Some(end) = edit.trim_end_ms {
         if end <= start.unwrap_or(0) {
@@ -96,10 +104,20 @@ pub fn export_args(input: &Path, output: &Path, edit: &Edit, tracks: &Tracks) ->
     if let Some(end) = edit.trim_end_ms {
         args.extend(["-to".into(), seconds(end - start.unwrap_or(0))]);
     }
-    args.extend(
-        ["-map", "0:v:0", "-c:v", "copy", "-filter_complex"].map(String::from),
-    );
-    args.push(graph);
+    let graph = if edit.blur_video {
+        format!("[0:v:0]scale=-2:'min({BLUR_MAX_HEIGHT},ih)',gblur=sigma={BLUR_SIGMA}[vout];{graph}")
+    } else {
+        graph
+    };
+    args.extend(["-filter_complex".into(), graph]);
+    if edit.blur_video {
+        args.extend(["-map", "[vout]"].map(String::from));
+        args.extend(encoder.iter().map(|s| s.to_string()));
+        // Like imported copies: a keyframe each second keeps trimming and seeking exact.
+        args.extend(["-pix_fmt", "yuv420p", "-force_key_frames", "expr:gte(t,n_forced*1)"].map(String::from));
+    } else {
+        args.extend(["-map", "0:v:0", "-c:v", "copy"].map(String::from));
+    }
     args.extend(
         ["-map", "[aout]", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-f", "mp4", "-progress", "pipe:1", "-nostats"]
             .map(String::from),
@@ -131,7 +149,14 @@ pub fn export(
     let out = dir.join(format!("{clip_id}.mp4"));
     let temp = dir.join(format!("{clip_id}.tmp.mp4"));
 
-    let args = export_args(input, &temp, edit, &tracks)?;
+    let encoder = if edit.blur_video {
+        let found = crate::import::detect_encoder(tools)
+            .ok_or_else(|| AppError::ToolFailed { tool: "ffmpeg", detail: "no H.264 encoder to blur the video with".into() })?;
+        found.args
+    } else {
+        Vec::new()
+    };
+    let args = export_args(input, &temp, edit, &tracks, &encoder)?;
     let result = run(tools, &args, expected_us, &mut progress).and_then(|_| match fs::metadata(&temp) {
         Ok(meta) if meta.len() > 0 => Ok(fs::rename(&temp, &out)?),
         _ => Err(AppError::ToolFailed { tool: "ffmpeg", detail: "export produced no output".into() }),
@@ -191,21 +216,21 @@ mod tests {
     #[test]
     fn args_with_mic_and_voice_mix_three_tracks() {
         let tracks = Tracks { mic: Some(1), voice: Some(2), extra: vec![] };
-        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &tracks).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &tracks, &[]).unwrap().join(" ");
         assert!(joined.contains(
             "[0:a:0]volume=1[a0];[0:a:1]volume=0.5[a1];[0:a:2]volume=0.25[a2];[a0][a1][a2]amix=inputs=3:normalize=0[aout]"
         ), "{joined}");
         let voice_only = Tracks { mic: None, voice: Some(1), extra: vec![] };
-        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &voice_only).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &voice_only, &[]).unwrap().join(" ");
         assert!(joined.contains("[0:a:1]volume=0.25[a1];[a0][a1]amix=inputs=2"), "{joined}");
     }
 
     #[test]
     fn master_volume_scales_the_mix() {
         let e = Edit { master_volume: 0.5, ..edit(None, None) };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, &[]).unwrap().join(" ");
         assert!(joined.contains("amix=inputs=2:normalize=0,volume=0.5[aout]"), "{joined}");
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &Tracks::default()).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &Tracks::default(), &[]).unwrap().join(" ");
         assert!(joined.contains("[0:a:0]volume=1,volume=0.5[aout]"), "{joined}");
     }
 
@@ -231,11 +256,35 @@ mod tests {
     fn extra_tracks_are_mixed_at_their_volumes() {
         let tracks = Tracks { mic: None, voice: None, extra: vec![1, 2] };
         let e = Edit { extra_volumes: BTreeMap::from([(2, 0.3)]), ..edit(None, None) };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &tracks).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &tracks, &[]).unwrap().join(" ");
         assert!(
             joined.contains("[0:a:0]volume=1[a0];[0:a:1]volume=1[a1];[0:a:2]volume=0.3[a2];[a0][a1][a2]amix=inputs=3"),
             "{joined}"
         );
+    }
+
+    #[test]
+    fn blurred_exports_encode_a_blurred_picture() {
+        let e = Edit { blur_video: true, ..edit(None, None) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, &["-c:v", "libx264"]).unwrap().join(" ");
+        assert!(joined.contains("[0:v:0]scale=-2:'min(720,ih)',gblur=sigma=8[vout];[0:a:0]volume=1[a0]"), "{joined}");
+        assert!(joined.contains("-map [vout] -c:v libx264 -pix_fmt yuv420p -force_key_frames"), "{joined}");
+        assert!(!joined.contains("-c:v copy"), "{joined}");
+        // Not blurred: the picture is copied as it is, no encoder needed.
+        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &MIC, &[]).unwrap().join(" ");
+        assert!(joined.contains("-map 0:v:0 -c:v copy") && !joined.contains("gblur"), "{joined}");
+    }
+
+    #[test]
+    fn exporting_a_blurred_clip_makes_a_playable_h264_file() {
+        let cache = tempfile::tempdir().unwrap();
+        let e = Edit { blur_video: true, ..edit(Some(500), Some(2500)) };
+        let out = export(&tools(), fixture(), cache.path(), "blur", &e, MIC, |_| {}).unwrap();
+        let info = crate::ffmpeg::inspect(&tools(), &out).unwrap();
+        assert_eq!(info.video_codec.as_deref(), Some("h264"));
+        assert!(info.height <= 720 && info.height > 0, "{info:?}");
+        assert!((1800..=2200).contains(&info.duration_ms), "the trim is kept: {info:?}");
+        assert_eq!(info.audio_codecs, vec!["aac"]);
     }
 
     #[test]
@@ -257,39 +306,39 @@ mod tests {
     }
 
     fn edit(start: Option<u64>, end: Option<u64>) -> Edit {
-        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0, extra_volumes: BTreeMap::new() }
+        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false }
     }
 
     #[test]
     fn args_with_a_mic() {
-        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(Some(2000), Some(4000)), &MIC).unwrap();
+        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(Some(2000), Some(4000)), &MIC, &[]).unwrap();
         assert_eq!(
             args.join(" "),
-            "-hide_banner -nostdin -y -ss 2.000 -i in.mp4 -to 2.000 -map 0:v:0 -c:v copy -filter_complex \
+            "-hide_banner -nostdin -y -ss 2.000 -i in.mp4 -to 2.000 -filter_complex \
              [0:a:0]volume=1[a0];[0:a:1]volume=0.5[a1];[a0][a1]amix=inputs=2:normalize=0[aout] \
-             -map [aout] -c:a aac -b:a 160k -movflags +faststart -f mp4 -progress pipe:1 -nostats out.mp4"
+             -map 0:v:0 -c:v copy -map [aout] -c:a aac -b:a 160k -movflags +faststart -f mp4 -progress pipe:1 -nostats out.mp4"
         );
     }
 
     // Review Focus 5: no mic track, the mix comes from one track.
     #[test]
     fn args_without_a_mic_or_trim() {
-        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(None, None), &Tracks::default()).unwrap();
+        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(None, None), &Tracks::default(), &[]).unwrap();
         assert_eq!(
             args.join(" "),
-            "-hide_banner -nostdin -y -i in.mp4 -map 0:v:0 -c:v copy -filter_complex [0:a:0]volume=1[aout] \
-             -map [aout] -c:a aac -b:a 160k -movflags +faststart -f mp4 -progress pipe:1 -nostats out.mp4"
+            "-hide_banner -nostdin -y -i in.mp4 -filter_complex [0:a:0]volume=1[aout] \
+             -map 0:v:0 -c:v copy -map [aout] -c:a aac -b:a 160k -movflags +faststart -f mp4 -progress pipe:1 -nostats out.mp4"
         );
     }
 
     #[test]
     fn volumes_are_clamped_and_bad_ranges_rejected() {
-        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new() };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC).unwrap().join(" ");
+        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, &[]).unwrap().join(" ");
         assert!(joined.contains("volume=2[a0]") && joined.contains("volume=0[a1]") && joined.contains("-to 1.500"));
         for (s, e) in [(Some(4000), Some(2000)), (Some(2000), Some(2000)), (None, Some(0))] {
             assert!(matches!(
-                export_args(Path::new("i"), Path::new("o"), &edit(s, e), &MIC),
+                export_args(Path::new("i"), Path::new("o"), &edit(s, e), &MIC, &[]),
                 Err(AppError::InvalidInput(_))
             ));
         }

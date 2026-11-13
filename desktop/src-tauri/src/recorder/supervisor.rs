@@ -714,6 +714,7 @@ mod tests {
                 master_volume: 1.0,
                 kind: crate::library::ClipKind::Clip,
                 extra_volumes: Default::default(),
+                blur_video: false,
             },
             file_missing: false,
             thumb_path: None,

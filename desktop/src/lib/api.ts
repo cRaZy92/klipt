@@ -39,6 +39,8 @@ export interface ClipView {
   masterVolume: number;
   /** Volumes of other audio tracks (an imported clip's), by track index; missing = 1. */
   extraVolumes?: Record<string, number>;
+  /** Uploads and exports blur the picture (only the sound matters). Missing = off. */
+  blurVideo?: boolean;
   /** The thumbnail's frame (ms into the video); null = automatic. */
   thumbnailMs: number | null;
   fileMissing: boolean;
@@ -200,6 +202,8 @@ export interface EditInput {
   masterVolume: number;
   /** 0.0–1.0 per other audio track, by track index. */
   extraVolumes: Record<number, number>;
+  /** Blur the picture in uploads and exports. */
+  blurVideo: boolean;
 }
 
 export interface ExportProgress {

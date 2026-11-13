@@ -59,12 +59,15 @@ const MIGRATIONS: &[&str] = &["
     -- Volumes of audio tracks besides the game, mic and voice chat ones (imported clips), as a
     -- JSON object of track index to volume, e.g. {\"2\": 0.5}. Tracks not listed play at 1.
     ALTER TABLE clips ADD COLUMN extra_volumes TEXT NOT NULL DEFAULT '{}';
+", "
+    -- The editor's Blur video switch: uploads and exports blur the picture (only the sound matters).
+    ALTER TABLE clips ADD COLUMN blur_video INTEGER NOT NULL DEFAULT 0;
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
                        visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind, \
-                       extra_volumes";
+                       extra_volumes, blur_video";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -96,6 +99,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         kind: if row.get::<_, String>(25)? == "screenshot" { ClipKind::Screenshot } else { ClipKind::Clip },
         // Unreadable JSON (hand-edited database) reads as "all at 1" rather than failing the clip.
         extra_volumes: serde_json::from_str(&row.get::<_, String>(26)?).unwrap_or_default(),
+        blur_video: row.get(27)?,
     })
 }
 
@@ -197,6 +201,11 @@ impl Library {
              master_volume = ?7, extra_volumes = ?8 WHERE id = ?1",
             params![id, trim.start_ms, trim.end_ms, volumes.game, volumes.mic, volumes.voice, volumes.master, extra],
         )
+    }
+
+    /// The editor's "Blur video" for clip `id`.
+    pub fn set_blur_video(&self, id: &str, blur: bool) -> Result<()> {
+        self.update(id, "UPDATE clips SET blur_video = ?2 WHERE id = ?1", params![id, blur])
     }
 
     pub fn set_game(&self, id: &str, name: Option<&str>, steam_app_id: Option<u32>) -> Result<()> {
@@ -548,6 +557,16 @@ mod tests {
         assert_eq!(f.lib.server_clip_ids().unwrap(), ["srv-b"]);
         let got = f.lib.get(&a.id).unwrap();
         assert_eq!((got.server_clip_id, got.share_url, got.visibility), (None, None, None));
+    }
+
+    #[test]
+    fn blur_video_persists() {
+        let f = Fixture::new();
+        let c = f.add("a.mp4", 1, None);
+        assert!(!f.lib.get(&c.id).unwrap().blur_video, "clips aren't blurred unless asked");
+        f.lib.set_blur_video(&c.id, true).unwrap();
+        assert!(f.lib.get(&c.id).unwrap().blur_video);
+        assert!(matches!(f.lib.set_blur_video("nope", true), Err(AppError::ClipNotFound(_))));
     }
 
     #[test]

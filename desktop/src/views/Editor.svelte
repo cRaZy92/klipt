@@ -45,6 +45,8 @@
   let masterVolume = $state(100);
   /** The other audio tracks' sliders (0–100), by track index. */
   let extraVolumes = $state<Record<number, number>>({});
+  /** "Blur video": uploads and exports blur the picture (a clip where only the sound matters). */
+  let blurVideo = $state(false);
   /** The thumbnail's frame; null = automatic. */
   let thumb = $state<number | null>(null);
   /** The edit as last loaded or saved; `dirty` compares against it. */
@@ -56,6 +58,18 @@
   let micAudio = $state<HTMLAudioElement>();
   let voiceAudio = $state<HTMLAudioElement>();
   let extraAudios = $state<(HTMLAudioElement | undefined)[]>([]);
+
+  // The preview of "Blur video": as strong as the export's blur (sigma 8 at up to 720p, see
+  // export.rs), scaled to the size the picture is shown at.
+  const BLUR_SIGMA = 8;
+  let stageWidth = $state(0);
+  let stageHeight = $state(0);
+  let videoSize = $state<{ width: number; height: number } | null>(null);
+  const previewBlur = $derived.by(() => {
+    if (!blurVideo || !videoSize || !stageWidth || !stageHeight) return undefined;
+    const shown = Math.min(stageHeight, (stageWidth * videoSize.height) / videoSize.width);
+    return `blur(${((BLUR_SIGMA * shown) / Math.min(720, videoSize.height)).toFixed(1)}px)`;
+  });
   let playing = $state(false);
   let position = $state(0);
 
@@ -86,6 +100,7 @@
       voiceVolume: voiceVolume / 100,
       masterVolume: masterVolume / 100,
       extraVolumes: Object.fromEntries(Object.entries(extraVolumes).map(([track, v]) => [track, v / 100])),
+      blurVideo,
     };
   });
 
@@ -103,6 +118,7 @@
         edit.voiceVolume !== stored.voiceVolume ||
         edit.masterVolume !== stored.masterVolume ||
         !sameVolumes(edit.extraVolumes, stored.extraVolumes) ||
+        edit.blurVideo !== stored.blurVideo ||
         thumb !== storedThumb),
   );
 
@@ -126,6 +142,7 @@
       voiceVolume = percent(d.clip.voiceVolume ?? 1);
       masterVolume = percent(d.clip.masterVolume ?? 1);
       extraVolumes = Object.fromEntries(d.extraTracks.map((t) => [t.index, percent(d.clip.extraVolumes?.[t.index] ?? 1)]));
+      blurVideo = d.clip.blurVideo ?? false;
       thumb = d.clip.thumbnailMs;
       position = trim.start;
       data = d;
@@ -325,6 +342,7 @@
           voiceVolume: next.voiceVolume,
           masterVolume: next.masterVolume,
           extraVolumes: next.extraVolumes,
+          blurVideo: next.blurVideo,
           uploadId: null,
           uploadOffset: null,
         };
@@ -470,7 +488,7 @@
       <p>Preparing the clip…</p>
     </div>
   {:else}
-    <div class="stage">
+    <div class="stage" bind:clientWidth={stageWidth} bind:clientHeight={stageHeight}>
       <!-- svelte-ignore a11y_media_has_caption -->
       <video
         bind:this={video}
@@ -486,8 +504,10 @@
         onended={onended}
         onerror={() => (mediaError = true)}
         onclick={togglePlay}
+        onloadedmetadata={() => video && (videoSize = { width: video.videoWidth, height: video.videoHeight })}
+        style:filter={previewBlur}
       ></video>
-      <canvas bind:this={freeze} class="freeze" class:show={frozen} aria-hidden="true"></canvas>
+      <canvas bind:this={freeze} class="freeze" class:show={frozen} aria-hidden="true" style:filter={previewBlur}></canvas>
       {#if mediaError}
         <div class="media-error">
           <Icon name="alert" size={28} />
@@ -538,6 +558,11 @@
 
     <div class="panel">
       <div class="mixer">
+        <label class="blur-toggle" title="For clips where only the sound matters: uploads and exports blur the picture">
+          <input type="checkbox" bind:checked={blurVideo} />
+          <span class="switch" aria-hidden="true"></span>
+          Blur video
+        </label>
         <label class="volume master" title="The whole clip: every track together">
           <span class="vol-label"><Icon name="volume" size={17} /> Master</span>
           <input
@@ -884,6 +909,61 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem 2.25rem;
+  }
+
+  .blur-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding-right: 2.25rem;
+    border-right: 1px solid var(--border);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .blur-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .switch {
+    position: relative;
+    flex: none;
+    width: 2.1rem;
+    height: 1.2rem;
+    border-radius: 999px;
+    background: var(--surface-3);
+    transition: background 0.15s;
+  }
+
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 0.15rem;
+    left: 0.15rem;
+    width: 0.9rem;
+    height: 0.9rem;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition:
+      transform 0.15s var(--ease-out),
+      background 0.15s;
+  }
+
+  .blur-toggle input:checked + .switch {
+    background: var(--accent);
+  }
+
+  .blur-toggle input:checked + .switch::after {
+    background: #fff;
+    transform: translateX(0.9rem);
+  }
+
+  .blur-toggle input:focus-visible + .switch {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   /* Master sits apart from the per-track sliders. */

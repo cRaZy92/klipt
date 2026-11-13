@@ -119,6 +119,7 @@ pub fn current_edit(clip: &Clip) -> Edit {
         voice_volume: clip.voice_volume,
         master_volume: clip.master_volume,
         extra_volumes: clip.extra_volumes.clone(),
+        blur_video: clip.blur_video,
     }
 }
 
@@ -144,6 +145,7 @@ pub fn save_edit(library: &Library, uploads: &Uploads, cache_dir: &Path, id: &st
     crate::library::validate_edit(trim, &volumes)?;
     forget_upload_export(library, cache_dir, id)?;
     library.update_edit(id, trim, &volumes)?;
+    library.set_blur_video(id, edit.blur_video)?;
     Ok(true)
 }
 
@@ -346,7 +348,7 @@ mod tests {
     }
 
     fn cut(start: u64, end: u64) -> Edit {
-        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new() }
+        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false }
     }
 
     #[test]
@@ -374,7 +376,7 @@ mod tests {
     #[test]
     fn saving_a_full_clip_edit_without_any_cache_works() {
         let f = Fixture::new();
-        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9, extra_volumes: BTreeMap::new() };
+        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9, extra_volumes: BTreeMap::new(), blur_video: false };
         assert!(save_edit(&f.lib, &Uploads::default(), &f.cache(), &f.clip.id, edit.clone()).unwrap());
         assert_eq!(current_edit(&f.lib.get(&f.clip.id).unwrap()), edit);
     }

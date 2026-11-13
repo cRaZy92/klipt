@@ -83,6 +83,8 @@ pub struct Clip {
     pub kind: ClipKind,
     /// Volumes of the other audio tracks (imported clips with more tracks), by track index.
     pub extra_volumes: BTreeMap<u32, f32>,
+    /// Uploads and exports blur the picture: a clip where only the sound matters.
+    pub blur_video: bool,
 }
 
 impl Clip {

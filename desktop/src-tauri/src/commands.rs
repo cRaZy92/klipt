@@ -833,6 +833,7 @@ fn edit_from(
     voice_volume: Option<f32>,
     master_volume: Option<f32>,
     extra_volumes: Option<BTreeMap<u32, f32>>,
+    blur_video: Option<bool>,
 ) -> Edit {
     Edit {
         trim_start_ms,
@@ -842,6 +843,7 @@ fn edit_from(
         voice_volume: voice_volume.unwrap_or(1.0),
         master_volume: master_volume.unwrap_or(1.0),
         extra_volumes: extra_volumes.unwrap_or_default(),
+        blur_video: blur_video.unwrap_or(false),
     }
 }
 
@@ -861,10 +863,11 @@ pub fn save_edit(
     voice_volume: Option<f32>,
     master_volume: Option<f32>,
     extra_volumes: Option<BTreeMap<u32, f32>>,
+    blur_video: Option<bool>,
     thumbnail_ms: Option<u64>,
 ) -> Result<()> {
     let cache_dir = cache_dir(&app)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video);
     let clip = {
         let library = lock(&state.library);
         editor::save_edit(&library, &uploads, &cache_dir, &id, edit)?;
@@ -911,6 +914,7 @@ pub async fn export_copy(
     voice_volume: Option<f32>,
     master_volume: Option<f32>,
     extra_volumes: Option<BTreeMap<u32, f32>>,
+    blur_video: Option<bool>,
 ) -> Result<()> {
     let (clip, tools) = {
         let state = app.state::<AppState>();
@@ -926,7 +930,7 @@ pub async fn export_copy(
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
     let guard = app.state::<Uploads>().try_begin(&id).map_err(|_| AppError::ClipBusy)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video);
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, export::Tracks::of(&clip), |p| {
@@ -1049,6 +1053,7 @@ mod tests {
             master_volume: 1.0,
             kind: crate::library::ClipKind::Clip,
             extra_volumes: Default::default(),
+            blur_video: false,
         }
     }
 

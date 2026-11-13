@@ -80,20 +80,13 @@ export function SharePage(props: {
         {clip.kind === 'screenshot' ? (
           <img class="shot" src={e(clip.videoUrl)} alt={e(clip.title)} data-view-url={`/api/clips/${e(clip.id)}/view`} />
         ) : (
-          // app.js starts it by itself; browsers that block sound get it muted plus the button.
-          <div class="player">
-            <video
-              controls
-              {...{ playsinline: true, preload: "metadata" }}
-              poster={e(clip.thumbnailUrl)}
-              src={e(clip.videoUrl)}
-              data-view-url={`/api/clips/${e(clip.id)}/view`}
-              data-autoplay
-            ></video>
-            <button type="button" class="unmute" hidden aria-label="Turn the sound on">
-              <span>🔊 Click for sound</span>
-            </button>
-          </div>
+        <video
+            controls
+            {...{ playsinline: true, preload: "metadata" }}
+            poster={e(clip.thumbnailUrl)}
+            src={e(clip.videoUrl)}
+            data-view-url={`/api/clips/${e(clip.id)}/view`}
+          ></video>
         )}
         <aside class="share-info">
         <h1>{e(clip.title)}</h1>

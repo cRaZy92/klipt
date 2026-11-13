@@ -216,9 +216,8 @@
     }, { once: true });
   });
 
-  // Share page: the clip starts by itself at the volume this browser last used (half the first
-  // time). Browsers block sound until the visitor has interacted with the site, so if playing with
-  // sound is refused it starts muted and a button turns the sound on.
+  // Share page: the clip plays when the visitor starts it, at half volume unless they've changed
+  // it before; their volume and mute are remembered in this browser.
   var VOLUME_KEY = 'klipt.volume';
   var MUTED_KEY = 'klipt.muted';
   function stored(key) {
@@ -227,50 +226,13 @@
   function store(key, value) {
     try { localStorage.setItem(key, value); } catch (e) { /* private mode: just not remembered */ }
   }
-  document.querySelectorAll('video[data-autoplay]').forEach(function (video) {
-    var button = video.parentElement && video.parentElement.querySelector('.unmute');
+  document.querySelectorAll('.share video').forEach(function (video) {
     var volume = parseFloat(stored(VOLUME_KEY));
     video.volume = volume >= 0 && volume <= 1 ? volume : 0.5;
     video.muted = stored(MUTED_KEY) === 'true';
-    // Muted by us to get past the autoplay block, not by the visitor: not remembered.
-    var mutedForAutoplay = false;
-
-    function soundOn() {
-      mutedForAutoplay = false;
-      video.muted = false;
-      if (button) button.hidden = true;
-      // Some browsers pause a video that's unmuted without a click; this is one, so carry on.
-      if (video.paused) video.play().catch(function () {});
-    }
-    if (button) button.addEventListener('click', soundOn);
-    // Any first click or key press on the page counts too: the browser allows sound after one.
-    function firstTouch() {
-      if (mutedForAutoplay) soundOn();
-      document.removeEventListener('pointerdown', firstTouch, true);
-      document.removeEventListener('keydown', firstTouch, true);
-    }
-    document.addEventListener('pointerdown', firstTouch, true);
-    document.addEventListener('keydown', firstTouch, true);
-
     video.addEventListener('volumechange', function () {
-      if (mutedForAutoplay) {
-        // The visitor unmuted with the player's own controls: the button has done its job.
-        if (!video.muted) { mutedForAutoplay = false; if (button) button.hidden = true; } else return;
-      }
       store(VOLUME_KEY, String(video.volume));
       store(MUTED_KEY, String(video.muted));
-    });
-
-    video.play().catch(function () {
-      if (video.muted) return; // blocked even muted (e.g. a data saver): the poster and controls stay
-      mutedForAutoplay = true;
-      video.muted = true;
-      video.play().then(function () {
-        if (button && mutedForAutoplay) button.hidden = false;
-      }).catch(function () {
-        mutedForAutoplay = false;
-        video.muted = false;
-      });
     });
   });
 

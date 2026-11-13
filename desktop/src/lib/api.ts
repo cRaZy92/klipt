@@ -37,6 +37,8 @@ export interface ClipView {
   voiceVolume: number;
   /** The whole clip's volume, applied after mixing. */
   masterVolume: number;
+  /** Volumes of other audio tracks (an imported clip's), by track index; missing = 1. */
+  extraVolumes?: Record<string, number>;
   /** The thumbnail's frame (ms into the video); null = automatic. */
   thumbnailMs: number | null;
   fileMissing: boolean;
@@ -179,6 +181,8 @@ export interface EditorData {
   gameAudioUrl: string;
   micAudioUrl: string | null;
   voiceAudioUrl: string | null;
+  /** The clip's other audio tracks (an imported clip's), each with its own slider. */
+  extraTracks: { index: number; audioPath: string; audioUrl: string }[];
   durationMs: number;
 }
 
@@ -194,6 +198,8 @@ export interface EditInput {
   voiceVolume: number;
   /** 0.0–1.0; the whole mix. */
   masterVolume: number;
+  /** 0.0–1.0 per other audio track, by track index. */
+  extraVolumes: Record<number, number>;
 }
 
 export interface ExportProgress {

@@ -26,6 +26,12 @@ pub fn voice_audio_path(cache_dir: &Path, id: &str) -> PathBuf {
     cache_dir.join("edit").join(format!("{id}-voice.m4a"))
 }
 
+/// The editor's copy of another audio track `track` of clip `id` (an imported clip's):
+/// `<cache>/edit/<id>-track<track>.m4a`.
+pub fn extra_audio_path(cache_dir: &Path, id: &str, track: u32) -> PathBuf {
+    cache_dir.join("edit").join(format!("{id}-track{track}.m4a"))
+}
+
 /// The upload's export of clip `id` (what an interrupted upload resumes from).
 pub fn upload_export_path(cache_dir: &Path, id: &str) -> PathBuf {
     cache_dir.join("exports").join(format!("{id}.mp4"))
@@ -59,16 +65,28 @@ pub fn demux_cached(tools: &Tools, input: &Path, track: u32, out: &Path) -> Resu
     Ok(true)
 }
 
-/// The game audio and (when the clip has them) mic and voice chat audio of a clip, as separate
-/// cached files the editor plays. A mic or voice track that can't be read is treated as missing
-/// rather than an error.
+/// The audio files the editor plays: one per track of the clip.
+#[derive(Debug)]
+pub struct EditorAudio {
+    pub game: PathBuf,
+    pub mic: Option<PathBuf>,
+    pub voice: Option<PathBuf>,
+    /// The other tracks (an imported clip's), by track index.
+    pub extra: Vec<(u32, PathBuf)>,
+}
+
+/// The game audio and (when the clip has them) mic, voice chat and any other audio tracks of a
+/// clip, as separate cached files the editor plays. `audio_tracks` is how many the file has. A
+/// track besides the game that can't be read is left out rather than failing.
 pub fn prepare_audio(
     tools: &Tools,
     input: &Path,
     tracks: Tracks,
+    audio_tracks: u32,
     cache_dir: &Path,
     id: &str,
-) -> Result<(PathBuf, Option<PathBuf>, Option<PathBuf>)> {
+) -> Result<EditorAudio> {
+    let tracks = tracks.present_in(audio_tracks);
     let (game, mic) = edit_audio_paths(cache_dir, id);
     demux_cached(tools, input, 0, &game)?;
     let optional = |track: Option<u32>, out: PathBuf, what: &str| {
@@ -83,7 +101,12 @@ pub fn prepare_audio(
     };
     let mic = optional(tracks.mic, mic, "mic");
     let voice = optional(tracks.voice, voice_audio_path(cache_dir, id), "voice chat");
-    Ok((game, mic, voice))
+    let extra = tracks
+        .extra
+        .iter()
+        .filter_map(|t| optional(Some(*t), extra_audio_path(cache_dir, id, *t), "audio").map(|p| (*t, p)))
+        .collect();
+    Ok(EditorAudio { game, mic, voice, extra })
 }
 
 /// The edit stored for a clip.
@@ -95,6 +118,7 @@ pub fn current_edit(clip: &Clip) -> Edit {
         mic_volume: clip.mic_volume,
         voice_volume: clip.voice_volume,
         master_volume: clip.master_volume,
+        extra_volumes: clip.extra_volumes.clone(),
     }
 }
 
@@ -109,15 +133,17 @@ pub fn save_edit(library: &Library, uploads: &Uploads, cache_dir: &Path, id: &st
     }
     // Drop the old cut's upload export first: if that fails, the edit isn't saved either, so a
     // retry still sees a changed edit and cleans up (instead of resuming the old cut's upload).
-    let (trim, volumes) =
-        (Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms }, Volumes { game: edit.game_volume, mic: edit.mic_volume, voice: edit.voice_volume, master: edit.master_volume });
-    crate::library::validate_edit(trim, volumes)?;
+    let trim = Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms };
+    let volumes = Volumes {
+        game: edit.game_volume,
+        mic: edit.mic_volume,
+        voice: edit.voice_volume,
+        master: edit.master_volume,
+        extra: edit.extra_volumes,
+    };
+    crate::library::validate_edit(trim, &volumes)?;
     forget_upload_export(library, cache_dir, id)?;
-    library.update_edit(
-        id,
-        Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms },
-        Volumes { game: edit.game_volume, mic: edit.mic_volume, voice: edit.voice_volume, master: edit.master_volume },
-    )?;
+    library.update_edit(id, trim, &volumes)?;
     Ok(true)
 }
 
@@ -130,7 +156,17 @@ pub fn forget_upload_export(library: &Library, cache_dir: &Path, id: &str) -> Re
 /// Best-effort cleanup of the editor's cached audio of a clip that was removed.
 pub fn remove_edit_cache(cache_dir: &Path, id: &str) {
     let (game, mic) = edit_audio_paths(cache_dir, id);
-    for file in [game, mic, voice_audio_path(cache_dir, id)] {
+    let mut files = vec![game, mic, voice_audio_path(cache_dir, id)];
+    // An imported clip's other tracks: <id>-track<n>.m4a.
+    let prefix = format!("{id}-track");
+    if let Ok(entries) = fs::read_dir(cache_dir.join("edit")) {
+        files.extend(
+            entries.flatten().map(|e| e.path()).filter(|p| {
+                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".m4a"))
+            }),
+        );
+    }
+    for file in files {
         if let Err(e) = remove_if_present(&file) {
             eprintln!("klipt: can't delete {}: {e}", file.display());
         }
@@ -176,6 +212,7 @@ pub fn move_file(from: &Path, to: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use crate::ffmpeg::tests::{fixture, tools};
     use crate::library::NewClip;
     use std::time::{Duration, SystemTime};
@@ -227,14 +264,19 @@ mod tests {
     #[test]
     fn audio_for_clips_with_and_without_a_mic() {
         let dir = tempfile::tempdir().unwrap();
-        let (game, mic, _) = prepare_audio(&tools(), fixture(), Tracks { mic: Some(1), voice: None }, dir.path(), "two").unwrap();
+        let EditorAudio { game, mic, extra, .. } =
+            prepare_audio(&tools(), fixture(), Tracks { mic: Some(1), voice: None, extra: vec![] }, 2, dir.path(), "two").unwrap();
+        assert!(extra.is_empty());
         assert_eq!(ffmpeg::probe(&tools(), &game).unwrap().audio_tracks, 1);
         assert_eq!(ffmpeg::probe(&tools(), mic.as_ref().unwrap()).unwrap().audio_tracks, 1);
 
-        // Review Focus 5: mic off means no mic file, so the editor hides the Mic slider.
-        let (_, mic, _) = prepare_audio(&tools(), fixture(), Tracks::default(), dir.path(), "off").unwrap();
+        // Review Focus 5: mic off means no mic file, so the editor hides the Mic slider. A second
+        // track it doesn't know (an imported clip's) gets its own file and slider instead.
+        let EditorAudio { mic, extra, .. } = prepare_audio(&tools(), fixture(), Tracks::default(), 2, dir.path(), "off").unwrap();
         assert_eq!(mic, None);
         assert!(!edit_audio_paths(dir.path(), "off").1.exists());
+        assert_eq!(extra, vec![(1, extra_audio_path(dir.path(), "off", 1))]);
+        assert_eq!(ffmpeg::probe(&tools(), &extra[0].1).unwrap().audio_tracks, 1);
 
         // A clip that claims a mic it doesn't have still opens, without one.
         let one = dir.path().join("one.mp4");
@@ -246,7 +288,8 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success());
-        let (game, mic, _) = prepare_audio(&tools(), &one, Tracks { mic: Some(1), voice: None }, dir.path(), "one").unwrap();
+        let EditorAudio { game, mic, .. } =
+            prepare_audio(&tools(), &one, Tracks { mic: Some(1), voice: None, extra: vec![] }, 1, dir.path(), "one").unwrap();
         assert!(game.is_file());
         assert_eq!(mic, None);
     }
@@ -255,7 +298,7 @@ mod tests {
     #[test]
     fn a_missing_clip_has_no_audio() {
         let dir = tempfile::tempdir().unwrap();
-        let r = prepare_audio(&tools(), &dir.path().join("gone.mp4"), Tracks { mic: Some(1), voice: None }, dir.path(), "x");
+        let r = prepare_audio(&tools(), &dir.path().join("gone.mp4"), Tracks { mic: Some(1), voice: None, extra: vec![] }, 2, dir.path(), "x");
         assert!(matches!(r, Err(AppError::ToolFailed { .. })));
     }
 
@@ -303,7 +346,7 @@ mod tests {
     }
 
     fn cut(start: u64, end: u64) -> Edit {
-        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0 }
+        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new() }
     }
 
     #[test]
@@ -331,8 +374,8 @@ mod tests {
     #[test]
     fn saving_a_full_clip_edit_without_any_cache_works() {
         let f = Fixture::new();
-        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9 };
-        assert!(save_edit(&f.lib, &Uploads::default(), &f.cache(), &f.clip.id, edit).unwrap());
+        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9, extra_volumes: BTreeMap::new() };
+        assert!(save_edit(&f.lib, &Uploads::default(), &f.cache(), &f.clip.id, edit.clone()).unwrap());
         assert_eq!(current_edit(&f.lib.get(&f.clip.id).unwrap()), edit);
     }
 

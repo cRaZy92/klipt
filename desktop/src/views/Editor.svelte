@@ -43,6 +43,8 @@
   let micVolume = $state(100);
   let voiceVolume = $state(100);
   let masterVolume = $state(100);
+  /** The other audio tracks' sliders (0–100), by track index. */
+  let extraVolumes = $state<Record<number, number>>({});
   /** The thumbnail's frame; null = automatic. */
   let thumb = $state<number | null>(null);
   /** The edit as last loaded or saved; `dirty` compares against it. */
@@ -53,6 +55,7 @@
   let gameAudio = $state<HTMLAudioElement>();
   let micAudio = $state<HTMLAudioElement>();
   let voiceAudio = $state<HTMLAudioElement>();
+  let extraAudios = $state<(HTMLAudioElement | undefined)[]>([]);
   let playing = $state(false);
   let position = $state(0);
 
@@ -82,8 +85,14 @@
       micVolume: micVolume / 100,
       voiceVolume: voiceVolume / 100,
       masterVolume: masterVolume / 100,
+      extraVolumes: Object.fromEntries(Object.entries(extraVolumes).map(([track, v]) => [track, v / 100])),
     };
   });
+
+  function sameVolumes(a: Record<number, number>, b: Record<number, number>): boolean {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)].map(Number));
+    return [...keys].every((k) => (a[k] ?? 1) === (b[k] ?? 1));
+  }
 
   const changed = $derived(
     !!stored &&
@@ -93,6 +102,7 @@
         edit.micVolume !== stored.micVolume ||
         edit.voiceVolume !== stored.voiceVolume ||
         edit.masterVolume !== stored.masterVolume ||
+        !sameVolumes(edit.extraVolumes, stored.extraVolumes) ||
         thumb !== storedThumb),
   );
 
@@ -115,6 +125,7 @@
       micVolume = percent(d.clip.micVolume);
       voiceVolume = percent(d.clip.voiceVolume ?? 1);
       masterVolume = percent(d.clip.masterVolume ?? 1);
+      extraVolumes = Object.fromEntries(d.extraTracks.map((t) => [t.index, percent(d.clip.extraVolumes?.[t.index] ?? 1)]));
       thumb = d.clip.thumbnailMs;
       position = trim.start;
       data = d;
@@ -167,9 +178,15 @@
   $effect(() => {
     if (voiceAudio) voiceAudio.volume = gain(voiceVolume);
   });
+  $effect(() => {
+    data?.extraTracks.forEach((t, i) => {
+      const audio = extraAudios[i];
+      if (audio) audio.volume = gain(extraVolumes[t.index] ?? 100);
+    });
+  });
 
   function audios(): HTMLAudioElement[] {
-    return [gameAudio, micAudio, voiceAudio].filter((a): a is HTMLAudioElement => !!a);
+    return [gameAudio, micAudio, voiceAudio, ...extraAudios].filter((a): a is HTMLAudioElement => !!a);
   }
 
   function syncAudio() {
@@ -307,6 +324,7 @@
           micVolume: next.micVolume,
           voiceVolume: next.voiceVolume,
           masterVolume: next.masterVolume,
+          extraVolumes: next.extraVolumes,
           uploadId: null,
           uploadOffset: null,
         };
@@ -483,6 +501,9 @@
       {#if data.voiceAudioUrl}
         <audio bind:this={voiceAudio} src={data.voiceAudioUrl} preload="auto"></audio>
       {/if}
+      {#each data.extraTracks as t, i (t.index)}
+        <audio bind:this={extraAudios[i]} src={t.audioUrl} preload="auto"></audio>
+      {/each}
     </div>
 
     <div class="timeline">
@@ -532,7 +553,8 @@
           <output>{masterVolume}%</output>
         </label>
         <label class="volume">
-          <span class="vol-label"><Icon name="volume" size={17} /> Game</span>
+          <!-- An imported clip with more tracks: Klipt can't know which one is the game. -->
+          <span class="vol-label"><Icon name="volume" size={17} /> {data.extraTracks.length > 0 ? "Track 1" : "Game"}</span>
           <input
             class="range"
             type="range"
@@ -541,7 +563,7 @@
             step="1"
             bind:value={gameVolume}
             style:--fill="{gameVolume}%"
-            aria-label="Game volume"
+            aria-label={data.extraTracks.length > 0 ? "Track 1 volume" : "Game volume"}
           />
           <output>{gameVolume}%</output>
         </label>
@@ -577,6 +599,22 @@
             <output>{voiceVolume}%</output>
           </label>
         {/if}
+        {#each data.extraTracks as t (t.index)}
+          <label class="volume">
+            <span class="vol-label"><Icon name="volume" size={17} /> Track {t.index + 1}</span>
+            <input
+              class="range"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              bind:value={extraVolumes[t.index]}
+              style:--fill="{extraVolumes[t.index]}%"
+              aria-label="Track {t.index + 1} volume"
+            />
+            <output>{extraVolumes[t.index]}%</output>
+          </label>
+        {/each}
       </div>
 
       <div class="actions">
@@ -865,6 +903,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
+    white-space: nowrap;
     width: 4.6rem;
     color: var(--text-muted);
     font-size: 0.9rem;

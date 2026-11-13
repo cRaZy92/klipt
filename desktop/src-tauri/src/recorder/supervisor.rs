@@ -713,6 +713,7 @@ mod tests {
                 voice_volume: 1.0,
                 master_volume: 1.0,
                 kind: crate::library::ClipKind::Clip,
+                extra_volumes: Default::default(),
             },
             file_missing: false,
             thumb_path: None,

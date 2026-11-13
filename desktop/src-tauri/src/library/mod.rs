@@ -3,6 +3,7 @@
 mod db;
 pub use db::validate_edit;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -80,6 +81,8 @@ pub struct Clip {
     /// The whole clip's volume, applied after the tracks are mixed.
     pub master_volume: f32,
     pub kind: ClipKind,
+    /// Volumes of the other audio tracks (imported clips with more tracks), by track index.
+    pub extra_volumes: BTreeMap<u32, f32>,
 }
 
 impl Clip {
@@ -137,7 +140,7 @@ pub struct Trim {
     pub end_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Volumes {
     pub game: f32,
@@ -145,10 +148,12 @@ pub struct Volumes {
     pub voice: f32,
     /// The whole mix.
     pub master: f32,
+    /// The other audio tracks, by track index (missing = 1).
+    pub extra: BTreeMap<u32, f32>,
 }
 
 impl Default for Volumes {
     fn default() -> Self {
-        Volumes { game: 1.0, mic: 1.0, voice: 1.0, master: 1.0 }
+        Volumes { game: 1.0, mic: 1.0, voice: 1.0, master: 1.0, extra: BTreeMap::new() }
     }
 }

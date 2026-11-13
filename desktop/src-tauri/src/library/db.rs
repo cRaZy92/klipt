@@ -55,11 +55,16 @@ const MIGRATIONS: &[&str] = &["
     -- else the file its H.264 copy was made from). NULL for clips Klipt recorded.
     ALTER TABLE clips ADD COLUMN source_path TEXT NULL;
     CREATE INDEX clips_source_path ON clips (source_path);
+", "
+    -- Volumes of audio tracks besides the game, mic and voice chat ones (imported clips), as a
+    -- JSON object of track index to volume, e.g. {\"2\": 0.5}. Tracks not listed play at 1.
+    ALTER TABLE clips ADD COLUMN extra_volumes TEXT NOT NULL DEFAULT '{}';
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
-                       visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind";
+                       visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind, \
+                       extra_volumes";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -89,6 +94,8 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         voice_volume: row.get(23)?,
         master_volume: row.get(24)?,
         kind: if row.get::<_, String>(25)? == "screenshot" { ClipKind::Screenshot } else { ClipKind::Clip },
+        // Unreadable JSON (hand-edited database) reads as "all at 1" rather than failing the clip.
+        extra_volumes: serde_json::from_str(&row.get::<_, String>(26)?).unwrap_or_default(),
     })
 }
 
@@ -181,13 +188,14 @@ impl Library {
         Ok(games)
     }
 
-    pub fn update_edit(&self, id: &str, trim: Trim, volumes: Volumes) -> Result<()> {
+    pub fn update_edit(&self, id: &str, trim: Trim, volumes: &Volumes) -> Result<()> {
         validate_edit(trim, volumes)?;
+        let extra = serde_json::to_string(&volumes.extra).map_err(|e| AppError::Internal(e.to_string()))?;
         self.update(
             id,
             "UPDATE clips SET trim_start_ms = ?2, trim_end_ms = ?3, game_volume = ?4, mic_volume = ?5, voice_volume = ?6,
-             master_volume = ?7 WHERE id = ?1",
-            params![id, trim.start_ms, trim.end_ms, volumes.game, volumes.mic, volumes.voice, volumes.master],
+             master_volume = ?7, extra_volumes = ?8 WHERE id = ?1",
+            params![id, trim.start_ms, trim.end_ms, volumes.game, volumes.mic, volumes.voice, volumes.master, extra],
         )
     }
 
@@ -344,13 +352,14 @@ fn remove_if_present(path: &Path) -> std::io::Result<()> {
 }
 
 /// Checks a trim and volumes without touching the library.
-pub fn validate_edit(trim: Trim, volumes: Volumes) -> Result<()> {
+pub fn validate_edit(trim: Trim, volumes: &Volumes) -> Result<()> {
     if let (Some(start), Some(end)) = (trim.start_ms, trim.end_ms) {
         if start >= end {
             return Err(AppError::InvalidInput(format!("trim start {start} ms is not before end {end} ms")));
         }
     }
-    for volume in [volumes.game, volumes.mic, volumes.voice, volumes.master] {
+    let named = [volumes.game, volumes.mic, volumes.voice, volumes.master];
+    for volume in named.into_iter().chain(volumes.extra.values().copied()) {
         if !(0.0..=MAX_VOLUME).contains(&volume) {
             return Err(AppError::InvalidInput(format!("volume {volume} is outside 0..={MAX_VOLUME}")));
         }
@@ -360,6 +369,7 @@ pub fn validate_edit(trim: Trim, volumes: Volumes) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use super::*;
     use crate::errors::AppError;
     use crate::library::Sort;
@@ -498,7 +508,7 @@ mod tests {
         let f = Fixture::new();
         let c = f.add("a.mp4", 1, None);
         f.lib
-            .update_edit(&c.id, Trim { start_ms: Some(1_500), end_ms: Some(20_000) }, Volumes { game: 0.8, mic: 1.5, voice: 0.4, master: 0.6 })
+            .update_edit(&c.id, Trim { start_ms: Some(1_500), end_ms: Some(20_000) }, &Volumes { game: 0.8, mic: 1.5, voice: 0.4, master: 0.6, extra: Default::default() })
             .unwrap();
         f.lib.set_game(&c.id, Some("Active Matter"), Some(2_887_580)).unwrap();
         f.lib.rename(&c.id, "Nice shot").unwrap();
@@ -541,21 +551,33 @@ mod tests {
     }
 
     #[test]
+    fn extra_track_volumes_persist_and_are_checked() {
+        let f = Fixture::new();
+        let c = f.add("a.mp4", 1, None);
+        assert!(f.lib.get(&c.id).unwrap().extra_volumes.is_empty(), "new clips play every track at 1");
+        let volumes = Volumes { extra: BTreeMap::from([(1, 0.25), (3, 2.0)]), ..Volumes::default() };
+        f.lib.update_edit(&c.id, Trim::default(), &volumes).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().extra_volumes, BTreeMap::from([(1, 0.25), (3, 2.0)]));
+        let loud = Volumes { extra: BTreeMap::from([(1, 2.5)]), ..Volumes::default() };
+        assert!(matches!(f.lib.update_edit(&c.id, Trim::default(), &loud), Err(AppError::InvalidInput(_))));
+    }
+
+    #[test]
     fn invalid_edits_and_unknown_ids_are_rejected() {
         let f = Fixture::new();
         let c = f.add("a.mp4", 1, None);
         let bad_trim = Trim { start_ms: Some(5_000), end_ms: Some(5_000) };
-        assert!(matches!(f.lib.update_edit(&c.id, bad_trim, Volumes::default()), Err(AppError::InvalidInput(_))));
+        assert!(matches!(f.lib.update_edit(&c.id, bad_trim, &Volumes::default()), Err(AppError::InvalidInput(_))));
         let bad_volume = Volumes { game: -0.1, ..Volumes::default() };
-        assert!(matches!(f.lib.update_edit(&c.id, Trim::default(), bad_volume), Err(AppError::InvalidInput(_))));
+        assert!(matches!(f.lib.update_edit(&c.id, Trim::default(), &bad_volume), Err(AppError::InvalidInput(_))));
         let nan_volume = Volumes { voice: f32::NAN, ..Volumes::default() };
-        assert!(matches!(f.lib.update_edit(&c.id, Trim::default(), nan_volume), Err(AppError::InvalidInput(_))));
+        assert!(matches!(f.lib.update_edit(&c.id, Trim::default(), &nan_volume), Err(AppError::InvalidInput(_))));
 
         assert!(matches!(f.lib.rename("nope", "x"), Err(AppError::ClipNotFound(_))));
         assert!(matches!(f.lib.set_game("nope", None, None), Err(AppError::ClipNotFound(_))));
         assert!(matches!(f.lib.remove("nope", true), Err(AppError::ClipNotFound(_))));
         assert!(matches!(
-            f.lib.update_edit("nope", Trim::default(), Volumes::default()),
+            f.lib.update_edit("nope", Trim::default(), &Volumes::default()),
             Err(AppError::ClipNotFound(_))
         ));
         assert!(matches!(f.lib.mark_uploaded("nope", "a", "b", "feed"), Err(AppError::ClipNotFound(_))));

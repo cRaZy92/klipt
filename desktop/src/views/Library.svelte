@@ -4,7 +4,10 @@
   import ImportDialog from "../components/ImportDialog.svelte";
   import ImportPanel from "../components/ImportPanel.svelte";
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
-  import { bufferLabel, groupByDay } from "../lib/format";
+  import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
+  import { removalChoices, type RemoveWhere } from "../lib/removal";
+  import { keepShown, selectClick } from "../lib/selection";
+  import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
   import { gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
@@ -48,10 +51,18 @@
 
   let uploading = $state<ClipView | null>(null);
   let renaming = $state<{ kind: "local" | "online"; id: string; value: string } | null>(null);
-  let tagging = $state<{ clip: ClipView; value: string } | null>(null);
-  type RemoveWhere = "library" | "local" | "everywhere";
-  /** Removing a clip: from the library only, also its file on this PC, or also its upload. */
-  let removing = $state<{ clip: ClipView; served: MyUpload | null; where: RemoveWhere } | null>(null);
+  /** Setting the game of one clip or several. */
+  let tagging = $state<{ clips: ClipView[]; value: string; skipped: number } | null>(null);
+  /** Deleting one clip or several: from the library only, also the files on this PC, or also the uploads. */
+  let removing = $state<{
+    local: { clip: ClipView; served: MyUpload | null }[];
+    online: MyUpload[];
+    where: RemoveWhere;
+  } | null>(null);
+  let bulkUpload = $state<{ clips: ClipView[]; visibility: "feed" | "link" } | null>(null);
+  /** Cards picked for a bulk action, by `MyClip.key`; `anchor` is the last one clicked (for Shift). */
+  let selected = $state<Set<string>>(new Set());
+  let anchor: string | null = null;
   let deletingOnline = $state<MyUpload | null>(null);
   let playing = $state<MyUpload | null>(null);
   let downloading = $state<Set<string>>(new Set());
@@ -65,6 +76,55 @@
   const games = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
   const visible = $derived(visibleClips(items, place, game, sort, search, media));
   const groups = $derived(groupByDay(visible, (i) => i.at, now));
+  /** The cards in the order they're shown, for Shift+click runs and "Select all". */
+  const order = $derived(groups.flatMap((g) => g.items.map((i) => i.key)));
+  const picked = $derived.by(() => {
+    const chosen = visible.filter((i) => selected.has(i.key));
+    return {
+      local: chosen.flatMap((i) =>
+        i.kind === "local" ? [{ clip: i.clip, served: (i.clip.serverClipId && uploadById.get(i.clip.serverClipId)) || null }] : [],
+      ),
+      online: chosen.flatMap((i) => (i.kind === "online" ? [i.upload] : [])),
+    };
+  });
+  /** Selected clips that can be uploaded now: on this PC, not uploaded, not already uploading. */
+  const uploadable = $derived(
+    picked.local.map((p) => p.clip).filter((c) => !c.fileMissing && !c.shareUrl && !isBusy(uploadJobs[c.id])),
+  );
+  const allStarred = $derived(
+    picked.local.every((p) => p.clip.favorite) && picked.online.every((u) => u.favorite !== false),
+  );
+
+  $effect(() => {
+    // Filtered out or deleted: no longer selected (actions only touch what you can see).
+    const kept = keepShown(selected, order);
+    if (kept !== selected) selected = kept;
+  });
+
+  function toggleSelect(key: string, e: MouseEvent) {
+    selected = selectClick(selected, order, key, anchor, e.shiftKey);
+    anchor = key;
+  }
+
+  function clearSelection() {
+    selected = new Set();
+    anchor = null;
+  }
+
+  const dialogOpen = $derived(
+    !!(uploading || playing || viewing || renaming || tagging || removing || deletingOnline || bulkUpload),
+  );
+
+  function onkeydown(e: KeyboardEvent) {
+    if (dialogOpen) return;
+    const typing = (e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]");
+    if (e.key === "Escape" && selected.size > 0) {
+      clearSelection();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && !typing) {
+      e.preventDefault();
+      selected = new Set(order);
+    }
+  }
 
   $effect(() => {
     // A filter for a game with no clips left (in this place) would show nothing forever.
@@ -166,8 +226,7 @@
   }
 
   /** A clip on this PC: starred locally (the cleanup keeps it) and, once uploaded, on the server too. */
-  async function toggleFavorite(clip: ClipView) {
-    const favorite = !clip.favorite;
+  async function toggleFavorite(clip: ClipView, favorite = !clip.favorite) {
     const serverId = clip.serverClipId && uploads?.some((u) => u.id === clip.serverClipId) ? clip.serverClipId : null;
     // Shown at once; put back if the library or the server refuses.
     local = local.map((c) => (c.id === clip.id ? { ...c, favorite } : c));
@@ -180,10 +239,32 @@
   }
 
   /** An upload with no copy on this PC: starred on the server. */
-  async function toggleOnlineFavorite(upload: MyUpload) {
-    const favorite = !upload.favorite;
+  async function toggleOnlineFavorite(upload: MyUpload, favorite = !upload.favorite) {
     markUpload(upload.id, favorite);
     if (!(await act(() => api.setServerFavorite(upload.id, favorite)))) markUpload(upload.id, !favorite);
+  }
+
+  /** Stars every selected clip, or unstars them when they all are starred already. */
+  async function starSelected() {
+    const favorite = !allStarred;
+    await Promise.all([
+      ...picked.local.filter((p) => p.clip.favorite !== favorite).map((p) => toggleFavorite(p.clip, favorite)),
+      ...picked.online
+        .filter((u) => u.favorite !== undefined && u.favorite !== favorite)
+        .map((u) => toggleOnlineFavorite(u, favorite)),
+    ]);
+  }
+
+  async function startBulkUpload() {
+    if (!bulkUpload) return;
+    const { clips, visibility } = bulkUpload;
+    bulkUpload = null;
+    clearSelection();
+    const done = await uploadInTurn(
+      clips.map((c) => ({ id: c.id, title: uploadTitle(c) })),
+      visibility,
+    );
+    if (done > 0) toast(`Uploaded ${done === 1 ? "1 clip" : `${done} clips`}. Copy a link from its card to share it.`, "success");
   }
 
   /** Picks a folder (ShadowPlay, OBS, Medal…) and imports the clips in it. */
@@ -219,32 +300,63 @@
     e.preventDefault();
     if (!tagging) return;
     const name = tagging.value.trim() || null;
-    if (await act(() => api.setClipGame(tagging!.clip.id, name))) {
+    const ids = tagging.clips.map((c) => c.id);
+    if (await act(async () => { for (const id of ids) await api.setClipGame(id, name); })) {
       tagging = null;
+      void loadLocal();
+    } else {
       void loadLocal();
     }
   }
 
   async function confirmRemove() {
     if (!removing) return;
-    const { clip, served, where } = removing;
-    const everywhere = where === "everywhere" && served;
-    const done = await act(
-      async () => {
+    const { local: clips, online, where } = removing;
+    const total = clips.length + online.length;
+    let failed = 0;
+    let firstError = "";
+    const attempt = async (work: () => Promise<unknown>) => {
+      try {
+        await work();
+      } catch (e) {
+        failed++;
+        firstError ||= errorMessage(e);
+      }
+    };
+    for (const { clip, served } of clips) {
+      await attempt(async () => {
         // The server first: if it refuses, the clip is still whole on this PC.
-        if (everywhere) await api.deleteUpload(served.id);
-        await api.deleteClip(clip.id, where !== "library");
-      },
-      everywhere ? "Deleted from this PC and the server." : where === "local" ? "Clip deleted." : "Removed from library.",
-    );
-    if (done) {
-      removing = null;
-      if (everywhere && uploads) uploads = uploads.filter((u) => u.id !== served.id);
-      void loadLocal();
-    } else if (everywhere) {
-      void loadUploads();
+        if (where === "everywhere" && served) await api.deleteUpload(served.id);
+        await api.deleteClip(clip.id, where !== "library" && !clip.fileMissing);
+      });
     }
+    if (where === "everywhere") for (const upload of online) await attempt(() => api.deleteUpload(upload.id));
+    const done = where === "everywhere" ? total : clips.length;
+    if (failed === 0) {
+      toast(
+        total === 1
+          ? where === "everywhere" ? "Deleted from this PC and the server." : where === "local" ? "Clip deleted." : "Removed from library."
+          : `${where === "library" ? "Removed" : "Deleted"} ${done} clips.`,
+        "success",
+      );
+      removing = null;
+      clearSelection();
+    } else {
+      toast(total === 1 ? firstError : `${failed} of ${done} couldn't be deleted: ${firstError}`, "error");
+      removing = null;
+    }
+    load();
   }
+
+  /** Opens the delete dialog for these clips. */
+  function askRemove(local: { clip: ClipView; served: MyUpload | null }[], online: MyUpload[]) {
+    const choices = removalChoices({
+      local: local.map((p) => ({ fileMissing: p.clip.fileMissing, uploaded: !!p.served })),
+      onlineOnly: online.length,
+    });
+    removing = { local, online, where: choices.initial };
+  }
+
 
 
   async function toggleVisibility(upload: MyUpload) {
@@ -427,9 +539,11 @@
                   onplay={served ? () => (playing = served) : undefined}
                   processing={served?.processing}
                   onrename={() => (renaming = { kind: "local", id: clip.id, value: clip.title })}
-                  onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
-                  onremove={() =>
-                    (removing = { clip, served: served ?? null, where: served && !clip.fileMissing ? "local" : "library" })}
+                  onsetgame={() => (tagging = { clips: [clip], value: clip.gameName ?? "", skipped: 0 })}
+                  onremove={() => askRemove([{ clip, served: served ?? null }], [])}
+                  selected={selected.has(item.key)}
+                  selecting={selected.size > 0}
+                  onselect={(e) => toggleSelect(item.key, e)}
                   onfavorite={() => toggleFavorite(clip)}
                   thumbVersion={thumbVersion[clip.id] ?? clip.thumbnailMs ?? 0}
                   onshowfolder={() => act(() => api.showInFolder(clip.id))}
@@ -450,6 +564,9 @@
                   ondownload={() => download(upload)}
                   ondelete={() => (deletingOnline = upload)}
                   onfavorite={upload.favorite === undefined ? undefined : () => toggleOnlineFavorite(upload)}
+                  selected={selected.has(item.key)}
+                  selecting={selected.size > 0}
+                  onselect={(e) => toggleSelect(item.key, e)}
                 />
               {/if}
             {/each}
@@ -458,7 +575,80 @@
       {/each}
     </div>
   {/if}
+
+  {#if selected.size > 0}
+    <div class="bulk-bar" role="toolbar" aria-label="Selected clips">
+      <span class="bulk-count">{selected.size} selected</span>
+      {#if selected.size < order.length}
+        <button class="btn btn-sm btn-ghost" onclick={() => (selected = new Set(order))} title="Ctrl+A">
+          Select all {order.length}
+        </button>
+      {/if}
+      <span class="bulk-sep" aria-hidden="true"></span>
+      <button class="btn btn-sm btn-ghost" onclick={starSelected}>
+        <Icon name={allStarred ? "star" : "starFilled"} size={15} />
+        {allStarred ? "Unstar" : "Star"}
+      </button>
+      <button
+        class="btn btn-sm btn-ghost"
+        disabled={picked.local.length === 0}
+        title={picked.local.length === 0 ? "Only clips on this PC have a game you can change" : undefined}
+        onclick={() =>
+          (tagging = {
+            clips: picked.local.map((p) => p.clip),
+            value: picked.local.every((p) => p.clip.gameName === picked.local[0].clip.gameName)
+              ? (picked.local[0].clip.gameName ?? "")
+              : "",
+            skipped: picked.online.length,
+          })}
+      >
+        <Icon name="tag" size={15} /> Set game
+      </button>
+      <button
+        class="btn btn-sm btn-ghost"
+        disabled={uploadable.length === 0}
+        title={uploadable.length === 0 ? "Nothing here left to upload" : undefined}
+        onclick={() => (bulkUpload = { clips: uploadable, visibility: "feed" })}
+      >
+        <Icon name="upload" size={15} /> Upload{uploadable.length > 0 && uploadable.length < selected.size
+          ? ` ${uploadable.length}`
+          : ""}
+      </button>
+      <button class="btn btn-sm btn-ghost bulk-danger" onclick={() => askRemove(picked.local, picked.online)}>
+        <Icon name="trash" size={15} /> Delete
+      </button>
+      <button class="btn btn-sm btn-ghost btn-icon" onclick={clearSelection} aria-label="Clear selection" title="Clear selection (Esc)">
+        <Icon name="close" size={16} />
+      </button>
+    </div>
+  {/if}
 </section>
+
+<svelte:window {onkeydown} />
+
+{#if bulkUpload}
+  {@const b = bulkUpload}
+  <Modal title="Upload {b.clips.length === 1 ? '1 clip' : `${b.clips.length} clips`}" onclose={() => (bulkUpload = null)}>
+    <p class="muted">
+      They upload one after another, each with its own title (like “{uploadTitle(b.clips[0])}”). Links aren't copied; use
+      “Copy link” on a card when it's done.
+    </p>
+    <div class="where" role="radiogroup" aria-label="Who can see them">
+      <label class="option">
+        <input type="radio" bind:group={bulkUpload.visibility} value="feed" />
+        <span><strong>Feed</strong><small>Your friends see them in the feed.</small></span>
+      </label>
+      <label class="option">
+        <input type="radio" bind:group={bulkUpload.visibility} value="link" />
+        <span><strong>Link only</strong><small>Only people you send a link to can watch them.</small></span>
+      </label>
+    </div>
+    {#snippet footer()}
+      <button class="btn" onclick={() => (bulkUpload = null)}>Cancel</button>
+      <button class="btn btn-primary" onclick={startBulkUpload}><Icon name="upload" size={16} /> Upload</button>
+    {/snippet}
+  </Modal>
+{/if}
 
 {#if uploading}
   <UploadDialog clip={uploading} onclose={() => (uploading = null)} />
@@ -502,7 +692,10 @@
 {/if}
 
 {#if tagging}
-  <Modal title="Set game" onclose={() => (tagging = null)}>
+  <Modal
+    title={tagging.clips.length === 1 ? "Set game" : `Set game of ${tagging.clips.length} clips`}
+    onclose={() => (tagging = null)}
+  >
     <form id="game-form" onsubmit={submitGame}>
       <label class="field">
         <span>Game</span>
@@ -512,8 +705,15 @@
           {#each games as g (g.name)}<option value={g.name}></option>{/each}
         </datalist>
       </label>
-      {#if !tagging.clip.gameName && tagging.clip.exe && tagging.clip.steamAppId === null}
+      {#if tagging.clips.length === 1 && !tagging.clips[0].gameName && tagging.clips[0].exe && tagging.clips[0].steamAppId === null}
         <p class="muted hint">Klipt will remember this game for future clips too.</p>
+      {/if}
+      {#if tagging.skipped > 0}
+        <p class="muted hint">
+          {tagging.skipped === 1 ? "1 selected clip is" : `${tagging.skipped} selected clips are`} only online and keep{tagging.skipped === 1
+            ? "s"
+            : ""} its game.
+        </p>
       {/if}
     </form>
     {#snippet footer()}
@@ -527,39 +727,73 @@
 
 {#if removing}
   {@const r = removing}
-  <Modal title="Delete clip?" onclose={() => (removing = null)}>
-    <p><strong>{r.clip.title}</strong></p>
-    <div class="where" role="radiogroup" aria-label="Where to delete it from">
-      <label class="option">
-        <input type="radio" bind:group={removing.where} value="library" />
-        <span>
-          <strong>Remove from library only</strong>
-          <small>
-            {r.clip.fileMissing ? "Its file is already gone" : "The file stays in its folder"}{r.served
-              ? " and the link keeps working"
-              : ""}.
-          </small>
-        </span>
-      </label>
-      {#if !r.clip.fileMissing}
+  {@const total = r.local.length + r.online.length}
+  {@const one = total === 1}
+  {@const choices = removalChoices({
+    local: r.local.map((p) => ({ fileMissing: p.clip.fileMissing, uploaded: !!p.served })),
+    onlineOnly: r.online.length,
+  })}
+  <Modal title={one ? "Delete clip?" : `Delete ${total} clips?`} onclose={() => (removing = null)}>
+    {#if one}
+      <p><strong>{(r.local[0]?.clip.title ?? r.online[0]?.title)}</strong></p>
+    {:else if r.online.length > 0 && r.local.length > 0}
+      <p class="muted">{r.local.length} on this PC, {r.online.length} only online.</p>
+    {/if}
+    <div class="where" role="radiogroup" aria-label="Where to delete from">
+      {#if choices.library}
+        <label class="option">
+          <input type="radio" bind:group={removing.where} value="library" />
+          <span>
+            <strong>Remove from library only</strong>
+            <small>
+              {#if one}
+                {r.local[0].clip.fileMissing ? "Its file is already gone" : "The file stays in its folder"}{r.local[0].served
+                  ? " and the link keeps working"
+                  : ""}.
+              {:else}
+                Files stay in their folders and links keep working.
+              {/if}
+            </small>
+          </span>
+        </label>
+      {/if}
+      {#if choices.local}
         <label class="option">
           <input type="radio" bind:group={removing.where} value="local" />
           <span>
             <strong>Delete from this PC</strong>
-            <small>{r.served ? "The upload and its link keep working." : "The video file is deleted. It isn't uploaded, so it's gone for good."}</small>
+            <small>
+              {#if one}
+                {r.local[0].served ? "The upload and its link keep working." : "The video file is deleted. It isn't uploaded, so it's gone for good."}
+              {:else if choices.notUploaded > 0}
+                Uploads keep working, but {choices.notUploaded === 1 ? "1 clip isn't" : `${choices.notUploaded} clips aren't`} uploaded
+                and will be gone for good.
+              {:else}
+                The files are deleted. Uploads and their links keep working.
+              {/if}
+            </small>
           </span>
         </label>
       {/if}
-      {#if r.served}
+      {#if choices.everywhere}
         <label class="option danger">
           <input type="radio" bind:group={removing.where} value="everywhere" />
           <span>
-            <strong>Delete everywhere</strong>
-            <small>This PC and the server. The link stops working for everyone.</small>
+            <strong>{choices.library ? "Delete everywhere" : "Delete from the server"}</strong>
+            <small>
+              {choices.library ? "This PC and the server." : ""}
+              {one ? "The link stops working" : "Links stop working"} for everyone.
+            </small>
           </span>
         </label>
       {/if}
     </div>
+    {#if r.online.length > 0 && r.where !== "everywhere"}
+      <p class="muted hint">
+        {r.online.length === 1 ? "1 clip is" : `${r.online.length} clips are`} only online, so only “Delete everywhere” deletes
+        {r.online.length === 1 ? "it" : "them"}.
+      </p>
+    {/if}
     {#snippet footer()}
       <button class="btn" onclick={() => (removing = null)}>Cancel</button>
       <button class="btn btn-danger" onclick={confirmRemove}>
@@ -700,6 +934,53 @@
     font-size: 0.85rem;
   }
 
+  .bulk-bar {
+    position: sticky;
+    bottom: 1.25rem;
+    z-index: 6;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    align-self: center;
+    gap: 0.25rem;
+    max-width: 100%;
+    padding: 0.4rem 0.45rem 0.4rem 1rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+    backdrop-filter: blur(12px);
+    box-shadow: var(--shadow);
+    animation: bar-in 0.18s var(--ease-out);
+  }
+
+  @keyframes bar-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  .bulk-count {
+    margin-right: 0.35rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bulk-sep {
+    width: 1px;
+    height: 1.4rem;
+    margin: 0 0.3rem;
+    background: var(--border-strong);
+  }
+
+  .bulk-danger {
+    color: var(--danger-text, var(--danger));
+  }
+
+  .bulk-danger:hover:not(:disabled) {
+    background: var(--danger-soft);
+  }
+
   .where {
     display: flex;
     flex-direction: column;
@@ -738,6 +1019,10 @@
     width: 1rem;
     height: 1rem;
     margin: 0.15rem 0 0;
+    accent-color: var(--accent);
+  }
+
+  .option.danger input {
     accent-color: var(--danger);
   }
 

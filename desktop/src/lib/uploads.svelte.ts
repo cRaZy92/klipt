@@ -4,7 +4,7 @@
 import { api, errorCode, errorMessage, on, type UploadPhase, type Visibility } from "./api";
 import { toast } from "./toasts.svelte";
 
-export type UploadStatus = "starting" | UploadPhase | "done" | "failed" | "needsLogin";
+export type UploadStatus = "queued" | "starting" | UploadPhase | "done" | "failed" | "needsLogin";
 
 export interface UploadJob {
   id: string;
@@ -23,12 +23,12 @@ export const uploads = $state<Record<string, UploadJob>>({});
 
 /** True while the core is working on the clip. */
 export function isBusy(job: UploadJob | undefined): boolean {
-  return !!job && ["starting", "exporting", "uploading", "finalizing"].includes(job.status);
+  return !!job && ["queued", "starting", "exporting", "uploading", "finalizing"].includes(job.status);
 }
 
 /** 0..1 for the current phase, or null when there's no measurable progress. */
 export function fraction(job: UploadJob): number | null {
-  if (job.status === "finalizing" || job.total <= 0) return null;
+  if (job.status === "finalizing" || job.status === "queued" || job.total <= 0) return null;
   return Math.min(1, Math.max(0, job.sent / job.total));
 }
 
@@ -36,6 +36,8 @@ export function statusLabel(job: UploadJob): string {
   const pct = fraction(job);
   const percent = pct === null ? "" : ` ${Math.round(pct * 100)}%`;
   switch (job.status) {
+    case "queued":
+      return "Waiting to upload…";
     case "starting":
       return "Starting…";
     case "exporting":
@@ -73,8 +75,59 @@ export function stopUploadsForLogout() {
     if (isBusy(job) || job.status === "needsLogin") {
       stoppedByLogout.add(job.id);
       uploads[job.id] = { ...job, status: "failed", message: LOGGED_OUT_MESSAGE };
+      settle(job.id);
     }
   }
+}
+
+/** Waiters for uploads to end (done, failed or waiting for a login), by clip id. */
+const waiters = new Map<string, () => void>();
+
+function settle(id: string) {
+  waiters.get(id)?.();
+  waiters.delete(id);
+}
+
+/** Resolves once the clip's upload is no longer running. */
+function settled(id: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (!isBusy(uploads[id]) || uploads[id].status === "queued") resolve();
+    else waiters.set(id, resolve);
+  });
+}
+
+/** Clips uploading as part of `uploadInTurn`: their own "Link copied!" toasts are skipped. */
+export const inBulk = new Set<string>();
+
+/**
+ * Uploads several clips one after another (each exports with ffmpeg first, so not all at once).
+ * They show "Waiting to upload…" until their turn. Returns how many were uploaded.
+ */
+export async function uploadInTurn(list: { id: string; title: string }[], visibility: Visibility): Promise<number> {
+  const todo = list.filter(({ id }) => !isBusy(uploads[id]));
+  for (const { id, title } of todo) {
+    inBulk.add(id);
+    uploads[id] = { id, title, visibility, status: "queued", sent: 0, total: 0 };
+  }
+  let uploaded = 0;
+  for (const { id, title } of todo) {
+    // Stopped meanwhile (logout) or waiting for a login: its turn is skipped.
+    if (uploads[id]?.status !== "queued") continue;
+    await startUpload(id, title, visibility);
+    // "Already uploading": the core is on it after all, and its events will say when it ends.
+    if (uploads[id]?.status === "queued") uploads[id] = { ...uploads[id], status: "starting" };
+    await settled(id);
+    const status = uploads[id]?.status;
+    if (status === "done") uploaded++;
+    if (status === "needsLogin") {
+      // The rest wait for the login too; logging in resumes them.
+      for (const rest of todo) {
+        if (uploads[rest.id]?.status === "queued") uploads[rest.id] = { ...uploads[rest.id], status: "needsLogin" };
+      }
+    }
+  }
+  for (const { id } of todo) inBulk.delete(id);
+  return uploaded;
 }
 
 /** Friends tagged in each upload, kept for retries. */
@@ -147,7 +200,8 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
       stoppedByLogout.delete(id);
       const job = uploads[id];
       if (job) uploads[id] = { ...job, status: "done", shareUrl, copied };
-      handlers.done(shareUrl, copied);
+      if (!inBulk.has(id)) handlers.done(shareUrl, copied);
+      settle(id);
     }),
     on("upload-failed", ({ id, code, message, stale }) => {
       const job = uploads[id];
@@ -155,6 +209,7 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
       if (stoppedByLogout.has(id)) {
         // Already shown as stopped. A 401 here is the logout itself; anything else, show it.
         if (code !== "unauthorized") uploads[id] = { ...job, status: "failed", message };
+        settle(id);
         return;
       }
       if (code === "unauthorized" && stale) {
@@ -164,8 +219,10 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
       } else if (code === "unauthorized") {
         uploads[id] = { ...job, status: "needsLogin" };
         handlers.unauthorized();
+        settle(id);
       } else {
         uploads[id] = { ...job, status: "failed", message };
+        settle(id);
       }
     }),
   ];

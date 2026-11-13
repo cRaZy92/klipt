@@ -23,6 +23,9 @@
     onplay,
     processing = null,
     thumbVersion = 0,
+    selected = false,
+    selecting = false,
+    onselect,
   }: {
     clip: ClipView;
     /** The time relative dates are counted from (ticks once a minute). */
@@ -47,6 +50,12 @@
     onplay?: () => void;
     /** The server is still compressing the uploaded copy. */
     processing?: "queued" | "running" | null;
+    /** Picked for a bulk action. */
+    selected?: boolean;
+    /** Something is selected: clicking the picture selects instead of opening. */
+    selecting?: boolean;
+    /** Toggles the selection (the event says whether Shift was held). */
+    onselect?: (e: MouseEvent) => void;
   } = $props();
 
   let menuOpen = $state(false);
@@ -67,6 +76,16 @@
     if (menuOpen && !menuWrap?.contains(e.target as Node)) menuOpen = false;
   }
 
+  /** Opens the clip, or selects it while selecting or with Ctrl/Shift held. */
+  function open(e: MouseEvent, action: () => void) {
+    if (onselect && (selecting || e.ctrlKey || e.metaKey || e.shiftKey)) {
+      e.preventDefault();
+      onselect(e);
+    } else {
+      action();
+    }
+  }
+
   function pick(action: () => void) {
     menuOpen = false;
     action();
@@ -75,25 +94,42 @@
 
 <svelte:window onclick={closeMenuOutside} />
 
-<article class="card clip-card rise" class:missing={clip.fileMissing} class:menu-open={menuOpen} style:--i={index}>
+{#snippet selectPill()}
+  <Icon name="check" size={15} />
+  {selected ? "Unselect" : "Select"}
+{/snippet}
+
+<article class="card clip-card rise" class:missing={clip.fileMissing} class:menu-open={menuOpen} class:selected class:selecting style:--i={index}>
   <div class="thumb">
+    {#if onselect}
+      <button
+        class="select"
+        role="checkbox"
+        aria-checked={selected}
+        aria-label="Select {clip.title}"
+        title={selected ? "Selected" : "Select (or Ctrl+click the picture)"}
+        onclick={onselect}
+      >
+        <Icon name="check" size={14} />
+      </button>
+    {/if}
     {#if thumb}
       <img src={thumb} alt="" loading="lazy" onerror={() => (thumbFailed = true)} />
     {:else}
       <div class="placeholder"><Icon name={clip.fileMissing ? "alert" : "film"} size={30} /></div>
     {/if}
     {#if onview && !clip.fileMissing}
-      <button class="open" onclick={onview} aria-label="View {clip.title}">
-        <span class="open-pill"><Icon name="image" size={15} /> View</span>
+      <button class="open" onclick={(e) => open(e, onview)} aria-label="View {clip.title}">
+        <span class="open-pill">{#if selecting}{@render selectPill()}{:else}<Icon name="image" size={15} /> View{/if}</span>
       </button>
     {:else if onplay}
-      <button class="open" onclick={onplay} aria-label="Play {clip.title}">
-        <span class="open-pill"><Icon name="play" size={15} /> Play</span>
+      <button class="open" onclick={(e) => open(e, onplay)} aria-label="Play {clip.title}">
+        <span class="open-pill">{#if selecting}{@render selectPill()}{:else}<Icon name="play" size={15} /> Play{/if}</span>
       </button>
     {:else if onedit && !clip.fileMissing}
       <!-- Not uploaded yet: the whole picture opens the editor, which is also where the clip plays. -->
-      <button class="open" onclick={onedit} disabled={busy} aria-label="Edit {clip.title}">
-        <span class="open-pill"><Icon name="scissors" size={15} /> Edit</span>
+      <button class="open" onclick={(e) => open(e, onedit)} disabled={busy && !selecting} aria-label="Edit {clip.title}">
+        <span class="open-pill">{#if selecting}{@render selectPill()}{:else}<Icon name="scissors" size={15} /> Edit{/if}</span>
       </button>
     {/if}
     {#if clip.fileMissing}
@@ -123,7 +159,11 @@
     {#if job && (busy || job.status === "failed" || job.status === "needsLogin")}
       <div class="overlay">
         <span class="status" class:failed={job.status === "failed"}>{statusLabel(job)}</span>
-        {#if busy}
+        {#if job.status === "queued"}
+          <div class="overlay-actions">
+            <button class="btn btn-sm" onclick={() => forgetUpload(clip.id)}>Don't upload</button>
+          </div>
+        {:else if busy}
           <div class="progress" class:indeterminate={progress === null} style:--value={progress ?? undefined}>
             <div></div>
           </div>

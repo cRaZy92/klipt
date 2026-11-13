@@ -352,3 +352,63 @@
 .clip-card .star.on {
   color: #ffc53d;
 }
+
+/* Selecting for bulk actions: a check box in the corner, shown on hover and while selecting. */
+.clip-card .select {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  border-radius: 7px;
+  background: rgba(10, 9, 16, 0.55);
+  backdrop-filter: blur(6px);
+  color: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.clip-card:hover .select,
+.clip-card.selecting .select,
+.clip-card .select:focus-visible {
+  opacity: 1;
+}
+
+.clip-card .select:hover {
+  border-color: #fff;
+}
+
+.clip-card.selected .select {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+/* The corner badge steps aside for the check box. */
+.clip-card .badge {
+  transition: transform 0.15s var(--ease-out);
+}
+
+.clip-card:hover .badge,
+.clip-card.selecting .badge {
+  transform: translateX(2.1rem);
+}
+
+.clip-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 14px 34px -18px rgba(124, 92, 255, 0.7);
+}
+
+.clip-card.selected .thumb img {
+  opacity: 0.8;
+}

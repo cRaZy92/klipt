@@ -20,6 +20,9 @@
     ondownload,
     ondelete,
     onfavorite,
+    selected = false,
+    selecting = false,
+    onselect,
   }: {
     upload: MyUpload;
     now: number;
@@ -35,7 +38,21 @@
     ondelete: () => void;
     /** Stars it on the server; missing for servers without favorites. */
     onfavorite?: () => void;
+    /** Picked for a bulk action. */
+    selected?: boolean;
+    /** Something is selected: clicking the picture selects instead of playing. */
+    selecting?: boolean;
+    onselect?: (e: MouseEvent) => void;
   } = $props();
+
+  function open(e: MouseEvent) {
+    if (onselect && (selecting || e.ctrlKey || e.metaKey || e.shiftKey)) {
+      e.preventDefault();
+      onselect(e);
+    } else {
+      onplay();
+    }
+  }
 
   let menuOpen = $state(false);
   let menuWrap = $state<HTMLElement>();
@@ -53,15 +70,29 @@
 
 <svelte:window onclick={closeMenuOutside} />
 
-<article class="card clip-card rise" class:menu-open={menuOpen} style:--i={index}>
+<article class="card clip-card rise" class:menu-open={menuOpen} class:selected class:selecting style:--i={index}>
   <div class="thumb">
+    {#if onselect}
+      <button
+        class="select"
+        role="checkbox"
+        aria-checked={selected}
+        aria-label="Select {upload.title}"
+        title={selected ? "Selected" : "Select (or Ctrl+click the picture)"}
+        onclick={onselect}
+      >
+        <Icon name="check" size={14} />
+      </button>
+    {/if}
     {#if !thumbFailed}
       <img src={upload.thumbnailUrl} alt="" loading="lazy" onerror={() => (thumbFailed = true)} />
     {:else}
       <div class="placeholder"><Icon name="film" size={30} /></div>
     {/if}
-    <button class="open" onclick={onplay} aria-label="Play {upload.title}">
-      <span class="open-pill"><Icon name="play" size={15} /> Play</span>
+    <button class="open" onclick={open} aria-label="Play {upload.title}">
+      <span class="open-pill">
+        {#if selecting}<Icon name="check" size={15} /> {selected ? "Unselect" : "Select"}{:else}<Icon name="play" size={15} /> Play{/if}
+      </span>
     </button>
     <span class="badge badge-online" title="Uploaded; not on this computer">
       <Icon name="cloud" size={13} /> Online only

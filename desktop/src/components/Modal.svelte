@@ -9,7 +9,16 @@
     children,
     footer,
     width = "28rem",
-  }: { title: string; onclose: () => void; children: Snippet; footer?: Snippet; width?: string } = $props();
+    closeOnBackdrop = true,
+  }: {
+    title: string;
+    onclose: () => void;
+    children: Snippet;
+    footer?: Snippet;
+    width?: string;
+    /** Clicking outside closes it. Off where a stray click would lose typing (Escape and × still close). */
+    closeOnBackdrop?: boolean;
+  } = $props();
 
   function onkeydown(e: KeyboardEvent) {
     if (e.key === "Escape") onclose();
@@ -19,7 +28,7 @@
 <svelte:window {onkeydown} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
+<div class="backdrop" onclick={(e) => closeOnBackdrop && e.target === e.currentTarget && onclose()}>
   <div class="modal" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" style:width use:trapFocus>
     <header>
       <h2>{title}</h2>

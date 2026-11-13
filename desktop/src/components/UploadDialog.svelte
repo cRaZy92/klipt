@@ -61,7 +61,7 @@
   }
 </script>
 
-<Modal title={job?.status === "done" ? "Clip uploaded" : "Upload clip"} {onclose}>
+<Modal title={job?.status === "done" ? "Clip uploaded" : "Upload clip"} {onclose} closeOnBackdrop={false}>
   {#if !job}
     <form id="upload-form" onsubmit={submit}>
       <label class="field">

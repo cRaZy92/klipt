@@ -273,68 +273,70 @@
 </script>
 
 <section class="page">
-  <header class="page-head">
-    <div>
-      <h1>My clips</h1>
-      {#if hotkey}
-        <p class="subtitle">Press <Keys shortcut={hotkey} /> in a game to save the last {bufferLabel(bufferSeconds)}.</p>
+  <div class="page-top">
+    <header class="page-head">
+      <div>
+        <h1>My clips</h1>
+        {#if hotkey}
+          <p class="subtitle">Press <Keys shortcut={hotkey} /> in a game to save the last {bufferLabel(bufferSeconds)}.</p>
+        {/if}
+      </div>
+      <div class="page-tools">
+        <button
+          class="btn btn-ghost"
+          onclick={() => (sort = sort === "newestFirst" ? "oldestFirst" : "newestFirst")}
+          title="Change the order"
+        >
+          <Icon name="sort" size={16} />
+          {sort === "newestFirst" ? "Newest first" : "Oldest first"}
+        </button>
+        <button
+          class="btn btn-ghost"
+          onclick={importClips}
+          disabled={importing.phase !== "idle"}
+          title="Add clips you already have (ShadowPlay, OBS, Medal…) from a folder"
+        >
+          <Icon name="folder" size={16} /> Import…
+        </button>
+        <button class="btn" onclick={() => act(() => api.takeScreenshot())} title="Take a screenshot of the recorded screen">
+          <Icon name="image" size={16} /> Screenshot
+        </button>
+        <button class="btn btn-rec" onclick={saveNow} disabled={saving}>
+          <span class="rec-dot"></span> Save clip now
+        </button>
+      </div>
+    </header>
+
+    <div class="filters">
+      <div class="places" role="group" aria-label="Show clips">
+        {#each PLACES as p (p.value)}
+          <button class:active={place === p.value} aria-pressed={place === p.value} onclick={() => (place = p.value)}>
+            {p.label}
+          </button>
+        {/each}
+      </div>
+      <div class="places" role="group" aria-label="Clips or screenshots">
+        {#each MEDIA as m (m.value)}
+          <button class:active={media === m.value} aria-pressed={media === m.value} onclick={() => (media = m.value)}>
+            {m.label}
+          </button>
+        {/each}
+      </div>
+      <SearchInput bind:value={search} placeholder="Search by title or game" label="Search my clips" />
+      {#if uploadsError}
+        <p class="uploads-error">
+          <Icon name="alert" size={15} /> Couldn't load your uploads.
+          <button class="link" onclick={loadUploads}>Try again</button>
+        </p>
       {/if}
     </div>
-    <div class="page-tools">
-      <button
-        class="btn btn-ghost"
-        onclick={() => (sort = sort === "newestFirst" ? "oldestFirst" : "newestFirst")}
-        title="Change the order"
-      >
-        <Icon name="sort" size={16} />
-        {sort === "newestFirst" ? "Newest first" : "Oldest first"}
-      </button>
-      <button
-        class="btn btn-ghost"
-        onclick={importClips}
-        disabled={importing.phase !== "idle"}
-        title="Add clips you already have (ShadowPlay, OBS, Medal…) from a folder"
-      >
-        <Icon name="folder" size={16} /> Import…
-      </button>
-      <button class="btn" onclick={() => act(() => api.takeScreenshot())} title="Take a screenshot of the recorded screen">
-        <Icon name="image" size={16} /> Screenshot
-      </button>
-      <button class="btn btn-rec" onclick={saveNow} disabled={saving}>
-        <span class="rec-dot"></span> Save clip now
-      </button>
-    </div>
-  </header>
 
-  <div class="filters">
-    <div class="places" role="group" aria-label="Show clips">
-      {#each PLACES as p (p.value)}
-        <button class:active={place === p.value} aria-pressed={place === p.value} onclick={() => (place = p.value)}>
-          {p.label}
-        </button>
-      {/each}
-    </div>
-    <div class="places" role="group" aria-label="Clips or screenshots">
-      {#each MEDIA as m (m.value)}
-        <button class:active={media === m.value} aria-pressed={media === m.value} onclick={() => (media = m.value)}>
-          {m.label}
-        </button>
-      {/each}
-    </div>
-    <SearchInput bind:value={search} placeholder="Search by title or game" label="Search my clips" />
-    {#if uploadsError}
-      <p class="uploads-error">
-        <Icon name="alert" size={15} /> Couldn't load your uploads.
-        <button class="link" onclick={loadUploads}>Try again</button>
-      </p>
+    {#if games.length > 0}
+      <GameFilter {games} selected={game} onselect={(g) => (game = g)} />
     {/if}
   </div>
 
   <ImportPanel />
-
-  {#if games.length > 0}
-    <GameFilter {games} selected={game} onselect={(g) => (game = g)} />
-  {/if}
 
   {#if loadError}
     <div class="empty">

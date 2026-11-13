@@ -126,71 +126,73 @@
 </script>
 
 <section class="page">
-  <header class="page-head">
-    <div>
-      <h1>Feed</h1>
-      <p class="subtitle">Clips your friends shared{server ? ` on ${server}` : ""}.</p>
-    </div>
-    <div class="page-tools">
-      <button class="btn btn-ghost" onclick={() => api.openWebsite().catch((e) => toast(errorMessage(e), "error"))}>
-        <Icon name="external" size={16} /> Open website
-      </button>
-      <button class="btn" onclick={refresh} disabled={loading}>
-        <span class="refresh-icon" class:spinning={loading}><Icon name="retry" size={16} /></span> Refresh
-      </button>
-    </div>
-  </header>
+  <div class="page-top">
+    <header class="page-head">
+      <div>
+        <h1>Feed</h1>
+        <p class="subtitle">Clips your friends shared{server ? ` on ${server}` : ""}.</p>
+      </div>
+      <div class="page-tools">
+        <button class="btn btn-ghost" onclick={() => api.openWebsite().catch((e) => toast(errorMessage(e), "error"))}>
+          <Icon name="external" size={16} /> Open website
+        </button>
+        <button class="btn" onclick={refresh} disabled={loading}>
+          <span class="refresh-icon" class:spinning={loading}><Icon name="retry" size={16} /></span> Refresh
+        </button>
+      </div>
+    </header>
 
-  <div class="filters">
-    <SearchInput
-      bind:value={search}
-      placeholder="Search by title, game or friend"
-      label="Search the feed"
-      delay={300}
-      onsearch={() => void load()}
-    />
-    <button
-      class="with-me"
-      class:on={withMe}
-      aria-pressed={withMe}
-      title="Clips your friends tagged you in"
-      onclick={() => {
-        withMe = !withMe;
-        void load();
-      }}
-    >
-      I'm in it
-    </button>
-    <button
-      class="with-me"
-      class:on={favoritesOnly}
-      aria-pressed={favoritesOnly}
-      title="Clips you starred"
-      onclick={() => {
-        favoritesOnly = !favoritesOnly;
-        void load();
-      }}
-    >
-      <Icon name={favoritesOnly ? "starFilled" : "star"} size={14} /> Favorites
-    </button>
-    {#each [["clip", "Clips"], ["screenshot", "Screenshots"]] as const as [value, label] (value)}
+    <div class="filters">
+      <SearchInput
+        bind:value={search}
+        placeholder="Search by title, game or friend"
+        label="Search the feed"
+        delay={300}
+        onsearch={() => void load()}
+      />
       <button
         class="with-me"
-        class:on={kind === value}
-        aria-pressed={kind === value}
+        class:on={withMe}
+        aria-pressed={withMe}
+        title="Clips your friends tagged you in"
         onclick={() => {
-          kind = kind === value ? null : value;
+          withMe = !withMe;
           void load();
         }}
       >
-        {label}
+        I'm in it
       </button>
-    {/each}
-  </div>
+      <button
+        class="with-me"
+        class:on={favoritesOnly}
+        aria-pressed={favoritesOnly}
+        title="Clips you starred"
+        onclick={() => {
+          favoritesOnly = !favoritesOnly;
+          void load();
+        }}
+      >
+        <Icon name={favoritesOnly ? "starFilled" : "star"} size={14} /> Favorites
+      </button>
+      {#each [["clip", "Clips"], ["screenshot", "Screenshots"]] as const as [value, label] (value)}
+        <button
+          class="with-me"
+          class:on={kind === value}
+          aria-pressed={kind === value}
+          onclick={() => {
+            kind = kind === value ? null : value;
+            void load();
+          }}
+        >
+          {label}
+        </button>
+      {/each}
+    </div>
 
-  {#if games.length > 0}
-    <GameFilter {games} selected={game} onselect={selectGame} />
-  {/if}
+    {#if games.length > 0}
+      <GameFilter {games} selected={game} onselect={selectGame} />
+    {/if}
+  </div>
 
   {#if loadError}
     <div class="empty">

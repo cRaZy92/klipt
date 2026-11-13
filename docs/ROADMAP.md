@@ -95,6 +95,14 @@ a spec yet. 1 and 7 are bugs you hit in normal use, so they go first.
 | 6 | Same filter style on both pages    | My clips uses segmented groups; Feed uses loose toggle chips ("I'm in it", "Favorites", "Clips", "Screenshots"). Make them match |
 | 7 | Game counts follow every filter    | My clips' game chip counts only follow the place filter: with Screenshots picked, "WARDOGS 5" can count 5 clips and then show nothing. Counts should follow media and search too |
 | 8 | `/` focuses search                 | Press `/` anywhere in My clips or Feed to jump to the search field                                 |
+| 9 | Select several clips               | Ctrl/Shift-click (or a checkbox on hover) in My clips, then favorite, set game, upload or remove them together |
+| 10 | Undo instead of "Are you sure?"   | "Remove from library" happens at once, with Undo in its toast. Deleting the file itself keeps its confirmation |
+| 11 | Right-click a clip card            | Opens the same menu as ⋯ (Rename, Set game, Show in folder, Remove)                                |
+| 12 | Hover preview                      | Hovering a thumbnail in My clips or Feed plays the clip muted, to find "the one where…" without opening it |
+| 13 | "New" dot on Feed cards            | Cards shared since you last opened the Feed are marked; the app already keeps that time for the new-clips count |
+| 14 | Slow motion in the editor          | Pick parts of a clip and set their speed (e.g. 0.25×/0.5×); the saved and uploaded clip plays them slowed. The editor's preview gets speed and frame-by-frame stepping to find the moment |
+
+Not now: sorting by size, length or views; moving between cards with the arrow keys.
 
 ## Later: after v1
 
@@ -108,7 +116,7 @@ Ideas the spec left out of v1 on purpose, or that came up while building. Nothin
 | Steam Deck / SteamOS Gaming Mode      | Needs gamescope capture; nobody in the group has asked                       |
 | GNOME and X11 on Linux                | v1 targets KDE Plasma on Wayland only                                        |
 | Code signing                          | Costs money; it would remove the SmartScreen warning and make a Program Files install practical |
-| Editor beyond trim and volume         | Cuts in the middle, text, merging clips: a non-goal for v1                   |
+| Editor beyond trim, volume and speed  | Cuts in the middle, text, merging clips: a non-goal for v1 (slow motion is planned, item 14 above) |
 | Likes, comments, notifications        | A non-goal for v1; the Feed is enough for a small group                      |
 | Several qualities per clip on the server | Server-side transcoding: a non-goal for v1                                |
 

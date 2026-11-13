@@ -3,6 +3,7 @@
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount } from "../lib/api";
   import type { RemoveWhere } from "../lib/removal";
+  import { AudioSync } from "../lib/audioSync";
   import { exportFileName, hueOf } from "../lib/format";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
   import { toast } from "../lib/toasts.svelte";
@@ -28,9 +29,9 @@
     dirty?: boolean;
   } = $props();
 
-  /** Audio more than this far off the video is put back in step. */
-  const MAX_DRIFT_S = 0.05;
+  /** How often the audio tracks are checked against the video's clock. */
   const DRIFT_CHECK_MS = 250;
+  const audioSync = new AudioSync(() => performance.now());
 
   let data = $state<EditorData | null>(null);
   let loadError = $state<string | null>(null);
@@ -129,12 +130,7 @@
 
     // Keep the audio on the video's clock and the playhead moving.
     const drift = setInterval(() => {
-      if (!video || video.paused || video.seeking) return;
-      for (const audio of audios()) {
-        if (!audio.seeking && Math.abs(audio.currentTime - video.currentTime) > MAX_DRIFT_S) {
-          audio.currentTime = video.currentTime;
-        }
-      }
+      if (video) audioSync.check(video, audios());
     }, DRIFT_CHECK_MS);
 
     let frame = requestAnimationFrame(function tick() {
@@ -177,8 +173,7 @@
   }
 
   function syncAudio() {
-    if (!video) return;
-    for (const audio of audios()) audio.currentTime = video.currentTime;
+    if (video) audioSync.align(video, audios());
   }
 
   function playAudio() {

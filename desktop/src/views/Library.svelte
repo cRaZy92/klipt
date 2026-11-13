@@ -5,6 +5,7 @@
   import ImportPanel from "../components/ImportPanel.svelte";
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
+  import { libraryMemory as memory } from "../lib/libraryMemory";
   import { removalChoices, type RemoveWhere } from "../lib/removal";
   import { keepShown, selectClick } from "../lib/selection";
   import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
@@ -34,18 +35,20 @@
   } = $props();
 
   // My clips = the clips on this PC plus your uploads on the server (myClips.ts merges them).
-  let local = $state<ClipView[]>([]);
+  // Back from the editor (or another tab): start from what was shown, then refresh it.
+  let local = $state<ClipView[]>(memory.local ?? []);
   /** Your uploads; null when logged out (or not loaded yet). */
-  let uploads = $state<MyUpload[] | null>(null);
+  let uploads = $state<MyUpload[] | null>(memory.uploads);
   let uploadsError = $state<string | null>(null);
-  let place = $state<Place>("all");
-  let game = $state<string | null>(null);
-  let sort = $state<Sort>("newestFirst");
-  let search = $state("");
-  let media = $state<MediaKind>("all");
+  let place = $state<Place>(memory.place);
+  let game = $state<string | null>(memory.game);
+  let sort = $state<Sort>(memory.sort);
+  let search = $state(memory.search);
+  let media = $state<MediaKind>(memory.media);
   /** The screenshot shown full size. */
   let viewing = $state<ClipView | null>(null);
-  let loaded = $state(false);
+  let loaded = $state(memory.local !== null);
+  let page = $state<HTMLElement>();
   let loadError = $state<string | null>(null);
   let now = $state(Date.now());
 
@@ -129,6 +132,25 @@
   $effect(() => {
     // A filter for a game with no clips left (in this place) would show nothing forever.
     if (game !== null && !games.some((g) => g.name === game)) game = null;
+  });
+
+  $effect(() => {
+    Object.assign(memory, { place, game, sort, search, media });
+  });
+
+  $effect(() => {
+    memory.local = $state.snapshot(local);
+    memory.uploads = $state.snapshot(uploads);
+  });
+
+  // The app scrolls its <main>, not this page: put it back where it was, then keep track of it.
+  $effect(() => {
+    const scroller = page?.closest("main");
+    if (!scroller) return;
+    if (memory.local !== null) scroller.scrollTop = memory.scrollTop;
+    const onscroll = () => (memory.scrollTop = scroller.scrollTop);
+    scroller.addEventListener("scroll", onscroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onscroll);
   });
 
   // Bumped to drop answers from older requests.
@@ -399,7 +421,7 @@
   ];
 </script>
 
-<section class="page">
+<section class="page" bind:this={page}>
   <div class="page-top">
     <header class="page-head">
       <div>

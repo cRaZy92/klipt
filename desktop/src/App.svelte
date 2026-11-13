@@ -6,6 +6,7 @@
   import { toast } from "./lib/toasts.svelte";
   import { resumeAfterLogin, stopUploadsForLogout, watchUploads } from "./lib/uploads.svelte";
   import { importing, watchImports } from "./lib/imports.svelte";
+  import { forgetLibrary } from "./lib/libraryMemory";
   import Avatar from "./components/Avatar.svelte";
   import Icon from "./components/Icon.svelte";
   import Toast from "./components/Toast.svelte";
@@ -136,6 +137,11 @@
     }
     account = null;
   }
+
+  // Logged out, or the login expired: the next account mustn't see this one's clips and uploads.
+  $effect(() => {
+    if (!account) forgetLibrary();
+  });
 
   /** Switches screens, asking first when that would throw away unsaved changes. */
   function go(next: View) {

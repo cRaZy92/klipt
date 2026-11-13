@@ -87,7 +87,7 @@ a spec yet. 1 and 7 are bugs you hit in normal use, so they go first.
 
 | # | Item                               | What it means                                                                                      |
 | - | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 1 | Keep filters and scroll position   | My clips and Feed are rebuilt each time you open them: going to the editor and back drops the place, media, game, sort and search filters and jumps to the top. Remember them for the session |
+| 1 | Keep filters and scroll position   | **Done for My clips.** Filters, sort, search, the clips shown and the scroll position are kept for the session (forgotten without a login). Feed still starts over |
 | 2 | Sticky day headings                | "Today", "Yesterday"… stay pinned under the sticky header while their clips scroll, so you know which day you're in |
 | 3 | Feed loads older clips by itself   | Replace "Load older clips" with loading the next page as you near the end of the list            |
 | 4 | Compact header when scrolled       | The pinned block is ~200 px; once scrolled, drop the subtitle and shrink the title so small windows keep room for clips |

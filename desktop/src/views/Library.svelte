@@ -49,7 +49,9 @@
   let uploading = $state<ClipView | null>(null);
   let renaming = $state<{ kind: "local" | "online"; id: string; value: string } | null>(null);
   let tagging = $state<{ clip: ClipView; value: string } | null>(null);
-  let removing = $state<{ clip: ClipView; deleteFile: boolean } | null>(null);
+  type RemoveWhere = "library" | "local" | "everywhere";
+  /** Removing a clip: from the library only, also its file on this PC, or also its upload. */
+  let removing = $state<{ clip: ClipView; served: MyUpload | null; where: RemoveWhere } | null>(null);
   let deletingOnline = $state<MyUpload | null>(null);
   let playing = $state<MyUpload | null>(null);
   let downloading = $state<Set<string>>(new Set());
@@ -225,12 +227,25 @@
 
   async function confirmRemove() {
     if (!removing) return;
-    const { clip, deleteFile } = removing;
-    if (await act(() => api.deleteClip(clip.id, deleteFile), deleteFile ? "Clip deleted." : "Removed from library.")) {
+    const { clip, served, where } = removing;
+    const everywhere = where === "everywhere" && served;
+    const done = await act(
+      async () => {
+        // The server first: if it refuses, the clip is still whole on this PC.
+        if (everywhere) await api.deleteUpload(served.id);
+        await api.deleteClip(clip.id, where !== "library");
+      },
+      everywhere ? "Deleted from this PC and the server." : where === "local" ? "Clip deleted." : "Removed from library.",
+    );
+    if (done) {
       removing = null;
+      if (everywhere && uploads) uploads = uploads.filter((u) => u.id !== served.id);
       void loadLocal();
+    } else if (everywhere) {
+      void loadUploads();
     }
   }
+
 
   async function toggleVisibility(upload: MyUpload) {
     const visibility = upload.visibility === "feed" ? "link" : "feed";
@@ -413,7 +428,8 @@
                   processing={served?.processing}
                   onrename={() => (renaming = { kind: "local", id: clip.id, value: clip.title })}
                   onsetgame={() => (tagging = { clip, value: clip.gameName ?? "" })}
-                  onremove={() => (removing = { clip, deleteFile: false })}
+                  onremove={() =>
+                    (removing = { clip, served: served ?? null, where: served && !clip.fileMissing ? "local" : "library" })}
                   onfavorite={() => toggleFavorite(clip)}
                   thumbVersion={thumbVersion[clip.id] ?? clip.thumbnailMs ?? 0}
                   onshowfolder={() => act(() => api.showInFolder(clip.id))}
@@ -510,21 +526,44 @@
 <ImportDialog />
 
 {#if removing}
-  <Modal title="Remove clip?" onclose={() => (removing = null)}>
-    <p>
-      <strong>{removing.clip.title}</strong> will be removed from your library.
-      {#if removing.clip.shareUrl}It stays online on the server.{/if}
-    </p>
-    {#if !removing.clip.fileMissing}
-      <label class="check">
-        <input type="checkbox" bind:checked={removing.deleteFile} />
-        Also delete the video file from this computer
+  {@const r = removing}
+  <Modal title="Delete clip?" onclose={() => (removing = null)}>
+    <p><strong>{r.clip.title}</strong></p>
+    <div class="where" role="radiogroup" aria-label="Where to delete it from">
+      <label class="option">
+        <input type="radio" bind:group={removing.where} value="library" />
+        <span>
+          <strong>Remove from library only</strong>
+          <small>
+            {r.clip.fileMissing ? "Its file is already gone" : "The file stays in its folder"}{r.served
+              ? " and the link keeps working"
+              : ""}.
+          </small>
+        </span>
       </label>
-    {/if}
+      {#if !r.clip.fileMissing}
+        <label class="option">
+          <input type="radio" bind:group={removing.where} value="local" />
+          <span>
+            <strong>Delete from this PC</strong>
+            <small>{r.served ? "The upload and its link keep working." : "The video file is deleted. It isn't uploaded, so it's gone for good."}</small>
+          </span>
+        </label>
+      {/if}
+      {#if r.served}
+        <label class="option danger">
+          <input type="radio" bind:group={removing.where} value="everywhere" />
+          <span>
+            <strong>Delete everywhere</strong>
+            <small>This PC and the server. The link stops working for everyone.</small>
+          </span>
+        </label>
+      {/if}
+    </div>
     {#snippet footer()}
       <button class="btn" onclick={() => (removing = null)}>Cancel</button>
       <button class="btn btn-danger" onclick={confirmRemove}>
-        {removing?.deleteFile ? "Delete" : "Remove"}
+        {r.where === "library" ? "Remove" : "Delete"}
       </button>
     {/snippet}
   </Modal>
@@ -661,16 +700,55 @@
     font-size: 0.85rem;
   }
 
-  .check {
+  .where {
     display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    cursor: pointer;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.9rem;
   }
 
-  .check input {
+  .option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition:
+      border-color 0.15s,
+      background 0.15s;
+  }
+
+  .option:hover {
+    border-color: var(--border-strong);
+  }
+
+  .option:has(input:checked) {
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+  }
+
+  .option.danger:has(input:checked) {
+    border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+    background: var(--danger-soft);
+  }
+
+  .option input {
     width: 1rem;
     height: 1rem;
+    margin: 0.15rem 0 0;
     accent-color: var(--danger);
+  }
+
+  .option span {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .option small {
+    color: var(--text-muted);
+    font-size: 0.84rem;
   }
 </style>

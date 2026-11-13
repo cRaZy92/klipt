@@ -90,8 +90,8 @@ export function SharePage(props: {
               data-view-url={`/api/clips/${e(clip.id)}/view`}
               data-autoplay
             ></video>
-            <button type="button" class="unmute" hidden>
-              🔊 Click for sound
+            <button type="button" class="unmute" hidden aria-label="Turn the sound on">
+              <span>🔊 Click for sound</span>
             </button>
           </div>
         )}

@@ -30,7 +30,7 @@ describe('share page', () => {
     expect(res.body).toMatch(/<video controls[^>]*playsinline[^>]*preload="metadata"/);
     // It starts by itself (app.js); the sound button waits hidden for browsers that block sound.
     expect(res.body).toMatch(/<video [^>]*data-autoplay/);
-    expect(res.body).toMatch(/<button type="button" class="unmute" hidden>/);
+    expect(res.body).toMatch(/<button type="button" class="unmute" hidden aria-label="Turn the sound on">/);
   });
 
   it('serves link-only clips, escapes titles, omits game when absent', async () => {

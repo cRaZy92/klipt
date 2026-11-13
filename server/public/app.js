@@ -243,6 +243,14 @@
       if (video.paused) video.play().catch(function () {});
     }
     if (button) button.addEventListener('click', soundOn);
+    // Any first click or key press on the page counts too: the browser allows sound after one.
+    function firstTouch() {
+      if (mutedForAutoplay) soundOn();
+      document.removeEventListener('pointerdown', firstTouch, true);
+      document.removeEventListener('keydown', firstTouch, true);
+    }
+    document.addEventListener('pointerdown', firstTouch, true);
+    document.addEventListener('keydown', firstTouch, true);
 
     video.addEventListener('volumechange', function () {
       if (mutedForAutoplay) {

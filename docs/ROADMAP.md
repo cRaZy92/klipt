@@ -1,6 +1,6 @@
 # Klipt roadmap
 
-As of 2026-11-11. Update this file when an item is done or a plan changes.
+As of 2026-11-13. Update this file when an item is done or a plan changes.
 
 All of v1 is built for Windows and Linux, and every desktop change pushed to `main` ships itself as a
 signed Windows release. What's missing is mostly proof on real machines and with real friends, not code.
@@ -79,6 +79,22 @@ Turned down: a save-and-share hotkey (clips are always trimmed before sharing), 
 length at save time, moment markers, autoplaying the next clip. Not now: automatic Discord posts, a
 weekly highlights page. Not picked (yet): keyboard trimming, re-trim after upload, loudness
 evening, links to a moment, per-game recording settings, recording the game's monitor.
+
+## Planned: My clips and Feed polish (chosen 2026-11-13)
+
+Picked by the owner after the sticky page header and the "+N more" game chips (`d057028`). None has
+a spec yet. 1 and 7 are bugs you hit in normal use, so they go first.
+
+| # | Item                               | What it means                                                                                      |
+| - | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 1 | Keep filters and scroll position   | My clips and Feed are rebuilt each time you open them: going to the editor and back drops the place, media, game, sort and search filters and jumps to the top. Remember them for the session |
+| 2 | Sticky day headings                | "Today", "Yesterday"… stay pinned under the sticky header while their clips scroll, so you know which day you're in |
+| 3 | Feed loads older clips by itself   | Replace "Load older clips" with loading the next page as you near the end of the list            |
+| 4 | Compact header when scrolled       | The pinned block is ~200 px; once scrolled, drop the subtitle and shrink the title so small windows keep room for clips |
+| 5 | "Clear filters" on empty results   | Empty states like "No clips match …" get one button that resets every filter                       |
+| 6 | Same filter style on both pages    | My clips uses segmented groups; Feed uses loose toggle chips ("I'm in it", "Favorites", "Clips", "Screenshots"). Make them match |
+| 7 | Game counts follow every filter    | My clips' game chip counts only follow the place filter: with Screenshots picked, "WARDOGS 5" can count 5 clips and then show nothing. Counts should follow media and search too |
+| 8 | `/` focuses search                 | Press `/` anywhere in My clips or Feed to jump to the search field                                 |
 
 ## Later: after v1
 

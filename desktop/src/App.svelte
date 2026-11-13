@@ -335,7 +335,15 @@
           />
         {:else if view.name === "editor"}
           {#key view.clip.id}
-            <Editor clip={view.clip} bind:dirty={viewDirty} onclose={() => go({ name: "library" })} />
+            <Editor
+            clip={view.clip}
+            bind:dirty={viewDirty}
+            onclose={() => go({ name: "library" })}
+            ondeleted={() => {
+              viewDirty = false;
+              view = { name: "library" };
+            }}
+          />
           {/key}
         {:else if settings}
           <SettingsView

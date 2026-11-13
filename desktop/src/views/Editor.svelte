@@ -1,23 +1,29 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { api, errorMessage, on, type ClipView, type EditInput, type EditorData } from "../lib/api";
+  import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount } from "../lib/api";
+  import type { RemoveWhere } from "../lib/removal";
   import { exportFileName, hueOf } from "../lib/format";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
   import { toast } from "../lib/toasts.svelte";
   import { isBusy, uploads } from "../lib/uploads.svelte";
+  import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
   import Icon from "../components/Icon.svelte";
+  import Modal from "../components/Modal.svelte";
   import TrimBar from "../components/TrimBar.svelte";
   import UploadDialog from "../components/UploadDialog.svelte";
 
   let {
     clip,
     onclose,
+    ondeleted,
     dirty = $bindable(false),
   }: {
     clip: ClipView;
     /** Back to the library (the app asks about unsaved changes). */
     onclose: () => void;
+    /** The clip was deleted: back to the library without asking about unsaved changes. */
+    ondeleted: () => void;
     /** Whether there are unsaved changes, for the app's "Discard changes?" guard. */
     dirty?: boolean;
   } = $props();
@@ -50,6 +56,13 @@
   let position = $state(0);
 
   let saving = $state(false);
+  // svelte-ignore state_referenced_locally
+  let gameName = $state(clip.gameName);
+  /** "Set game": the name being typed and the games Klipt knows (for suggestions). */
+  let tagging = $state<{ value: string; games: GameCount[] } | null>(null);
+  /** "Delete clip?": the clip as the library has it now (it may have been uploaded meanwhile). */
+  let removing = $state<ClipView | null>(null);
+  let deleting = $state(false);
   let exportProgress = $state<number | null>(null);
   let uploadOpen = $state(false);
 
@@ -342,6 +355,57 @@
     }
   }
 
+  function setGame() {
+    tagging = { value: gameName ?? "", games: [] };
+    api.listGames().then((games) => tagging && (tagging.games = games)).catch(() => {});
+  }
+
+  async function submitGame(e: SubmitEvent) {
+    e.preventDefault();
+    if (!tagging) return;
+    const name = tagging.value.trim() || null;
+    try {
+      await api.setClipGame(clip.id, name);
+      gameName = name;
+      tagging = null;
+    } catch (err) {
+      toast(errorMessage(err), "error");
+    }
+  }
+
+  async function askDelete() {
+    video?.pause();
+    // Uploaded from this editor? The library knows its server copy now; `clip` may not.
+    let current = data?.clip ?? clip;
+    try {
+      current = (await api.listClips({ game: null, sort: "newestFirst" })).find((c) => c.id === clip.id) ?? current;
+    } catch {
+      // Use what we have.
+    }
+    removing = current;
+  }
+
+  async function confirmDelete(where: RemoveWhere) {
+    if (!removing) return;
+    const target = removing;
+    deleting = true;
+    try {
+      // The server first: if it refuses, the clip is still whole on this PC.
+      if (where === "everywhere" && target.serverClipId) await api.deleteUpload(target.serverClipId);
+      await api.deleteClip(target.id, where !== "library" && !target.fileMissing);
+      toast(
+        where === "everywhere" ? "Deleted from this PC and the server." : where === "local" ? "Clip deleted." : "Removed from library.",
+        "success",
+      );
+      removing = null;
+      ondeleted();
+    } catch (err) {
+      toast(errorMessage(err), "error");
+    } finally {
+      deleting = false;
+    }
+  }
+
   async function onupload() {
     // The upload exports the saved edit, so save first: it uploads the cut the user sees.
     if (await saveEdit()) {
@@ -361,12 +425,21 @@
     </button>
     <div class="title">
       <h1 title={data?.clip.title ?? clip.title}>{data?.clip.title ?? clip.title}</h1>
-      <span class="game" class:unknown={!clip.gameName}>
-        {#if clip.gameName}<span class="game-dot" style:--hue={hueOf(clip.gameName)}></span>{/if}
-        {clip.gameName ?? "Unknown game"}
-      </span>
+      <button class="game" class:unknown={!gameName} onclick={setGame} title="Set game">
+        {#if gameName}<span class="game-dot" style:--hue={hueOf(gameName)}></span>{/if}
+        {gameName ?? "Unknown game"}
+        <Icon name="chevronDown" size={13} />
+      </button>
     </div>
     {#if changed}<span class="unsaved">Unsaved changes</span>{/if}
+    <button
+      class="btn btn-ghost delete"
+      onclick={askDelete}
+      disabled={uploading || deleting}
+      title={uploading ? "Wait for the upload to finish" : "Delete this clip"}
+    >
+      <Icon name="trash" size={16} /> Delete
+    </button>
   </header>
 
   {#if loadError}
@@ -539,6 +612,34 @@
   <UploadDialog clip={data.clip} onclose={() => (uploadOpen = false)} />
 {/if}
 
+{#if tagging}
+  <Modal title="Set game" onclose={() => (tagging = null)}>
+    <form id="editor-game-form" onsubmit={submitGame}>
+      <label class="field">
+        <span>Game</span>
+        <!-- svelte-ignore a11y_autofocus -->
+        <input class="input" bind:value={tagging.value} list="editor-known-games" placeholder="Unknown game" autofocus />
+        <datalist id="editor-known-games">
+          {#each tagging.games as g (g.name)}<option value={g.name}></option>{/each}
+        </datalist>
+      </label>
+    </form>
+    {#snippet footer()}
+      <button class="btn" onclick={() => (tagging = null)}>Cancel</button>
+      <button class="btn btn-primary" type="submit" form="editor-game-form">Save</button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if removing}
+  <DeleteClipDialog
+    local={[{ title: removing.title, fileMissing: removing.fileMissing, uploaded: !!removing.serverClipId }]}
+    busy={deleting}
+    onconfirm={confirmDelete}
+    onclose={() => (removing = null)}
+  />
+{/if}
+
 <style>
   .editor {
     display: flex;
@@ -580,12 +681,41 @@
     flex: none;
     align-items: center;
     gap: 0.45rem;
+    padding: 0.2rem 0.45rem 0.2rem 0.55rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: none;
     color: var(--text-muted);
+    font: inherit;
     font-size: 0.9rem;
+    cursor: pointer;
+    transition:
+      border-color 0.15s,
+      color 0.15s;
+  }
+
+  .game:hover,
+  .game:focus-visible {
+    border-color: var(--border-strong);
+    color: var(--text);
   }
 
   .unknown {
     font-style: italic;
+  }
+
+  .delete {
+    flex: none;
+    margin-left: auto;
+    color: var(--danger-text, var(--danger));
+  }
+
+  .unsaved + .delete {
+    margin-left: 0;
+  }
+
+  .delete:hover:not(:disabled) {
+    background: var(--danger-soft);
   }
 
   .unsaved {

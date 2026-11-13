@@ -6,13 +6,14 @@
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
   import { libraryMemory as memory } from "../lib/libraryMemory";
-  import { removalChoices, type RemoveWhere } from "../lib/removal";
+  import type { RemoveWhere } from "../lib/removal";
   import { keepShown, selectClick } from "../lib/selection";
   import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
   import { gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
+  import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import ImageViewer from "../components/ImageViewer.svelte";
   import Icon from "../components/Icon.svelte";
@@ -60,8 +61,8 @@
   let removing = $state<{
     local: { clip: ClipView; served: MyUpload | null }[];
     online: MyUpload[];
-    where: RemoveWhere;
   } | null>(null);
+  let deleting = $state(false);
   let bulkUpload = $state<{ clips: ClipView[]; visibility: "feed" | "link" } | null>(null);
   /** Cards picked for a bulk action, by `MyClip.key`; `anchor` is the last one clicked (for Shift). */
   let selected = $state<Set<string>>(new Set());
@@ -331,9 +332,10 @@
     }
   }
 
-  async function confirmRemove() {
+  async function confirmRemove(where: RemoveWhere) {
     if (!removing) return;
-    const { local: clips, online, where } = removing;
+    const { local: clips, online } = removing;
+    deleting = true;
     const total = clips.length + online.length;
     let failed = 0;
     let firstError = "";
@@ -367,17 +369,15 @@
       toast(total === 1 ? firstError : `${failed} of ${done} couldn't be deleted: ${firstError}`, "error");
       removing = null;
     }
+    deleting = false;
     load();
   }
 
   /** Opens the delete dialog for these clips. */
   function askRemove(local: { clip: ClipView; served: MyUpload | null }[], online: MyUpload[]) {
-    const choices = removalChoices({
-      local: local.map((p) => ({ fileMissing: p.clip.fileMissing, uploaded: !!p.served })),
-      onlineOnly: online.length,
-    });
-    removing = { local, online, where: choices.initial };
+    removing = { local, online };
   }
+
 
 
 
@@ -655,12 +655,12 @@
       They upload one after another, each with its own title (like “{uploadTitle(b.clips[0])}”). Links aren't copied; use
       “Copy link” on a card when it's done.
     </p>
-    <div class="where" role="radiogroup" aria-label="Who can see them">
-      <label class="option">
+    <div class="pick-list" role="radiogroup" aria-label="Who can see them">
+      <label class="pick">
         <input type="radio" bind:group={bulkUpload.visibility} value="feed" />
         <span><strong>Feed</strong><small>Your friends see them in the feed.</small></span>
       </label>
-      <label class="option">
+      <label class="pick">
         <input type="radio" bind:group={bulkUpload.visibility} value="link" />
         <span><strong>Link only</strong><small>Only people you send a link to can watch them.</small></span>
       </label>
@@ -748,81 +748,13 @@
 <ImportDialog />
 
 {#if removing}
-  {@const r = removing}
-  {@const total = r.local.length + r.online.length}
-  {@const one = total === 1}
-  {@const choices = removalChoices({
-    local: r.local.map((p) => ({ fileMissing: p.clip.fileMissing, uploaded: !!p.served })),
-    onlineOnly: r.online.length,
-  })}
-  <Modal title={one ? "Delete clip?" : `Delete ${total} clips?`} onclose={() => (removing = null)}>
-    {#if one}
-      <p><strong>{(r.local[0]?.clip.title ?? r.online[0]?.title)}</strong></p>
-    {:else if r.online.length > 0 && r.local.length > 0}
-      <p class="muted">{r.local.length} on this PC, {r.online.length} only online.</p>
-    {/if}
-    <div class="where" role="radiogroup" aria-label="Where to delete from">
-      {#if choices.library}
-        <label class="option">
-          <input type="radio" bind:group={removing.where} value="library" />
-          <span>
-            <strong>Remove from library only</strong>
-            <small>
-              {#if one}
-                {r.local[0].clip.fileMissing ? "Its file is already gone" : "The file stays in its folder"}{r.local[0].served
-                  ? " and the link keeps working"
-                  : ""}.
-              {:else}
-                Files stay in their folders and links keep working.
-              {/if}
-            </small>
-          </span>
-        </label>
-      {/if}
-      {#if choices.local}
-        <label class="option">
-          <input type="radio" bind:group={removing.where} value="local" />
-          <span>
-            <strong>Delete from this PC</strong>
-            <small>
-              {#if one}
-                {r.local[0].served ? "The upload and its link keep working." : "The video file is deleted. It isn't uploaded, so it's gone for good."}
-              {:else if choices.notUploaded > 0}
-                Uploads keep working, but {choices.notUploaded === 1 ? "1 clip isn't" : `${choices.notUploaded} clips aren't`} uploaded
-                and will be gone for good.
-              {:else}
-                The files are deleted. Uploads and their links keep working.
-              {/if}
-            </small>
-          </span>
-        </label>
-      {/if}
-      {#if choices.everywhere}
-        <label class="option danger">
-          <input type="radio" bind:group={removing.where} value="everywhere" />
-          <span>
-            <strong>{choices.library ? "Delete everywhere" : "Delete from the server"}</strong>
-            <small>
-              {choices.library ? "This PC and the server." : ""}
-              {one ? "The link stops working" : "Links stop working"} for everyone.
-            </small>
-          </span>
-        </label>
-      {/if}
-    </div>
-    {#if r.online.length > 0 && r.where !== "everywhere"}
-      <p class="muted hint">
-        {r.online.length === 1 ? "1 clip is" : `${r.online.length} clips are`} only online, so only “Delete everywhere” deletes
-        {r.online.length === 1 ? "it" : "them"}.
-      </p>
-    {/if}
-    {#snippet footer()}
-      <button class="btn" onclick={() => (removing = null)}>Cancel</button>
-      <button class="btn btn-danger" onclick={confirmRemove}>
-        {r.where === "library" ? "Remove" : "Delete"}
-      </button>
-    {/snippet}
-  </Modal>
+  <DeleteClipDialog
+    local={removing.local.map((p) => ({ title: p.clip.title, fileMissing: p.clip.fileMissing, uploaded: !!p.served }))}
+    online={removing.online}
+    busy={deleting}
+    onconfirm={confirmRemove}
+    onclose={() => (removing = null)}
+  />
 {/if}
 
 <style>
@@ -1003,59 +935,4 @@
     background: var(--danger-soft);
   }
 
-  .where {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    margin-top: 0.9rem;
-  }
-
-  .option {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.7rem;
-    padding: 0.65rem 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    cursor: pointer;
-    transition:
-      border-color 0.15s,
-      background 0.15s;
-  }
-
-  .option:hover {
-    border-color: var(--border-strong);
-  }
-
-  .option:has(input:checked) {
-    border-color: var(--border-strong);
-    background: var(--surface-2);
-  }
-
-  .option.danger:has(input:checked) {
-    border-color: color-mix(in srgb, var(--danger) 55%, transparent);
-    background: var(--danger-soft);
-  }
-
-  .option input {
-    width: 1rem;
-    height: 1rem;
-    margin: 0.15rem 0 0;
-    accent-color: var(--accent);
-  }
-
-  .option.danger input {
-    accent-color: var(--danger);
-  }
-
-  .option span {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-  }
-
-  .option small {
-    color: var(--text-muted);
-    font-size: 0.84rem;
-  }
 </style>

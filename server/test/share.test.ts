@@ -28,6 +28,9 @@ describe('share page', () => {
     expect(res.body).toContain('content="player"');
     expect(res.body).toContain('name="robots" content="noindex"');
     expect(res.body).toMatch(/<video controls[^>]*playsinline[^>]*preload="metadata"/);
+    // It starts by itself (app.js); the sound button waits hidden for browsers that block sound.
+    expect(res.body).toMatch(/<video [^>]*data-autoplay/);
+    expect(res.body).toMatch(/<button type="button" class="unmute" hidden>/);
   });
 
   it('serves link-only clips, escapes titles, omits game when absent', async () => {

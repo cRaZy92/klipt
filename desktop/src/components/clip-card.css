@@ -23,7 +23,10 @@
   z-index: 5;
 }
 
+/* No blur (backdrop-filter) on anything in a card: each one is its own compositing layer, and with
+   hundreds of cards scrolling stutters (WebKitGTK especially). Off-screen pictures aren't drawn. */
 .clip-card .thumb {
+  content-visibility: auto;
   position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
@@ -102,8 +105,7 @@
   padding: 0.45rem 0.9rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
-  background: rgba(15, 13, 24, 0.72);
-  backdrop-filter: blur(8px);
+  background: rgba(15, 13, 24, 0.86);
   font-size: 0.88rem;
   font-weight: 650;
   opacity: 0;
@@ -131,25 +133,24 @@
   border-radius: 999px;
   font-size: 0.74rem;
   font-weight: 700;
-  backdrop-filter: blur(8px);
   pointer-events: none;
 }
 
 .clip-card .badge-uploaded {
   border: 1px solid rgba(60, 207, 142, 0.3);
-  background: rgba(8, 28, 20, 0.78);
+  background: rgba(8, 28, 20, 0.9);
   color: var(--success);
 }
 
 .clip-card .badge-online {
   border: 1px solid rgba(124, 92, 255, 0.35);
-  background: rgba(20, 14, 40, 0.8);
+  background: rgba(20, 14, 40, 0.9);
   color: var(--accent-text, #c9bcff);
 }
 
 .clip-card .badge-missing {
   border: 1px solid rgba(255, 181, 71, 0.3);
-  background: rgba(40, 28, 8, 0.82);
+  background: rgba(40, 28, 8, 0.9);
   color: var(--warning);
 }
 
@@ -177,8 +178,7 @@
   align-items: stretch;
   gap: 0.65rem;
   padding: 1rem 1.25rem;
-  background: rgba(9, 8, 15, 0.78);
-  backdrop-filter: blur(3px);
+  background: rgba(9, 8, 15, 0.86);
   text-align: center;
 }
 
@@ -328,8 +328,7 @@
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 50%;
-  background: rgba(12, 10, 20, 0.7);
-  backdrop-filter: blur(8px);
+  background: rgba(12, 10, 20, 0.82);
   color: #fff;
   cursor: pointer;
   opacity: 0;
@@ -366,8 +365,7 @@
   padding: 0;
   border: 1.5px solid rgba(255, 255, 255, 0.55);
   border-radius: 7px;
-  background: rgba(10, 9, 16, 0.55);
-  backdrop-filter: blur(6px);
+  background: rgba(10, 9, 16, 0.7);
   color: transparent;
   cursor: pointer;
   opacity: 0;

@@ -114,7 +114,7 @@
       </button>
     {/if}
     {#if thumb}
-      <img src={thumb} alt="" loading="lazy" onerror={() => (thumbFailed = true)} />
+      <img src={thumb} alt="" loading="lazy" decoding="async" onerror={() => (thumbFailed = true)} />
     {:else}
       <div class="placeholder"><Icon name={clip.fileMissing ? "alert" : "film"} size={30} /></div>
     {/if}

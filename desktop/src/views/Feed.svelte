@@ -240,7 +240,7 @@
             {#each group.items as clip, i (clip.id)}
               <article class="card rise" style:--i={i}>
                 <button class="thumb" onclick={() => (playing = clip)} aria-label={`Play ${clip.title}`}>
-                  <img src={clip.thumbnailUrl} alt="" loading="lazy" />
+                  <img src={clip.thumbnailUrl} alt="" loading="lazy" decoding="async" />
                   <span class="play"><Icon name={clip.kind === "screenshot" ? "image" : "play"} size={22} /></span>
                   {#if clip.gameName}
                     <span class="game-tag" style:--hue={hueOf(clip.gameName)}>
@@ -345,8 +345,7 @@
     padding: 0;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 50%;
-    background: rgba(12, 10, 20, 0.7);
-    backdrop-filter: blur(8px);
+    background: rgba(12, 10, 20, 0.82);
     color: #fff;
     cursor: pointer;
     opacity: 0;
@@ -398,6 +397,7 @@
   }
 
   .thumb {
+    content-visibility: auto;
     position: relative;
     display: block;
     width: 100%;
@@ -473,8 +473,7 @@
     padding: 0.2rem 0.55rem;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 999px;
-    background: rgba(12, 10, 20, 0.7);
-    backdrop-filter: blur(8px);
+    background: rgba(12, 10, 20, 0.82);
     color: #fff;
     font-size: 0.74rem;
     font-weight: 650;

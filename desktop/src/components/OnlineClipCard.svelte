@@ -85,7 +85,7 @@
       </button>
     {/if}
     {#if !thumbFailed}
-      <img src={upload.thumbnailUrl} alt="" loading="lazy" onerror={() => (thumbFailed = true)} />
+      <img src={upload.thumbnailUrl} alt="" loading="lazy" decoding="async" onerror={() => (thumbFailed = true)} />
     {:else}
       <div class="placeholder"><Icon name="film" size={30} /></div>
     {/if}

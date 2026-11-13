@@ -31,8 +31,7 @@
     padding: 0.2rem 0.5rem 0.2rem 0.4rem;
     border: 1px solid rgba(124, 92, 255, 0.35);
     border-radius: 999px;
-    background: rgba(20, 14, 40, 0.8);
-    backdrop-filter: blur(8px);
+    background: rgba(20, 14, 40, 0.9);
     color: var(--accent-text, #c9bcff);
     font-size: 0.72rem;
     font-weight: 700;

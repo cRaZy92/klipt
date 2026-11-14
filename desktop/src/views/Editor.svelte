@@ -89,6 +89,13 @@
   const exporting = $derived(exportProgress !== null);
   const busy = $derived(saving || exporting || uploading);
 
+  // An upload saves its title as the clip's: show it here at once, not on the next open.
+  $effect(() => {
+    if (job?.status === "done" && data && data.clip.title !== job.title) {
+      data.clip = { ...data.clip, title: job.title };
+    }
+  });
+
   /** The edit as the UI shows it now, in the shape it is saved. */
   const edit = $derived.by((): EditInput => {
     const t = savedTrim(trim, duration);

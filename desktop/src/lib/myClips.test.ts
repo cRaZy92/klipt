@@ -47,11 +47,12 @@ describe("visibleClips", () => {
   );
 
   it("filters by place", () => {
-    const keys = (place: "all" | "local" | "uploaded") =>
+    const keys = (place: "all" | "local" | "uploaded" | "notUploaded") =>
       visibleClips(items, place, null, "newestFirst").map((i) => i.key);
     expect(keys("all")).toEqual(["l:new", "l:up", "s:old"]);
     expect(keys("local")).toEqual(["l:new", "l:up"]);
     expect(keys("uploaded")).toEqual(["l:up", "s:old"]);
+    expect(keys("notUploaded")).toEqual(["l:new"]);
   });
 
   it("filters by game and sorts both ways", () => {

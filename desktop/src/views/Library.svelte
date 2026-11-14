@@ -408,6 +408,7 @@
     { value: "all", label: "All" },
     { value: "local", label: "On this PC" },
     { value: "uploaded", label: "Uploaded" },
+    { value: "notUploaded", label: "Not uploaded" },
     { value: "favorites", label: "Favorites" },
   ];
 
@@ -505,6 +506,8 @@
         <p>No clips for this game here.</p>
       {:else if place === "uploaded"}
         <p>Nothing uploaded yet.</p>
+      {:else if place === "notUploaded"}
+        <p>Everything here is uploaded.</p>
       {:else}
         <p>No clips on this PC.</p>
       {/if}

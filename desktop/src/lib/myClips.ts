@@ -3,8 +3,9 @@
 
 import type { ClipView, GameCount, MyUpload, Sort } from "./api";
 
-/** Where a clip is: everything, the clips on this PC, the ones on the server, or starred ones. */
-export type Place = "all" | "local" | "uploaded" | "favorites";
+/** Where a clip is: everything, the clips on this PC, the ones on the server, the ones not
+ * uploaded yet, or starred ones. */
+export type Place = "all" | "local" | "uploaded" | "notUploaded" | "favorites";
 
 export type MyClip =
   | { kind: "local"; key: string; clip: ClipView; at: number; game: string | null; steamAppId: number | null }
@@ -54,6 +55,7 @@ export function mediaKindOf(item: MyClip): "clip" | "screenshot" {
 export function matchesPlace(item: MyClip, place: Place): boolean {
   if (place === "local") return item.kind === "local";
   if (place === "uploaded") return isUploaded(item);
+  if (place === "notUploaded") return !isUploaded(item);
   if (place === "favorites") return item.kind === "local" ? item.clip.favorite : !!item.upload.favorite;
   return true;
 }

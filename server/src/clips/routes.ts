@@ -232,10 +232,25 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
   const clipsDir = join(config.dataDir, 'clips');
   await mkdir(clipsDir, { recursive: true });
   await app.register(fastifyStatic, { root: clipsDir, serve: false });
+  const versionOf = (file: string) => Number(/\.v(\d+)\.mp4$/.exec(file)?.[1] ?? 0);
+  /** The clip's current video when `file` names an earlier version of it, else null. */
+  const currentVideoFor = async (file: string): Promise<string | null> => {
+    const found = await getClip(db, file.slice(0, 12));
+    if (!found || found.clip.kind !== 'clip' || versionOf(file) >= found.clip.mediaVersion) return null;
+    const current = mediaFileName(found.clip);
+    return (await stat(join(clipsDir, current)).catch(() => null)) ? current : null;
+  };
   app.get('/media/:file', async (req, reply) => {
     const { file } = req.params as { file: string };
     if (!MEDIA_FILE.test(file)) return reply.code(404).send({ error: 'not_found' });
-    if (!(await stat(join(clipsDir, file)).catch(() => null))) return reply.code(404).send({ error: 'not_found' });
+    if (!(await stat(join(clipsDir, file)).catch(() => null))) {
+      // An older name of a clip's video (compression replaced it): serve the current one. Discord
+      // keeps the og:video URL it saw when the link was posted, often before compression finished.
+      const current = file.endsWith('.mp4') ? await currentVideoFor(file) : null;
+      if (!current) return reply.code(404).send({ error: 'not_found' });
+      reply.header('cache-control', 'public, max-age=3600');
+      return reply.sendFile(current, { cacheControl: false });
+    }
     if (!file.endsWith('.jpg') && (req.query as { download?: string }).download === '1') {
       const found = await getClip(db, file.slice(0, 12));
       if (!found) return reply.code(404).send({ error: 'not_found' });

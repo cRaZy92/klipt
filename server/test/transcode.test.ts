@@ -190,6 +190,23 @@ describe('compression queue', () => {
     const dl = await t.app.inject({ url: `/media/${created.id}.v1.mp4?download=1` });
     expect(dl.headers['content-disposition']).toContain('Ace.mp4');
   });
+
+  it('a link to the upload keeps working after the compressed file replaced it', async () => {
+    // Discord caches a share page's og:video for the URL it saw when the link was posted,
+    // which is the upload's name if the clip was still compressing.
+    const created = await upload(await makeVideo(dir, 'high'));
+    await t.app.transcoder.idle();
+    await rm(join(t.dataDir, 'clips', `${created.id}.mp4`)); // what the grace timer does later
+    const clip = await getClip(created.id);
+
+    const old = await t.app.inject({ url: `/media/${created.id}.mp4` });
+    expect(old.statusCode).toBe(200);
+    expect(Number(old.headers['content-length'])).toBe(clip.sizeBytes);
+    expect(old.headers['cache-control']).not.toContain('immutable');
+    const range = await t.app.inject({ url: `/media/${created.id}.mp4`, headers: { range: 'bytes=0-99' } });
+    expect(range.statusCode).toBe(206);
+    expect((await t.app.inject({ url: `/media/${created.id}.v2.mp4` })).statusCode).toBe(404);
+  });
 });
 
 describe('restart recovery', () => {

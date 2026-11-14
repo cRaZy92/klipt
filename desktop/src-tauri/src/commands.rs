@@ -452,27 +452,46 @@ pub fn list_games(state: State<'_, AppState>) -> Result<Vec<GameCount>> {
 }
 
 #[tauri::command]
-pub fn rename_clip(state: State<'_, AppState>, id: String, title: String) -> Result<()> {
+pub fn rename_clip(app: AppHandle, state: State<'_, AppState>, id: String, title: String) -> Result<()> {
     let title = clean_title(&title)?;
-    lock(&state.library).rename(&id, &title)
+    edit_synced(&app, &state, &id, "title", |library| library.rename(&id, &title))
+}
+
+/// Saves a local edit; for an uploaded clip, also marks `field` to sync and sends it.
+fn edit_synced(
+    app: &AppHandle,
+    state: &AppState,
+    id: &str,
+    field: &str,
+    edit: impl FnOnce(&crate::library::Library) -> Result<()>,
+) -> Result<()> {
+    let library = lock(&state.library);
+    edit(&library)?;
+    library.mark_sync_pending(id, field)?;
+    let uploaded = library.get(id)?.server_clip_id.is_some();
+    drop(library);
+    if uploaded {
+        crate::server_clips::spawn_push(app.clone());
+    }
+    Ok(())
 }
 
 /// Stars or unstars a clip.
 #[tauri::command]
-pub fn set_clip_favorite(state: State<'_, AppState>, id: String, favorite: bool) -> Result<()> {
-    lock(&state.library).set_favorite(&id, favorite)
+pub fn set_clip_favorite(app: AppHandle, state: State<'_, AppState>, id: String, favorite: bool) -> Result<()> {
+    edit_synced(&app, &state, &id, "favorite", |library| library.set_favorite(&id, favorite))
 }
 
 /// Tags a clip with a game (`None` or blank = Unknown). Tagging an Unknown clip also remembers
 /// its exe, so the next clip of that game is named automatically.
 #[tauri::command]
-pub fn set_clip_game(state: State<'_, AppState>, id: String, name: Option<String>) -> Result<()> {
+pub fn set_clip_game(app: AppHandle, state: State<'_, AppState>, id: String, name: Option<String>) -> Result<()> {
     let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
     let library = lock(&state.library);
     let clip = library.get(&id)?;
     let steam_app_id = steam_app_id_for(&library.games()?, &clip, name.as_deref());
-    library.set_game(&id, name.as_deref(), steam_app_id)?;
     drop(library);
+    edit_synced(&app, &state, &id, "game", |library| library.set_game(&id, name.as_deref(), steam_app_id))?;
     if let (true, Some(exe), Some(name)) = (should_save_mapping(&clip, name.as_deref()), &clip.exe, &name) {
         if let Err(e) = mappings::set(&state.data_dir, exe, name) {
             eprintln!("klipt: can't remember {exe} as {name}: {e}");
@@ -714,6 +733,12 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
         library.mark_uploaded(id, &server_clip.id, &server_clip.share_url, visibility)?;
         if let Err(e) = library.rename(id, &job.title) {
             eprintln!("klipt: can't save the uploaded title of clip {id}: {e}");
+        }
+        // Uploads don't carry the star: it goes up with the next sync.
+        if clip.favorite {
+            if let Err(e) = library.mark_sync_pending(id, "favorite") {
+                eprintln!("klipt: can't queue the star of clip {id}: {e}");
+            }
         }
     }
     if !screenshot {

@@ -10,7 +10,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::commands::{clean_title, clear_auth_if_current, keep_own_media};
 use crate::errors::{AppError, Result};
-use crate::library::{ClipView, NewClip};
+use crate::library::{ClipView, NewClip, ServerFields};
 use crate::state::AppState;
 use crate::upload::api::ApiClient;
 use crate::upload::auth::{self, Auth};
@@ -56,6 +56,7 @@ pub async fn my_uploads(app: AppHandle) -> Result<Option<Vec<Value>>> {
         Err(AppError::Unauthorized) => return Ok(None),
         Err(e) => return Err(e),
     };
+    push_pending_with(&app, &client, &saved).await;
     let mut items = Vec::new();
     let mut cursor: Option<String> = None;
     let mut complete = false;
@@ -74,6 +75,7 @@ pub async fn my_uploads(app: AppHandle) -> Result<Option<Vec<Value>>> {
             break;
         }
     }
+    apply_uploads(&app, &items);
     if complete {
         forget_deleted_uploads(&app, &client, &saved, &items).await;
     }
@@ -126,10 +128,7 @@ pub async fn update_upload(
         .patch_json(&saved.token, &format!("/api/clips/{id}"), &Value::Object(body))
         .await
         .map_err(|e| failed(&data_dir, &saved, e))?;
-    if let Some(visibility) = clip.get("visibility").and_then(Value::as_str) {
-        let state = app.state::<AppState>();
-        crate::commands::lock(&state.library).set_server_visibility(id, visibility)?;
-    }
+    apply_uploads(&app, std::slice::from_ref(&clip));
     Ok(clip)
 }
 
@@ -157,7 +156,89 @@ pub async fn set_server_favorite(app: AppHandle, id: String, favorite: bool) -> 
     let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
     let path = format!("/api/clips/{id}/favorite");
     let done = if favorite { client.put_empty(&saved.token, &path).await } else { client.delete(&saved.token, &path).await };
-    done.map_err(|e| failed(&data_dir, &saved, e))
+    done.map_err(|e| failed(&data_dir, &saved, e))?;
+    let server = ServerFields { favorite: Some(favorite), ..Default::default() };
+    if let Err(e) = crate::commands::lock(&app.state::<AppState>().library).apply_server(id, &server) {
+        eprintln!("klipt: can't save the star of upload {id} locally: {e}");
+    }
+    Ok(())
+}
+
+/// The synced fields of a server `Clip` JSON.
+fn server_fields(clip: &Value) -> ServerFields {
+    let text = |k: &str| clip.get(k).and_then(Value::as_str).map(String::from);
+    ServerFields {
+        title: text("title"),
+        game: clip.get("gameName").map(|name| {
+            let steam = clip.get("steamAppId").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok());
+            (name.as_str().map(String::from), steam)
+        }),
+        favorite: clip.get("favorite").and_then(Value::as_bool),
+        visibility: text("visibility"),
+    }
+}
+
+/// Server edits (the website, another PC) flow into the local clips uploaded as them.
+fn apply_uploads(app: &AppHandle, uploads: &[Value]) {
+    let state = app.state::<AppState>();
+    let library = crate::commands::lock(&state.library);
+    for upload in uploads {
+        let Some(id) = upload.get("id").and_then(Value::as_str) else { continue };
+        if let Err(e) = library.apply_server(id, &server_fields(upload)) {
+            eprintln!("klipt: can't copy the server's changes of {id}: {e}");
+        }
+    }
+}
+
+/// Sends local edits of uploaded clips (see `mark_sync_pending`) in the background.
+pub fn spawn_push(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        if let Ok((saved, client, _)) = login(&app, LIST_TIMEOUT) {
+            push_pending_with(&app, &client, &saved).await;
+        }
+    });
+}
+
+/// Sends every pending edit; what fails stays pending for the next try (the next uploads
+/// refresh). A server copy that's gone unlinks its local clip.
+async fn push_pending_with(app: &AppHandle, client: &ApiClient, saved: &Auth) {
+    let pending = match crate::commands::lock(&app.state::<AppState>().library).pending_syncs() {
+        Ok(p) => p,
+        Err(e) => return eprintln!("klipt: can't read edits to sync: {e}"),
+    };
+    for (clip, fields) in pending {
+        let Some(Ok(id)) = clip.server_clip_id.as_deref().map(checked_id) else { continue };
+        let has = |f: &str| fields.iter().any(|x| x == f);
+        let mut body = serde_json::Map::new();
+        if has("title") {
+            body.insert("title".into(), clip.title.clone().into());
+        }
+        if has("game") {
+            body.insert("gameName".into(), clip.game_name.clone().into());
+            body.insert("steamAppId".into(), clip.steam_app_id.into());
+        }
+        let mut result = Ok(());
+        if !body.is_empty() {
+            result = client.patch_json(&saved.token, &format!("/api/clips/{id}"), &Value::Object(body)).await.map(drop);
+        }
+        if result.is_ok() && has("favorite") {
+            let path = format!("/api/clips/{id}/favorite");
+            result = if clip.favorite { client.put_empty(&saved.token, &path).await } else { client.delete(&saved.token, &path).await };
+        }
+        let state = app.state::<AppState>();
+        let library = crate::commands::lock(&state.library);
+        let done = match result {
+            Ok(()) => library.clear_sync_pending(&clip, &fields),
+            Err(crate::upload::ApiError::Server { status: 404, .. }) => library.unlink_server_clip(id),
+            Err(e) => {
+                eprintln!("klipt: can't sync the edits of {id} yet: {e}");
+                continue;
+            }
+        };
+        if let Err(e) = done {
+            eprintln!("klipt: can't save the sync of {id}: {e}");
+        }
+    }
 }
 
 /// Counts a play of server clip `id` (the server counts each friend once and never the owner).

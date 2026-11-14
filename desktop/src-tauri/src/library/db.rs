@@ -62,6 +62,13 @@ const MIGRATIONS: &[&str] = &["
 ", "
     -- The editor's Blur video switch: uploads and exports blur the picture (only the sound matters).
     ALTER TABLE clips ADD COLUMN blur_video INTEGER NOT NULL DEFAULT 0;
+", "
+    -- Fields of an uploaded clip changed in the app that still have to reach the server: a comma
+    -- list of title, game, favorite. Until then the server's value doesn't overwrite them.
+    ALTER TABLE clips ADD COLUMN sync_pending TEXT NOT NULL DEFAULT '';
+    -- Clips uploaded before syncing existed: the app's title and game win once, and a local star.
+    UPDATE clips SET sync_pending = CASE WHEN favorite = 1 THEN 'title,game,favorite' ELSE 'title,game' END
+        WHERE server_clip_id IS NOT NULL;
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
@@ -101,6 +108,20 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         extra_volumes: serde_json::from_str(&row.get::<_, String>(26)?).unwrap_or_default(),
         blur_video: row.get(27)?,
     })
+}
+
+fn split_fields(text: &str) -> Vec<String> {
+    text.split(',').filter(|f| !f.is_empty()).map(String::from).collect()
+}
+
+/// A server copy's synced fields, as `GET /api/clips` returns them.
+#[derive(Debug, Default, Clone)]
+pub struct ServerFields {
+    pub title: Option<String>,
+    /// Game name (None = Unknown) and Steam app id.
+    pub game: Option<(Option<String>, Option<u32>)>,
+    pub favorite: Option<bool>,
+    pub visibility: Option<String>,
 }
 
 pub struct Library {
@@ -298,6 +319,97 @@ impl Library {
     pub fn set_server_visibility(&self, server_clip_id: &str, visibility: &str) -> Result<()> {
         self.conn.execute("UPDATE clips SET visibility = ?2 WHERE server_clip_id = ?1", params![server_clip_id, visibility])?;
         Ok(())
+    }
+
+    /// Remembers that `field` (title, game or favorite) of clip `id` changed and still has to
+    /// reach its server copy. Does nothing for a clip that isn't uploaded.
+    pub fn mark_sync_pending(&self, id: &str, field: &str) -> Result<()> {
+        let pending = self.sync_pending_of(id)?;
+        if pending.iter().any(|f| f == field) {
+            return Ok(());
+        }
+        let mut fields = pending;
+        fields.push(field.to_string());
+        self.conn.execute(
+            "UPDATE clips SET sync_pending = ?2 WHERE id = ?1 AND server_clip_id IS NOT NULL",
+            params![id, fields.join(",")],
+        )?;
+        Ok(())
+    }
+
+    fn sync_pending_of(&self, id: &str) -> Result<Vec<String>> {
+        let text: Option<String> =
+            self.conn.query_row("SELECT sync_pending FROM clips WHERE id = ?1", [id], |r| r.get(0)).optional()?;
+        Ok(split_fields(&text.unwrap_or_default()))
+    }
+
+    /// Uploaded clips with edits still to send, with the fields to send.
+    pub fn pending_syncs(&self) -> Result<Vec<(Clip, Vec<String>)>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLUMNS}, sync_pending FROM clips WHERE sync_pending != '' AND server_clip_id IS NOT NULL"
+        ))?;
+        let rows = stmt
+            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(28)?))))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// The server took `sent`'s values of `fields`: those stop being pending, unless the clip was
+    /// edited again meanwhile (then the newer value is still to send).
+    pub fn clear_sync_pending(&self, sent: &Clip, fields: &[String]) -> Result<()> {
+        let Ok(now) = self.get(&sent.id) else { return Ok(()) };
+        let unchanged = |f: &str| match f {
+            "title" => now.title == sent.title,
+            "game" => now.game_name == sent.game_name && now.steam_app_id == sent.steam_app_id,
+            "favorite" => now.favorite == sent.favorite,
+            _ => true,
+        };
+        let left: Vec<String> = self
+            .sync_pending_of(&sent.id)?
+            .into_iter()
+            .filter(|f| !(fields.contains(f) && unchanged(f)))
+            .collect();
+        self.conn.execute("UPDATE clips SET sync_pending = ?2 WHERE id = ?1", params![sent.id, left.join(",")])?;
+        Ok(())
+    }
+
+    /// Copies the server copy's values into the local clips uploaded as it, except fields with
+    /// edits still to send. `None` leaves a field as it is (the server didn't say).
+    pub fn apply_server(&self, server_clip_id: &str, server: &ServerFields) -> Result<bool> {
+        let mut stmt = self.conn.prepare("SELECT id, sync_pending FROM clips WHERE server_clip_id = ?1")?;
+        let linked = stmt
+            .query_map([server_clip_id], |r| Ok((r.get::<_, String>(0)?, split_fields(&r.get::<_, String>(1)?))))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut changed = 0;
+        for (id, pending) in linked {
+            let free = |f: &str| !pending.iter().any(|p| p == f);
+            if let (Some(title), true) = (&server.title, free("title")) {
+                changed += self.conn.execute(
+                    "UPDATE clips SET title = ?2 WHERE id = ?1 AND title != ?2",
+                    params![id, title],
+                )?;
+            }
+            if let (Some((name, steam)), true) = (&server.game, free("game")) {
+                changed += self.conn.execute(
+                    "UPDATE clips SET game_name = ?2, steam_app_id = ?3 WHERE id = ?1
+                     AND (game_name IS NOT ?2 OR steam_app_id IS NOT ?3)",
+                    params![id, name, steam],
+                )?;
+            }
+            if let (Some(favorite), true) = (server.favorite, free("favorite")) {
+                changed += self.conn.execute(
+                    "UPDATE clips SET favorite = ?2 WHERE id = ?1 AND favorite != ?2",
+                    params![id, favorite],
+                )?;
+            }
+            if let Some(visibility) = &server.visibility {
+                changed += self.conn.execute(
+                    "UPDATE clips SET visibility = ?2 WHERE id = ?1 AND visibility IS NOT ?2",
+                    params![id, visibility],
+                )?;
+            }
+        }
+        Ok(changed > 0)
     }
 
     /// The server clip ids local clips were uploaded as, each once.
@@ -510,6 +622,45 @@ mod tests {
         assert!(!del.path.exists());
         assert!(!thumb.exists());
         assert!(matches!(f.lib.get(&del.id), Err(AppError::ClipNotFound(_))));
+    }
+
+    #[test]
+    fn server_edits_skip_fields_waiting_to_sync() {
+        let f = Fixture::new();
+        let c = f.add("a.mp4", 1, None);
+        f.lib.mark_sync_pending(&c.id, "title").unwrap(); // not uploaded: ignored
+        assert!(f.lib.pending_syncs().unwrap().is_empty());
+        f.lib.mark_uploaded(&c.id, "srv-1", "https://s/c/1", "link").unwrap();
+        f.lib.rename(&c.id, "Mine").unwrap();
+        f.lib.mark_sync_pending(&c.id, "title").unwrap();
+        f.lib.mark_sync_pending(&c.id, "title").unwrap();
+
+        let server = ServerFields {
+            title: Some("Website".into()),
+            game: Some((Some("Deadlock".into()), Some(1_422_450))),
+            favorite: Some(true),
+            visibility: Some("feed".into()),
+        };
+        assert!(f.lib.apply_server("srv-1", &server).unwrap());
+        let got = f.lib.get(&c.id).unwrap();
+        assert_eq!(got.title, "Mine");
+        assert_eq!(got.game_name.as_deref(), Some("Deadlock"));
+        assert!(got.favorite);
+        assert_eq!(got.visibility.as_deref(), Some("feed"));
+        assert!(!f.lib.apply_server("srv-1", &server).unwrap());
+
+        let pending = f.lib.pending_syncs().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].1, vec!["title".to_string()]);
+        // Edited again while sending: still pending.
+        f.lib.rename(&c.id, "Mine 2").unwrap();
+        f.lib.clear_sync_pending(&pending[0].0, &pending[0].1).unwrap();
+        assert_eq!(f.lib.pending_syncs().unwrap().len(), 1);
+        let pending = f.lib.pending_syncs().unwrap();
+        f.lib.clear_sync_pending(&pending[0].0, &pending[0].1).unwrap();
+        assert!(f.lib.pending_syncs().unwrap().is_empty());
+        f.lib.apply_server("srv-1", &server).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().title, "Website");
     }
 
     #[test]

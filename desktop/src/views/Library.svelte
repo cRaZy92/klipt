@@ -179,10 +179,9 @@
       if (mine !== uploadsRequest) return;
       uploads = list;
       uploadsError = null;
-      // A local clip linked to an upload missing from the list may have been unlinked just now
-      // (deleted on another PC or the website): reload so it stops showing as uploaded.
-      const ids = new Set((list ?? []).map((u) => u.id));
-      if (list && local.some((c) => c.serverClipId && !ids.has(c.serverClipId))) void loadLocal();
+      // Linked local clips may have changed: unlinked (deleted elsewhere) or edited elsewhere.
+      // Also picks up edits made on the website, copied into linked local clips by myUploads.
+      if (list && local.some((c) => c.serverClipId)) void loadLocal();
     } catch (e) {
       if (mine === uploadsRequest) uploadsError = errorMessage(e);
     }
@@ -254,10 +253,8 @@
     // Shown at once; put back if the library or the server refuses.
     local = local.map((c) => (c.id === clip.id ? { ...c, favorite } : c));
     if (serverId) markUpload(serverId, favorite);
-    const ok = await act(async () => {
-      await api.setClipFavorite(clip.id, favorite);
-      if (serverId) await api.setServerFavorite(serverId, favorite);
-    });
+    // The library sends the star to the server copy itself (and again later if it's offline).
+    const ok = await act(() => api.setClipFavorite(clip.id, favorite));
     if (!ok) load();
   }
 

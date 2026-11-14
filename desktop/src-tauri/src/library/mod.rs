@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-pub use db::Library;
+pub use db::{Library, ServerFields};
 
 /// A video clip or a screenshot (a PNG): both live in the library.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -176,6 +176,12 @@ pub fn remove_edit_cache(cache_dir: &Path, id: &str) {
             eprintln!("klipt: can't delete {}: {e}", file.display());
         }
     }
+    let strip = crate::filmstrip::strip_dir(cache_dir, id);
+    if let Err(e) = fs::remove_dir_all(&strip) {
+        if e.kind() != io::ErrorKind::NotFound {
+            eprintln!("klipt: can't delete {}: {e}", strip.display());
+        }
+    }
 }
 
 fn remove_if_present(path: &Path) -> io::Result<()> {
@@ -422,6 +428,16 @@ mod tests {
         fs::write(&game, b"a").unwrap();
         remove_edit_cache(dir.path(), "c");
         assert!(!game.exists() && !mic.exists());
+    }
+
+    #[test]
+    fn remove_edit_cache_removes_the_strip() {
+        let dir = tempfile::tempdir().unwrap();
+        let strip = crate::filmstrip::strip_dir(dir.path(), "c");
+        fs::create_dir_all(&strip).unwrap();
+        fs::write(crate::filmstrip::frame_path(&strip, 0), b"x").unwrap();
+        remove_edit_cache(dir.path(), "c");
+        assert!(!strip.exists());
     }
 
     #[test]

@@ -7,6 +7,7 @@ pub mod errors;
 pub mod export;
 pub mod feed_watch;
 pub mod feedback;
+pub mod filmstrip;
 pub mod ffmpeg;
 pub mod games;
 pub mod hotkey;

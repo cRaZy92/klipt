@@ -124,6 +124,7 @@ describe("editor cache", () => {
     expect(fields({ editorCacheGb: 100 })).toEqual([]);
     expect(fields({ editorCacheGb: 0.4 })).toContain("editorCacheGb");
     expect(fields({ editorCacheGb: 100.5 })).toContain("editorCacheGb");
+    expect(validateSettings({ ...defaults, editorCacheGb: 0.4 })[0].message).toBe("Keep 0.5 to 100 GB of editor previews.");
   });
 });
 

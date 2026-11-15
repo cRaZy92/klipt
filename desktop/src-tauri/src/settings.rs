@@ -244,7 +244,7 @@ impl Settings {
             fail("cleanupDays", "Keep clips for 1 to 365 days.");
         }
         if !EDITOR_CACHE_GB_RANGE.contains(&self.editor_cache_gb) {
-            fail("editorCacheGb", "The editor preview cache must be between 0.5 and 100 GB.");
+            fail("editorCacheGb", "Keep 0.5 to 100 GB of editor previews.");
         }
         errors
     }
@@ -522,6 +522,8 @@ mod tests {
             let s = Settings { editor_cache_gb: gb, ..Settings::default() };
             assert_eq!(s.validate().iter().all(|e| e.field != "editorCacheGb"), ok, "{gb} GB");
         }
+        let errors = Settings { editor_cache_gb: 0.4, ..Settings::default() }.validate();
+        assert_eq!(errors[0].message, "Keep 0.5 to 100 GB of editor previews.");
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join(FILE_NAME), r#"{"fps": 30}"#).unwrap();
         assert_eq!(Settings::load(dir.path()).editor_cache_gb, 2.0);

@@ -53,7 +53,7 @@ export function validateSettings(s: Settings): FieldError[] {
   if (s.voiceApps.length > 10 || s.voiceApps.some(badApp)) fail("voiceApps", "List up to 10 app names, without | or : characters.");
   if (!inRange(s.cleanupDays, CLEANUP_DAYS_MIN, CLEANUP_DAYS_MAX)) fail("cleanupDays", "Keep clips for 1 to 365 days.");
   if (!(s.editorCacheGb >= EDITOR_CACHE_GB_MIN && s.editorCacheGb <= EDITOR_CACHE_GB_MAX)) {
-    fail("editorCacheGb", "The editor preview cache must be between 0.5 and 100 GB.");
+    fail("editorCacheGb", "Keep 0.5 to 100 GB of editor previews.");
   }
   return errors;
 }

@@ -472,6 +472,8 @@
     if (video) {
       video.pause();
       video.playbackRate = 1;
+      // The video trails or leads the audio a little: show the playhead's own frame.
+      if (!mediaError && Math.abs(video.currentTime * 1000 - position) > 20) seekVideo(position);
     }
   }
 

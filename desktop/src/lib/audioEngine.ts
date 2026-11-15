@@ -99,6 +99,12 @@ export class AudioEngine {
     return segmentAt(this.ctx.currentTime - this.startedAt, this.segments);
   }
 
+  /** The part that plays after the one playing now; null when stopped or on the last part. */
+  nextSegment(): Segment | null {
+    const seg = this.segment();
+    return seg ? (this.segments[this.segments.indexOf(seg) + 1] ?? null) : null;
+  }
+
   close() {
     this.stop();
     void this.ctx?.close();

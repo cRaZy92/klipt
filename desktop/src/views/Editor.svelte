@@ -4,7 +4,7 @@
   import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount } from "../lib/api";
   import type { RemoveWhere } from "../lib/removal";
   import { AudioEngine } from "../lib/audioEngine";
-  import { videoCorrection, type Segment } from "../lib/playSchedule";
+  import { cutSeekAhead, SEEK_LATENCY_START_MS, seekLatency, videoCorrection, type Segment } from "../lib/playSchedule";
   import { exportFileName, hueOf } from "../lib/format";
   import { frameUrl, previewIndex } from "../lib/filmstrip";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
@@ -284,6 +284,10 @@
   let freeze = $state<HTMLCanvasElement>();
   let frozen = $state(false);
   let pendingSeek: number | null = null;
+  /** How long a video seek takes here (a moving average): seeks while playing aim that far ahead. */
+  let seekAverageMs = SEEK_LATENCY_START_MS;
+  /** When the seek in flight was asked for (`performance.now()`); null when none is. */
+  let seekStartedAt: number | null = null;
 
   function freezeFrame() {
     if (!video || !freeze || frozen || video.videoWidth === 0) return;
@@ -322,6 +326,7 @@
       return;
     }
     freezeFrame();
+    seekStartedAt = performance.now();
     video.currentTime = ms / 1000;
   }
 
@@ -387,6 +392,8 @@
 
   /** The segment the audio played on the last frame: a new one that doesn't follow it is a cut. */
   let lastSegment: Segment | null = null;
+  /** The segment whose cut the video already seeked across (ahead of the audio getting there). */
+  let seekedPastCut: Segment | null = null;
 
   /** Starts the audio at `ms` (or the next kept part) and the video with it. */
   function startPlayback(ms: number) {
@@ -394,11 +401,14 @@
     engine.play(ms, playRanges);
     playingRanges = playRanges;
     lastSegment = engine.segment();
+    seekedPastCut = null;
     playing = true;
     if (lastSegment) {
       position = lastSegment.from;
       // Off by more than the drift the video catches up on by itself: move it.
-      if (videoCorrection(video.currentTime * 1000, lastSegment.from)) seekVideo(lastSegment.from);
+      if (videoCorrection(video.currentTime * 1000, lastSegment.from, seekAverageMs, lastSegment.to)) {
+        seekVideo(lastSegment.from);
+      }
     }
     video.playbackRate = 1;
     video.play().catch(() => {});
@@ -409,6 +419,7 @@
     engine.stop();
     playing = false;
     lastSegment = null;
+    seekedPastCut = null;
     if (video) {
       video.pause();
       video.playbackRate = 1;
@@ -427,14 +438,28 @@
     }
     position = ms;
     const cut = lastSegment !== null && seg !== lastSegment && seg.from !== lastSegment.to;
+    const seekedAhead = cut && seekedPastCut === lastSegment;
     lastSegment = seg;
     if (cut) {
+      seekedPastCut = null;
+      // Already on its way there from before the cut: no second seek.
+      if (seekedAhead) return;
       video.playbackRate = 1;
-      seekVideo(seg.from);
+      seekVideo(Math.min(ms + seekAverageMs, seg.to));
       return;
     }
-    if (video.seeking) return;
-    const correction = videoCorrection(video.currentTime * 1000, ms);
+    // The video already moved to the next part; the audio gets there in a moment.
+    if (seekedPastCut === seg) return;
+    const ahead = cutSeekAhead(ms, seg, engine.nextSegment(), seekAverageMs);
+    if (ahead !== null) {
+      seekedPastCut = seg;
+      video.playbackRate = 1;
+      seekVideo(ahead);
+      return;
+    }
+    // One drift seek at a time: the next is decided once this one landed.
+    if (video.seeking || pendingSeek !== null) return;
+    const correction = videoCorrection(video.currentTime * 1000, ms, seekAverageMs, seg.to);
     if (!correction) {
       if (video.playbackRate !== 1) video.playbackRate = 1;
     } else if ("rate" in correction) {
@@ -457,9 +482,14 @@
   }
 
   function onseeked() {
+    if (seekStartedAt !== null) {
+      seekAverageMs = seekLatency(seekAverageMs, performance.now() - seekStartedAt);
+      seekStartedAt = null;
+    }
     if (pendingSeek !== null && video) {
       const next = pendingSeek;
       pendingSeek = null;
+      seekStartedAt = performance.now();
       video.currentTime = next / 1000;
       return;
     }

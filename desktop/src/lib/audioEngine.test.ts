@@ -113,4 +113,14 @@ describe("AudioEngine", () => {
     expect(engine.positionMs()).toBeNull();
     expect(engine.segment()).toBeNull();
   });
+
+  it("tells the part that plays after this one", async () => {
+    const { engine, ctx } = await loaded();
+    expect(engine.nextSegment()).toBeNull();
+    engine.play(1500, skip);
+    ctx.currentTime = 10.05 + 0.25;
+    expect(engine.nextSegment()).toEqual({ at: 0.5, from: 3000, to: 5000 });
+    ctx.currentTime = 10.05 + 0.75;
+    expect(engine.nextSegment()).toBeNull();
+  });
 });

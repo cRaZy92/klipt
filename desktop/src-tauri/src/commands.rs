@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -18,6 +18,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::editor;
 use crate::errors::{AppError, Result};
 use crate::export::{self, Edit};
+use crate::filmstrip;
 use crate::ffmpeg::Tools;
 use crate::games::mappings;
 use crate::hotkey::{self, HotkeyHandle, HotkeyStatus, HotkeyStatusState};
@@ -42,6 +43,8 @@ pub mod events {
     pub const EXPORT_PROGRESS: &str = "export-progress";
     /// Payload: `{ id }`: the clip's thumbnail was made again (the editor picked a frame).
     pub const THUMBNAIL_CHANGED: &str = "thumbnail-changed";
+    /// Payload: `{ id, frames }`: how many filmstrip frames of the open clip are readable now.
+    pub const FILMSTRIP_PROGRESS: &str = "filmstrip-progress";
 }
 
 /// Server titles are 1–100 characters.
@@ -596,6 +599,7 @@ pub fn upload_clip(
     let job = Job { clip, title, visibility, tagged, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
     tauri::async_runtime::spawn(async move {
         let id = job.clip.id.clone();
+        let cache_dir = job.cache_dir.clone();
         let (data_dir, token) = (job.data_dir.clone(), job.auth.token.clone());
         // The work runs in its own task so a panic anywhere in it still ends in `upload-failed`
         // instead of a card stuck on "Uploading…".
@@ -615,6 +619,9 @@ pub fn upload_clip(
                         false
                     }
                 };
+                // The upload is the end of the clip's editing: its cached audio and strip go.
+                app.state::<crate::filmstrip::Jobs>().stop(&id);
+                editor::remove_edit_cache(&cache_dir, &id);
                 emit(&app, events::UPLOAD_DONE, serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied }));
             }
             Err(e) => {
@@ -779,6 +786,17 @@ pub struct EditorData {
     /// The clip's other audio tracks (an imported clip's): the editor shows a slider for each.
     pub extra_tracks: Vec<ExtraTrack>,
     pub duration_ms: u64,
+    pub filmstrip: FilmstripInfo,
+}
+
+/// The editor's filmstrip: JPEG frames (`<dir>/000000.jpg`, one per 100 ms) readable so far.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilmstripInfo {
+    pub dir: PathBuf,
+    /// Frames readable now; the rest are still being extracted.
+    pub frames: u32,
+    pub total: u32,
 }
 
 /// An audio track besides the game, mic and voice chat ones, as the editor plays it.
@@ -806,6 +824,7 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
     let (input, tracks, stored_ms) = (clip.path.clone(), export::Tracks::of(&clip), clip.duration_ms);
+    let (strip_tools, strip_cache) = (tools.clone(), cache_dir.clone());
     let (audio, duration_ms) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
         // How many audio tracks the file has: an imported clip may have more than Klipt records.
         let info = crate::ffmpeg::probe(&tools, &input)?;
@@ -824,6 +843,45 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
         if let Err(e) = scope.allow_file(file) {
             eprintln!("klipt: can't allow {} in the asset scope: {e}", file.display());
         }
+    }
+    let strip = filmstrip::strip_dir(&strip_cache, &clip.id);
+    filmstrip::mark_opened(&strip);
+    let cap = lock(&app.state::<AppState>().settings).editor_cache_bytes();
+    filmstrip::evict(&strip_cache, cap, &clip.id);
+    if let Err(e) = scope.allow_directory(&strip, false) {
+        eprintln!("klipt: can't allow {} in the asset scope: {e}", strip.display());
+    }
+    let total = filmstrip::expected_frames(duration_ms);
+    let frames = filmstrip::ready_frames(&strip);
+    if !filmstrip::is_complete(&strip) {
+        let (worker_app, id, dir, video) = (app.clone(), clip.id.clone(), strip.clone(), clip.path.clone());
+        app.state::<filmstrip::Jobs>().start(clip.id.clone(), move |stop| {
+            let mut last = Instant::now();
+            let mut latest = None;
+            let result = filmstrip::extract(&strip_tools, &video, &dir, duration_ms, stop, |frames| {
+                latest = Some(frames);
+                if last.elapsed() >= Duration::from_millis(250) {
+                    last = Instant::now();
+                    latest = None;
+                    emit(&worker_app, events::FILMSTRIP_PROGRESS, serde_json::json!({ "id": id, "frames": frames }));
+                }
+            });
+            match result {
+                Ok(()) => {
+                    let frames = filmstrip::ready_frames(&dir);
+                    emit(&worker_app, events::FILMSTRIP_PROGRESS, serde_json::json!({ "id": id, "frames": frames }));
+                    let cap = lock(&worker_app.state::<AppState>().settings).editor_cache_bytes();
+                    filmstrip::evict(&strip_cache, cap, &id);
+                }
+                Err(e) => {
+                    eprintln!("klipt: filmstrip of clip {id} failed: {e}");
+                    // A stopped or failed run still tells the UI how far it got.
+                    if let Some(frames) = latest {
+                        emit(&worker_app, events::FILMSTRIP_PROGRESS, serde_json::json!({ "id": id, "frames": frames }));
+                    }
+                }
+            }
+        });
     }
     let media = app.state::<crate::media_server::MediaServer>();
     let video_url = media.url_for(&clip.path);
@@ -846,7 +904,14 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
         mic_audio_path: mic,
         voice_audio_path: voice,
         duration_ms,
+        filmstrip: FilmstripInfo { dir: strip, frames, total },
     })
+}
+
+/// The editor closed: stops that clip's filmstrip extraction (the frames made so far stay cached).
+#[tauri::command]
+pub fn close_editor(app: AppHandle, id: String) {
+    app.state::<filmstrip::Jobs>().stop(&id);
 }
 
 fn edit_from(

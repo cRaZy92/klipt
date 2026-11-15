@@ -441,6 +441,25 @@ mod tests {
     }
 
     #[test]
+    fn upload_cleanup_keeps_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let clips = dir.path().join("clips");
+        fs::create_dir_all(&clips).unwrap();
+        let clip = clips.join("clip.mp4");
+        fs::write(&clip, b"v").unwrap();
+        let cache = dir.path().join("cache");
+        let (game, _) = edit_audio_paths(&cache, "c");
+        fs::create_dir_all(game.parent().unwrap()).unwrap();
+        fs::write(&game, b"a").unwrap();
+        let strip = crate::filmstrip::strip_dir(&cache, "c");
+        fs::create_dir_all(&strip).unwrap();
+        fs::write(crate::filmstrip::frame_path(&strip, 0), b"x").unwrap();
+        remove_edit_cache(&cache, "c");
+        assert!(clip.is_file());
+        assert!(!game.exists() && !strip.exists());
+    }
+
+    #[test]
     fn same_file_sees_through_relative_parts() {
         let dir = tempfile::tempdir().unwrap();
         let clip = dir.path().join("clip.mp4");

@@ -65,6 +65,7 @@ pub fn run() {
             app.manage(media_server::MediaServer::start()?);
             app.manage(state);
             app.manage(commands::Uploads::default());
+            app.manage(filmstrip::Jobs::default());
             app.manage(hotkey::HotkeyStatusState::default());
             // Development builds start in the tray, like an autostart launch, while
             // `<app data>/dev-start-hidden` exists: rebuilds don't pop the window over a game.
@@ -140,6 +141,7 @@ pub fn run() {
             update::app_info,
             commands::upload_clip,
             commands::open_editor,
+            commands::close_editor,
             commands::save_edit,
             commands::export_copy,
         ])

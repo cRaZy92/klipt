@@ -196,6 +196,8 @@ export interface EditorData {
   /** The clip's other audio tracks (an imported clip's), each with its own slider. */
   extraTracks: { index: number; audioPath: string; audioUrl: string }[];
   durationMs: number;
+  /** JPEG frames (`000000.jpg`, one per 100 ms) in `dir`; `frames` are readable now, the rest follow. */
+  filmstrip: { dir: string; frames: number; total: number };
 }
 
 /** A clip's edit. A null trim end means "to the end"; a null start, "from the start". */
@@ -446,6 +448,7 @@ export const api = {
   /** The website's home page, or `url` (a link on the server, e.g. a clip's share link). */
   openWebsite: (url?: string) => invoke<void>("open_website", { url: url ?? null }),
   openEditor: (id: string) => invoke<EditorData>("open_editor", { id }),
+  closeEditor: (id: string) => invoke<void>("close_editor", { id }),
   /** Saves the trim and volumes, and the thumbnail frame (null = automatic). */
   saveEdit: (id: string, edit: EditInput, thumbnailMs: number | null) =>
     invoke<void>("save_edit", { id, ...edit, thumbnailMs }),
@@ -473,6 +476,8 @@ export interface Events {
   "feed-new": { count: number };
   /** A clip's thumbnail was made again (the editor picked a new frame). */
   "thumbnail-changed": { id: string };
+  /** More filmstrip frames of the open clip are readable. */
+  "filmstrip-progress": { id: string; frames: number };
   /** The automatic cleanup deleted old clips. */
   "clips-cleaned": { deleted: number; freedBytes: number };
   /**

@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::errors::{AppError, Result};
@@ -210,6 +211,43 @@ pub fn extract(
     fs::write(dir.join(COMPLETE_MARKER), b"")?;
     progress(ready_frames(dir));
     Ok(())
+}
+
+/// The one filmstrip extraction that may be running: starting another stops it.
+#[derive(Default)]
+pub struct Jobs {
+    running: std::sync::Mutex<Option<(String, Arc<AtomicBool>)>>,
+}
+
+impl Jobs {
+    /// Stops the running job, if any, then runs `run` for clip `id` on a blocking thread. `run`
+    /// should return soon after its flag turns true.
+    pub fn start(&self, id: String, run: impl FnOnce(&AtomicBool) + Send + 'static) {
+        let stop = Arc::new(AtomicBool::new(false));
+        if let Some((_, previous)) = self.slot().replace((id, stop.clone())) {
+            previous.store(true, Ordering::Relaxed);
+        }
+        tauri::async_runtime::spawn_blocking(move || run(&stop));
+    }
+
+    /// Stops the job of clip `id`, if that is the one running.
+    pub fn stop(&self, id: &str) {
+        if let Some((running, stop)) = &*self.slot() {
+            if running == id {
+                stop.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+
+    pub fn stop_all(&self) {
+        if let Some((_, stop)) = &*self.slot() {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn slot(&self) -> std::sync::MutexGuard<'_, Option<(String, Arc<AtomicBool>)>> {
+        self.running.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 #[cfg(test)]

@@ -77,6 +77,8 @@ pub struct Settings {
     /// Delete clips older than `cleanup_days` from this PC (uploaded and favorite clips are kept).
     pub cleanup_enabled: bool,
     pub cleanup_days: u32,
+    /// Disk the editor's scrubbing pictures (filmstrips) may take; the least recently opened go first.
+    pub editor_cache_gb: f32,
     /// A system notification when a friend uploads a clip.
     pub friend_notifications: bool,
     /// Voice chat apps (as PipeWire names them) recorded on their own track, so a clip can be
@@ -100,6 +102,7 @@ pub const BITRATE_KBPS_RANGE: std::ops::RangeInclusive<u32> = 2_000..=80_000;
 pub const FPS_CHOICES: [u32; 2] = [30, 60];
 pub const MAX_VOICE_APPS: usize = 10;
 pub const CLEANUP_DAYS_RANGE: std::ops::RangeInclusive<u32> = 1..=365;
+pub const EDITOR_CACHE_GB_RANGE: std::ops::RangeInclusive<f32> = 0.5..=100.0;
 
 /// `<Videos>/Klipt`.
 pub fn default_output_dir() -> PathBuf {
@@ -131,6 +134,7 @@ impl Default for Settings {
             server_url: None,
             cleanup_enabled: false,
             cleanup_days: 30,
+            editor_cache_gb: 2.0,
             friend_notifications: true,
             voice_apps: vec!["discord".into(), "vesktop".into()],
         }
@@ -239,7 +243,15 @@ impl Settings {
         if !CLEANUP_DAYS_RANGE.contains(&self.cleanup_days) {
             fail("cleanupDays", "Keep clips for 1 to 365 days.");
         }
+        if !EDITOR_CACHE_GB_RANGE.contains(&self.editor_cache_gb) {
+            fail("editorCacheGb", "The editor preview cache must be between 0.5 and 100 GB.");
+        }
         errors
+    }
+
+    /// The editor preview cache limit in bytes (decimal GB, like the disk sizes shown elsewhere).
+    pub fn editor_cache_bytes(&self) -> u64 {
+        (f64::from(self.editor_cache_gb) * 1e9) as u64
     }
 
     /// The video bitrate to record with.
@@ -260,6 +272,7 @@ impl Settings {
                 "screenshotHotkey" => self.screenshot_hotkey = defaults.screenshot_hotkey.clone(),
                 "outputDir" => self.output_dir = defaults.output_dir.clone(),
                 "cleanupDays" => self.cleanup_days = defaults.cleanup_days,
+                "editorCacheGb" => self.editor_cache_gb = defaults.editor_cache_gb,
                 "voiceApps" => self.voice_apps = defaults.voice_apps.clone(),
                 other => debug_assert!(false, "validate() returned a field this function doesn't reset: {other}"),
             }
@@ -498,6 +511,22 @@ mod tests {
         let loaded = Settings::load(dir.path());
         assert!(loaded.cleanup_enabled);
         assert_eq!(loaded.cleanup_days, 30);
+    }
+
+    #[test]
+    fn editor_cache_defaults_and_range() {
+        let defaults = Settings::default();
+        assert_eq!(defaults.editor_cache_gb, 2.0);
+        assert_eq!(defaults.editor_cache_bytes(), 2_000_000_000);
+        for (gb, ok) in [(0.4, false), (0.5, true), (100.0, true), (100.5, false)] {
+            let s = Settings { editor_cache_gb: gb, ..Settings::default() };
+            assert_eq!(s.validate().iter().all(|e| e.field != "editorCacheGb"), ok, "{gb} GB");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(FILE_NAME), r#"{"fps": 30}"#).unwrap();
+        assert_eq!(Settings::load(dir.path()).editor_cache_gb, 2.0);
+        fs::write(dir.path().join(FILE_NAME), r#"{"editorCacheGb": 0.1}"#).unwrap();
+        assert_eq!(Settings::load(dir.path()).editor_cache_gb, 2.0);
     }
 
     #[test]

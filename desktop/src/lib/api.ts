@@ -97,6 +97,8 @@ export interface Settings {
   /** Delete clips older than `cleanupDays` from this PC; uploaded and favorite clips are kept. */
   cleanupEnabled: boolean;
   cleanupDays: number;
+  /** Disk the editor's scrubbing pictures may take, in GB; the least recently opened are deleted first. */
+  editorCacheGb: number;
   /** A system notification when a friend shares a clip. */
   friendNotifications: boolean;
   /** Voice chat apps recorded on their own track (Linux); empty = recorded with the game. */

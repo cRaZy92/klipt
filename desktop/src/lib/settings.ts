@@ -10,6 +10,8 @@ export const BITRATE_KBPS_MAX = 80000;
 export const FPS_CHOICES = [30, 60] as const;
 export const CLEANUP_DAYS_MIN = 1;
 export const CLEANUP_DAYS_MAX = 365;
+export const EDITOR_CACHE_GB_MIN = 0.5;
+export const EDITOR_CACHE_GB_MAX = 100;
 
 /** The bitrate each quality preset stands for (`Quality::preset_kbps`). */
 export const PRESET_KBPS: Record<Exclude<Quality, "custom">, number> = {
@@ -50,6 +52,9 @@ export function validateSettings(s: Settings): FieldError[] {
   const badApp = (a: string) => !a.trim() || a.length > 64 || /[|:]/.test(a) || a.trim() !== a;
   if (s.voiceApps.length > 10 || s.voiceApps.some(badApp)) fail("voiceApps", "List up to 10 app names, without | or : characters.");
   if (!inRange(s.cleanupDays, CLEANUP_DAYS_MIN, CLEANUP_DAYS_MAX)) fail("cleanupDays", "Keep clips for 1 to 365 days.");
+  if (!(s.editorCacheGb >= EDITOR_CACHE_GB_MIN && s.editorCacheGb <= EDITOR_CACHE_GB_MAX)) {
+    fail("editorCacheGb", "The editor preview cache must be between 0.5 and 100 GB.");
+  }
   return errors;
 }
 

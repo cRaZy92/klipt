@@ -22,6 +22,7 @@ const defaults: Settings = {
   serverUrl: null,
   cleanupEnabled: false,
   cleanupDays: 30,
+  editorCacheGb: 2,
   friendNotifications: true,
   voiceApps: ["discord", "vesktop"],
 };
@@ -114,6 +115,15 @@ describe("cleanup days", () => {
     expect(fields({ cleanupDays: 0 })).toEqual(["cleanupDays"]);
     expect(fields({ cleanupDays: 366 })).toEqual(["cleanupDays"]);
     expect(fields({ cleanupDays: 2.5 })).toEqual(["cleanupDays"]);
+  });
+});
+
+describe("editor cache", () => {
+  it("must be from 0.5 to 100 GB", () => {
+    expect(fields({ editorCacheGb: 0.5 })).toEqual([]);
+    expect(fields({ editorCacheGb: 100 })).toEqual([]);
+    expect(fields({ editorCacheGb: 0.4 })).toContain("editorCacheGb");
+    expect(fields({ editorCacheGb: 100.5 })).toContain("editorCacheGb");
   });
 });
 

@@ -27,6 +27,8 @@
     BUFFER_SECONDS_MIN,
     CLEANUP_DAYS_MAX,
     CLEANUP_DAYS_MIN,
+    EDITOR_CACHE_GB_MAX,
+    EDITOR_CACHE_GB_MIN,
     PRESET_KBPS,
     bitrateKbps,
     parseAppList,
@@ -342,6 +344,7 @@
     screenshotHotkey: "hotkey",
     outputDir: "clips",
     cleanupDays: "clips",
+    editorCacheGb: "clips",
     startWithOs: "general",
     saveSound: "general",
     saveNotification: "general",
@@ -739,6 +742,28 @@
           <span class="muted">days</span>
         </div>
         {#if fieldErrors.cleanupDays}<small class="error">{fieldErrors.cleanupDays}</small>{/if}
+      </div>
+    </section>
+
+    <section>
+      <h2>Editor</h2>
+      <div class="row">
+        <label class="label" for="editor-cache">Editor preview cache</label>
+        <div class="days">
+          <input
+            id="editor-cache"
+            class="input seconds"
+            type="number"
+            step="0.5"
+            min={EDITOR_CACHE_GB_MIN}
+            max={EDITOR_CACHE_GB_MAX}
+            bind:value={draft.editorCacheGb}
+            aria-invalid={!!fieldErrors.editorCacheGb}
+          />
+          <span class="muted">GB</span>
+        </div>
+        <small class="muted">Pictures for scrubbing in the editor. The ones you opened longest ago are deleted first.</small>
+        {#if fieldErrors.editorCacheGb}<small class="error">{fieldErrors.editorCacheGb}</small>{/if}
       </div>
     </section>
 

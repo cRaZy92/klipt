@@ -232,7 +232,7 @@
         {/each}
       </div>
     {/if}
-    <div class="dim" style:left="0" style:width="{pct(start)}%"></div>
+    <div class="dim left" style:left="0" style:width="{pct(start)}%"></div>
     <div class="dim" style:left="{pct(end)}%" style:right="0"></div>
     <div class="selection" style:left="{pct(start)}%" style:width="{pct(end) - pct(start)}%"></div>
     {#each shown as p (p.i)}
@@ -272,7 +272,7 @@
         onpointermove={move}
         onpointerup={release}
         onpointercancel={release}
-    onlostpointercapture={release}
+        onlostpointercapture={release}
         onkeydown={(e) => onsplitkey(e, s.i)}
       >
         <button
@@ -305,7 +305,7 @@
         onpointermove={move}
         onpointerup={release}
         onpointercancel={release}
-    onlostpointercapture={release}
+        onlostpointercapture={release}
         onkeydown={(e) => onkeydown(e, handle)}
       >
         <span class="grip"></span>
@@ -329,7 +329,7 @@
       onpointermove={move}
       onpointerup={release}
       onpointercancel={release}
-    onlostpointercapture={release}
+      onlostpointercapture={release}
       onkeydown={(e) => onkeydown(e, "thumb")}
     >
       <Icon name="image" size={13} />
@@ -548,7 +548,7 @@
     pointer-events: none;
   }
 
-  .dim:first-child {
+  .dim.left {
     border-radius: var(--radius-sm) 0 0 var(--radius-sm);
   }
 

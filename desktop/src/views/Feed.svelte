@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import { api, errorCode, errorMessage, type FeedClip, type GameCount } from "../lib/api";
   import { neighbors } from "../lib/clipNav";
+  import { feedNeedsRefresh, type FeedLoaded } from "../lib/feedRefresh";
   import { formatDuration, groupByDay, hueOf, relativeDate, viewsLabel } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "../components/Avatar.svelte";
@@ -72,7 +73,7 @@
       // The unfiltered first page is the whole feed's newest end: you've now seen it.
       if (!more && !game && !search.trim() && !withMe && !kind && !favoritesOnly && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
       now = Date.now();
-      if (!more) loadedAt = now;
+      shown = more ? { ...shown, pages: shown.pages + 1 } : { loadedAt: now, pages: 1 };
       loaded = true;
     } catch (e) {
       if (id !== request) return;
@@ -126,10 +127,10 @@
     }
   }
 
-  /** When the list was last loaded from the top (ms); shown again after longer than 30 s, it refreshes. */
-  let loadedAt = 0;
+  /** What's loaded; decides whether showing the Feed again refreshes it (see feedRefresh.ts). */
+  let shown: FeedLoaded = { loadedAt: 0, pages: 0 };
   $effect(() => {
-    if (active) untrack(() => Date.now() - loadedAt > 30_000 && refresh());
+    if (active) untrack(() => feedNeedsRefresh(shown, Date.now()) && refresh());
   });
 
   // Hidden: stop anything playing.

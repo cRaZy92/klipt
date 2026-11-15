@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount } from "../lib/api";
   import type { RemoveWhere } from "../lib/removal";
-  import { AudioSync } from "../lib/audioSync";
+  import { AudioEngine } from "../lib/audioEngine";
+  import { videoCorrection, type Segment } from "../lib/playSchedule";
   import { exportFileName, hueOf } from "../lib/format";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
   import {
@@ -11,7 +12,6 @@
     keptLength,
     keptRanges,
     piecesFromRanges,
-    playFrom,
     removedRanges,
     sameRanges,
     splitAt,
@@ -41,9 +41,12 @@
     dirty?: boolean;
   } = $props();
 
-  /** How often the audio tracks are checked against the video's clock. */
-  const DRIFT_CHECK_MS = 250;
-  const audioSync = new AudioSync(() => performance.now());
+  /** Plays every audio track on one clock; the muted video follows it. */
+  const engine = new AudioEngine();
+  /** The tracks are decoded (or failed): playback can start and the sliders apply. */
+  let audioReady = $state(false);
+  /** The editor was closed: a load finishing late must not toast. */
+  let closed = false;
 
   let data = $state<EditorData | null>(null);
   let loadError = $state<string | null>(null);
@@ -55,6 +58,8 @@
   let pieces = $state<Piece[]>(wholeClip(0));
   /** The parts that play and get uploaded: the trim minus the removed pieces. */
   const kept = $derived(keptRanges(pieces, trim));
+  /** What plays: the kept parts, or the trim while nothing is kept (as before, so it can be seen). */
+  const playRanges = $derived(kept.length ? kept : [trim]);
   let gameVolume = $state(100);
   let micVolume = $state(100);
   let voiceVolume = $state(100);
@@ -70,10 +75,6 @@
   let storedThumb = $state<number | null>(null);
 
   let video = $state<HTMLVideoElement>();
-  let gameAudio = $state<HTMLAudioElement>();
-  let micAudio = $state<HTMLAudioElement>();
-  let voiceAudio = $state<HTMLAudioElement>();
-  let extraAudios = $state<(HTMLAudioElement | undefined)[]>([]);
 
   // The preview of "Blur video": as strong as the export's blur (sigma 8 at up to 720p, see
   // export.rs), scaled to the size the picture is shown at.
@@ -175,30 +176,38 @@
       data = d;
       stored = edit;
       storedThumb = thumb;
+      void loadAudio(d);
     } catch (e) {
       loadError = errorMessage(e);
     }
   }
 
+  /** The engine's key for each track, with the name the "couldn't load" toast uses. */
+  function audioTracks(d: EditorData): { key: string; url: string; name: string }[] {
+    return [
+      { key: "game", url: d.gameAudioUrl, name: "game" },
+      ...(d.micAudioUrl ? [{ key: "mic", url: d.micAudioUrl, name: "microphone" }] : []),
+      ...(d.voiceAudioUrl ? [{ key: "voice", url: d.voiceAudioUrl, name: "voice chat" }] : []),
+      ...d.extraTracks.map((t) => ({ key: `track-${t.index}`, url: t.audioUrl, name: `track ${t.index + 1}` })),
+    ];
+  }
+
+  async function loadAudio(d: EditorData) {
+    const tracks = audioTracks(d);
+    const failed = await engine.load(tracks);
+    if (closed) return;
+    for (const t of tracks) {
+      if (failed.includes(t.key)) toast(`Couldn't load the ${t.name} track`, "error");
+    }
+    audioReady = true;
+  }
+
   onMount(() => {
     void load();
 
-    // Keep the audio on the video's clock and the playhead moving.
-    const drift = setInterval(() => {
-      if (video) audioSync.check(video, audios());
-    }, DRIFT_CHECK_MS);
-
+    // The audio clock moves the playhead; the video follows it.
     let frame = requestAnimationFrame(function tick() {
-      if (video && !video.seeking) {
-        const ms = video.currentTime * 1000;
-        position = ms;
-        // Playback jumps over removed parts (one seek each) and loops inside the trim. A frame
-        // up to 50 ms early is where a seek to a part's start can land: no jump for that.
-        if (!video.paused) {
-          const to = kept.length ? playFrom(ms, kept) : ms >= trim.end || ms < trim.start - 50 ? trim.start : ms;
-          if (to !== ms && !(to > ms && to - ms <= 50)) seek(to);
-        }
-      }
+      if (playing) follow();
       frame = requestAnimationFrame(tick);
     });
 
@@ -207,46 +216,45 @@
     });
 
     return () => {
-      clearInterval(drift);
+      closed = true;
       cancelAnimationFrame(frame);
       stopProgress();
       video?.pause();
-      for (const audio of audios()) audio.pause();
+      engine.close();
+      api.closeEditor(clip.id).catch(() => {});
     };
   });
 
-  // Playback gain: the sliders' 0–100% is HTMLMediaElement's 0.0–1.0; Master scales every track.
-  const gain = (track: number) => (track / 100) * (masterVolume / 100);
+  // Playback gain: the sliders' 0–100% is a gain of 0.0–1.0; Master scales every track. A track
+  // still loading drops its gain, so these run again once the audio is ready.
   $effect(() => {
-    if (gameAudio) gameAudio.volume = gain(gameVolume);
+    if (audioReady) engine.setMaster(masterVolume / 100);
   });
   $effect(() => {
-    if (micAudio) micAudio.volume = gain(micVolume);
+    if (audioReady) engine.setGain("game", gameVolume / 100);
   });
   $effect(() => {
-    if (voiceAudio) voiceAudio.volume = gain(voiceVolume);
+    if (audioReady) engine.setGain("mic", micVolume / 100);
   });
   $effect(() => {
-    data?.extraTracks.forEach((t, i) => {
-      const audio = extraAudios[i];
-      if (audio) audio.volume = gain(extraVolumes[t.index] ?? 100);
+    if (audioReady) engine.setGain("voice", voiceVolume / 100);
+  });
+  $effect(() => {
+    if (!audioReady) return;
+    for (const t of data?.extraTracks ?? []) engine.setGain(`track-${t.index}`, (extraVolumes[t.index] ?? 100) / 100);
+  });
+
+  // Trimming or splitting while playing: play the new parts from where the playhead is.
+  let playingRanges: TrimRange[] = [];
+  $effect(() => {
+    const ranges = playRanges;
+    untrack(() => {
+      if (playing && !sameTrims(ranges, playingRanges)) startPlayback(position);
     });
   });
 
-  function audios(): HTMLAudioElement[] {
-    return [gameAudio, micAudio, voiceAudio, ...extraAudios].filter((a): a is HTMLAudioElement => !!a);
-  }
-
-  function syncAudio() {
-    if (video) audioSync.align(video, audios());
-  }
-
-  function playAudio() {
-    for (const audio of audios()) audio.play().catch(() => {});
-  }
-
-  function pauseAudio() {
-    for (const audio of audios()) audio.pause();
+  function sameTrims(a: TrimRange[], b: TrimRange[]): boolean {
+    return a.length === b.length && a.every((r, i) => r.start === b[i].start && r.end === b[i].end);
   }
 
   // While dragging, only one seek runs at a time; the newest target waits in `pendingSeek` and
@@ -281,9 +289,9 @@
     unfreezeTimer = setTimeout(done, 250);
   }
 
-  function seek(ms: number) {
+  /** Moves the video's picture (not the audio). */
+  function seekVideo(ms: number) {
     if (!video) return;
-    position = ms;
     if (video.seeking) {
       pendingSeek = ms;
       return;
@@ -292,35 +300,82 @@
     video.currentTime = ms / 1000;
   }
 
-  function togglePlay() {
-    if (!video || mediaError) return;
-    if (video.paused) {
-      const ms = video.currentTime * 1000;
-      const last = kept[kept.length - 1];
-      if (!last) {
-        if (ms < trim.start || ms >= trim.end - 50) seek(trim.start);
-      } else if (ms >= last.end - 50) seek(kept[0].start);
-      else if (playFrom(ms, kept) !== ms) seek(playFrom(ms, kept));
-      video.play().catch(() => {});
-    } else {
+  /** Moves the playhead: while playing, the audio plays on from there. */
+  function seek(ms: number) {
+    position = ms;
+    if (playing) startPlayback(ms);
+    else seekVideo(ms);
+  }
+
+  /** The segment the audio played on the last frame: a new one that doesn't follow it is a cut. */
+  let lastSegment: Segment | null = null;
+
+  /** Starts the audio at `ms` (or the next kept part) and the video with it. */
+  function startPlayback(ms: number) {
+    if (!video) return;
+    engine.play(ms, playRanges);
+    playingRanges = playRanges;
+    lastSegment = engine.segment();
+    playing = true;
+    if (lastSegment) {
+      position = lastSegment.from;
+      // Off by more than the drift the video catches up on by itself: move it.
+      if (videoCorrection(video.currentTime * 1000, lastSegment.from)) seekVideo(lastSegment.from);
+    }
+    video.playbackRate = 1;
+    video.play().catch(() => {});
+  }
+
+  function pause() {
+    position = engine.positionMs() ?? position;
+    engine.stop();
+    playing = false;
+    lastSegment = null;
+    if (video) {
       video.pause();
+      video.playbackRate = 1;
     }
   }
 
-  // The video drives; the two audio elements follow it. During a seek the audio is paused and
-  // only resumes once the video landed, so the tracks don't drift apart on every jump.
-  function onplay() {
-    playing = true;
-    // Play right after a seek (e.g. from the trim start): the audio starts in `onseeked`, once
-    // the video landed. Starting it here too gave a short blip from the old position.
-    if (video?.seeking) return;
-    syncAudio();
-    playAudio();
+  /** Each frame while playing: the playhead follows the audio, and the video follows both. */
+  function follow() {
+    if (!video) return;
+    const seg = engine.segment();
+    const ms = engine.positionMs();
+    if (!seg || ms === null) {
+      // The audio played the last kept part: loop from the first.
+      startPlayback(playRanges[0].start);
+      return;
+    }
+    position = ms;
+    const cut = lastSegment !== null && seg !== lastSegment && seg.from !== lastSegment.to;
+    lastSegment = seg;
+    if (cut) {
+      video.playbackRate = 1;
+      seekVideo(seg.from);
+      return;
+    }
+    if (video.seeking) return;
+    const correction = videoCorrection(video.currentTime * 1000, ms);
+    if (!correction) {
+      if (video.playbackRate !== 1) video.playbackRate = 1;
+    } else if ("rate" in correction) {
+      if (video.playbackRate !== correction.rate) video.playbackRate = correction.rate;
+    } else {
+      video.playbackRate = 1;
+      seekVideo(correction.seekMs);
+    }
   }
 
-  function onpause() {
-    playing = false;
-    pauseAudio();
+  function togglePlay() {
+    if (!video || mediaError || !audioReady) return;
+    if (playing) {
+      pause();
+      return;
+    }
+    // At the end of the last part (or within a frame or so of it): start over from the first.
+    const last = playRanges[playRanges.length - 1];
+    startPlayback(position >= last.end - 50 ? playRanges[0].start : position);
   }
 
   function onseeked() {
@@ -333,19 +388,19 @@
     // Unfreeze only once the new frame is actually on screen (WebKitGTK paints it after
     // `seeked`); fall back to a short delay where requestVideoFrameCallback is missing.
     unfreezeAfterPaint();
-    syncAudio();
-    if (video && !video.paused) playAudio();
   }
 
-  function onended() {
-    // The trim runs to the clip's end: loop from the first kept part.
-    seek(kept[0]?.start ?? trim.start);
-    video?.play().catch(() => {});
+  function onloadedmetadata() {
+    if (!video) return;
+    videoSize = { width: video.videoWidth, height: video.videoHeight };
+    // The engine plays the sound: the video's own audio stays off (and muted) for good.
+    const tracks = (video as HTMLVideoElement & { audioTracks?: Iterable<{ enabled: boolean }> }).audioTracks;
+    if (tracks) for (const t of tracks) t.enabled = false;
   }
 
   function onhandlemove(_handle: "start" | "end" | "thumb" | "split", ms: number) {
-    // Show the frame under the handle while paused; while playing, the loop takes care of it.
-    if (video?.paused) seek(ms);
+    // Show the frame under the handle while paused; while playing, the audio clock moves it.
+    if (!playing) seek(ms);
   }
 
   function splitHere() {
@@ -449,7 +504,7 @@
   }
 
   async function askDelete() {
-    video?.pause();
+    pause();
     // Uploaded from this editor? The library knows its server copy now; `clip` may not.
     let current = data?.clip ?? clip;
     try {
@@ -484,7 +539,7 @@
   async function onupload() {
     // The upload exports the saved edit, so save first: it uploads the cut the user sees.
     if (await saveEdit()) {
-      video?.pause();
+      pause();
       uploadOpen = true;
     }
   }
@@ -541,14 +596,10 @@
         muted
         playsinline
         preload="auto"
-        onplay={onplay}
-        onpause={onpause}
-        onseeking={pauseAudio}
         onseeked={onseeked}
-        onended={onended}
         onerror={() => (mediaError = true)}
         onclick={togglePlay}
-        onloadedmetadata={() => video && (videoSize = { width: video.videoWidth, height: video.videoHeight })}
+        {onloadedmetadata}
         style:filter={previewBlur}
       ></video>
       <canvas bind:this={freeze} class="freeze" class:show={frozen} aria-hidden="true" style:filter={previewBlur}></canvas>
@@ -558,16 +609,6 @@
           <p>Klipt can't play this clip here. You can still trim, export and upload it.</p>
         </div>
       {/if}
-      <audio bind:this={gameAudio} src={data.gameAudioUrl} preload="auto"></audio>
-      {#if data.micAudioUrl}
-        <audio bind:this={micAudio} src={data.micAudioUrl} preload="auto"></audio>
-      {/if}
-      {#if data.voiceAudioUrl}
-        <audio bind:this={voiceAudio} src={data.voiceAudioUrl} preload="auto"></audio>
-      {/if}
-      {#each data.extraTracks as t, i (t.index)}
-        <audio bind:this={extraAudios[i]} src={t.audioUrl} preload="auto"></audio>
-      {/each}
     </div>
 
     <div class="timeline">
@@ -575,9 +616,9 @@
         <button
           class="btn btn-primary btn-icon play"
           onclick={togglePlay}
-          disabled={mediaError}
+          disabled={mediaError || !audioReady}
           aria-label={playing ? "Pause" : "Play"}
-          title={playing ? "Pause (Space)" : "Play (Space)"}
+          title={!audioReady ? "Loading audio…" : playing ? "Pause (Space)" : "Play (Space)"}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             {#if playing}

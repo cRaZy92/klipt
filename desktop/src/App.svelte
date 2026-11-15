@@ -7,6 +7,7 @@
   import { resumeAfterLogin, stopUploadsForLogout, watchUploads } from "./lib/uploads.svelte";
   import { importing, watchImports } from "./lib/imports.svelte";
   import { forgetCache } from "./lib/cache";
+  import { keepScroll } from "./lib/keepScroll";
   import Avatar from "./components/Avatar.svelte";
   import Icon from "./components/Icon.svelte";
   import Toast from "./components/Toast.svelte";
@@ -339,7 +340,7 @@
       <!-- Screens stay alive once visited and are only hidden (see .screen:not(.here)), so switching back is instant and
            keeps scroll and filters. Each has its own scroll area. The editor is built per clip. -->
       {#if visited.has("library")}
-        <main class="screen" class:here={view.name === "library"} inert={view.name !== "library"}>
+        <main class="screen" class:here={view.name === "library"} use:keepScroll={view.name === "library"} inert={view.name !== "library"}>
           <Library
             active={view.name === "library"}
             {hotkey}
@@ -349,7 +350,7 @@
         </main>
       {/if}
       {#if visited.has("feed")}
-        <main class="screen" class:here={view.name === "feed"} inert={view.name !== "feed"}>
+        <main class="screen" class:here={view.name === "feed"} use:keepScroll={view.name === "feed"} inert={view.name !== "feed"}>
           <Feed
             active={view.name === "feed"}
             server={hostOf(account.serverUrl)}
@@ -376,7 +377,7 @@
         </main>
       {/if}
       {#if visited.has("settings") && settings}
-        <main class="screen" class:here={view.name === "settings"} inert={view.name !== "settings"}>
+        <main class="screen" class:here={view.name === "settings"} use:keepScroll={view.name === "settings"} inert={view.name !== "settings"}>
           {#key settingsEpoch}
             <SettingsView
               active={view.name === "settings"}

@@ -668,9 +668,8 @@ fn progress(app: &AppHandle, id: &str, phase: &'static str, sent: u64, total: u6
 /// The chosen thumbnail frame as a time in the uploaded, trimmed video (kept inside the cut).
 pub(crate) fn upload_thumbnail_ms(clip: &Clip) -> Option<u64> {
     let at = clip.thumbnail_ms?;
-    let start = clip.trim_start_ms.unwrap_or(0);
-    let end = clip.trim_end_ms.unwrap_or(clip.duration_ms).max(start);
-    Some(at.clamp(start, end.saturating_sub(1).max(start)) - start)
+    let kept = export::kept_ranges(&editor::current_edit(clip), clip.duration_ms);
+    Some(export::joined_time(at, &kept))
 }
 
 async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
@@ -1101,6 +1100,20 @@ mod tests {
         assert_eq!(upload_thumbnail_ms(&c), Some(1_000));
         c.thumbnail_ms = Some(2_000);
         assert_eq!(upload_thumbnail_ms(&c), Some(0), "before the cut: its first frame");
+        c.thumbnail_ms = Some(20_000);
+        assert_eq!(upload_thumbnail_ms(&c), Some(5_999), "after the cut: its last frame");
+    }
+
+    #[test]
+    fn thumbnail_time_skips_removed_parts() {
+        let mut c = clip(None, None, None);
+        c.duration_ms = 10_000;
+        (c.trim_start_ms, c.trim_end_ms) = (Some(1_000), Some(9_000));
+        c.removed_ranges = vec![crate::library::CutRange { start_ms: 2_000, end_ms: 4_000 }];
+        c.thumbnail_ms = Some(5_000);
+        assert_eq!(upload_thumbnail_ms(&c), Some(2_000));
+        c.thumbnail_ms = Some(3_000);
+        assert_eq!(upload_thumbnail_ms(&c), Some(1_000), "inside a removed part: the next kept frame");
         c.thumbnail_ms = Some(20_000);
         assert_eq!(upload_thumbnail_ms(&c), Some(5_999), "after the cut: its last frame");
     }

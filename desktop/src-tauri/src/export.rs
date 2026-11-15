@@ -72,6 +72,38 @@ fn seconds(ms: u64) -> String {
     format!("{}.{:03}", ms / 1000, ms % 1000)
 }
 
+/// The parts of the file an export keeps, in order: the trim minus the removed parts. A trim
+/// that runs to the end ends at `duration_ms`.
+pub fn kept_ranges(edit: &Edit, duration_ms: u64) -> Vec<(u64, u64)> {
+    let mut at = edit.trim_start_ms.unwrap_or(0);
+    let end = edit.trim_end_ms.unwrap_or(duration_ms);
+    let mut kept = Vec::new();
+    for r in &edit.removed {
+        if r.start_ms > at {
+            kept.push((at, r.start_ms.min(end)));
+        }
+        at = at.max(r.end_ms);
+    }
+    if end > at {
+        kept.push((at, end));
+    }
+    kept.retain(|(s, e)| e > s);
+    kept
+}
+
+/// Where `ms` (a time in the file) lands in the export of `kept`: a time in a removed part moves
+/// to the next kept frame, one past the end to the last kept frame.
+pub fn joined_time(ms: u64, kept: &[(u64, u64)]) -> u64 {
+    let mut before = 0;
+    for &(s, e) in kept {
+        if ms < e {
+            return before + ms.saturating_sub(s);
+        }
+        before += e - s;
+    }
+    before.saturating_sub(1)
+}
+
 /// The ffmpeg arguments (without the program name) for exporting `input` to `output`.
 /// A trim start before `-i` snaps to the keyframe at or before it; `-to` is then relative to it.
 /// The video is copied as it is, or with `edit.blur_video` blurred and encoded with `encoder`.
@@ -98,6 +130,9 @@ pub fn export_args(input: &Path, output: &Path, edit: &Edit, tracks: &Tracks, en
         format!("{};{labels}amix=inputs={}:normalize=0{master}[aout]", filters.join(";"), inputs.len())
     };
 
+    if !edit.removed.is_empty() {
+        return Ok(cut_args(input, output, edit, &graph, encoder));
+    }
     let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-y"].map(String::from).into();
     if let Some(start) = start {
         args.extend(["-ss".into(), seconds(start)]);
@@ -128,6 +163,44 @@ pub fn export_args(input: &Path, output: &Path, edit: &Edit, tracks: &Tracks, en
     Ok(args)
 }
 
+/// The arguments for an export with removed parts: every kept part is cut out exactly (`trim`,
+/// `atrim` on the mix), the parts are joined with `concat` and the video is encoded with
+/// `encoder`. `mix` is the audio graph ending in `[aout]`.
+fn cut_args(input: &Path, output: &Path, edit: &Edit, mix: &str, encoder: &[&str]) -> Vec<String> {
+    // No end for a trim running to the file's end: `trim` then stops where the file does.
+    let kept = kept_ranges(edit, u64::MAX);
+    let n = kept.len();
+    let range = |(s, e): (u64, u64)| {
+        if e == u64::MAX { format!("start={}", seconds(s)) } else { format!("start={}:end={}", seconds(s), seconds(e)) }
+    };
+    let mut graph = vec![mix.replace("[aout]", "[amix]")];
+    graph.push(format!("[amix]asplit={n}{}", (0..n).map(|i| format!("[am{i}]")).collect::<String>()));
+    let mut pairs = String::new();
+    for (i, k) in kept.iter().enumerate() {
+        graph.push(format!("[0:v:0]trim={},setpts=PTS-STARTPTS[v{i}]", range(*k)));
+        graph.push(format!("[am{i}]atrim={},asetpts=PTS-STARTPTS[a{i}]", range(*k)));
+        pairs.push_str(&format!("[v{i}][a{i}]"));
+    }
+    graph.push(format!("{pairs}concat=n={n}:v=1:a=1[vcat][aout]"));
+    graph.push(if edit.blur_video {
+        format!("[vcat]scale=-2:'min({BLUR_MAX_HEIGHT},ih)',gblur=sigma={BLUR_SIGMA}[vout]")
+    } else {
+        "[vcat]null[vout]".to_string()
+    });
+    let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-y", "-i"].map(String::from).into();
+    args.push(input.to_string_lossy().into_owned());
+    args.extend(["-filter_complex".into(), graph.join(";"), "-map".into(), "[vout]".into()]);
+    args.extend(encoder.iter().map(|s| s.to_string()));
+    // Like imported copies: a keyframe each second keeps trimming and seeking exact.
+    args.extend(["-pix_fmt", "yuv420p", "-force_key_frames", "expr:gte(t,n_forced*1)"].map(String::from));
+    args.extend(
+        ["-map", "[aout]", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-f", "mp4", "-progress", "pipe:1", "-nostats"]
+            .map(String::from),
+    );
+    args.push(output.to_string_lossy().into_owned());
+    args
+}
+
 /// Exports to `<cache_dir>/exports/<clip_id>.mp4` and returns that path. `progress` gets 0..=1.
 pub fn export(
     tools: &Tools,
@@ -142,18 +215,18 @@ pub fn export(
     // Never fail on a missing mic or voice track; never mix a track that isn't there.
     let tracks = tracks.present_in(info.audio_tracks);
 
-    let start = edit.trim_start_ms.unwrap_or(0);
-    let end = edit.trim_end_ms.unwrap_or(info.duration_ms).min(info.duration_ms.max(1));
-    let expected_us = (end.saturating_sub(start).max(1) as f64) * 1000.0;
+    let duration = info.duration_ms.max(1);
+    let kept_ms: u64 = kept_ranges(edit, duration).iter().map(|(s, e)| e.min(&duration).saturating_sub(*s)).sum();
+    let expected_us = (kept_ms.max(1) as f64) * 1000.0;
 
     let dir = cache_dir.join("exports");
     fs::create_dir_all(&dir)?;
     let out = dir.join(format!("{clip_id}.mp4"));
     let temp = dir.join(format!("{clip_id}.tmp.mp4"));
 
-    let encoder = if edit.blur_video {
+    let encoder = if edit.blur_video || !edit.removed.is_empty() {
         let found = crate::import::detect_encoder(tools)
-            .ok_or_else(|| AppError::ToolFailed { tool: "ffmpeg", detail: "no H.264 encoder to blur the video with".into() })?;
+            .ok_or_else(|| AppError::ToolFailed { tool: "ffmpeg", detail: "no H.264 encoder to re-encode the video with".into() })?;
         found.args
     } else {
         Vec::new()
@@ -368,6 +441,57 @@ mod tests {
             pos += size;
         }
         types
+    }
+
+    fn cut(start: u64, end: u64) -> crate::library::CutRange {
+        crate::library::CutRange { start_ms: start, end_ms: end }
+    }
+
+    #[test]
+    fn kept_ranges_subtract_the_removed_parts() {
+        let e = Edit { removed: vec![cut(1000, 2000), cut(4000, 5000)], ..edit(Some(1000), Some(9000)) };
+        assert_eq!(kept_ranges(&e, 10_000), vec![(2000, 4000), (5000, 9000)]);
+        assert_eq!(kept_ranges(&edit(None, None), 10_000), vec![(0, 10_000)]);
+    }
+
+    #[test]
+    fn cut_exports_trim_and_concat() {
+        let e = Edit { removed: vec![cut(2000, 3000)], ..edit(Some(1000), Some(5000)) };
+        let args = export_args(Path::new("i"), Path::new("o"), &e, &MIC, &["-c:v", "libx264"]).unwrap();
+        let joined = args.join(" ");
+        for part in [
+            "[0:v:0]trim=start=1.000:end=2.000,setpts=PTS-STARTPTS[v0]",
+            "[0:v:0]trim=start=3.000:end=5.000,setpts=PTS-STARTPTS[v1]",
+            "atrim=start=1.000:end=2.000,asetpts=PTS-STARTPTS[a0]",
+            "concat=n=2:v=1:a=1",
+            "-c:v libx264",
+            "-force_key_frames",
+        ] {
+            assert!(joined.contains(part), "{part} missing: {joined}");
+        }
+        assert!(!args.iter().any(|a| a == "-ss" || a == "-to") && !joined.contains("-c:v copy"), "{joined}");
+    }
+
+    #[test]
+    fn cut_and_blur_blurs_the_joined_video() {
+        let e = Edit { removed: vec![cut(2000, 3000)], blur_video: true, ..edit(Some(1000), Some(5000)) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, &["-c:v", "libx264"]).unwrap().join(" ");
+        let concat = joined.find("concat=").unwrap();
+        assert!(joined.find("gblur=sigma=8").is_some_and(|g| g > concat), "{joined}");
+    }
+
+    #[test]
+    fn exporting_with_cuts_keeps_only_the_kept_time() {
+        let cache = tempfile::tempdir().unwrap();
+        let e = Edit { removed: vec![cut(1500, 3500)], ..edit(Some(500), Some(5500)) };
+        let mut reports = vec![];
+        let out = export(&tools(), fixture(), cache.path(), "cuts", &e, MIC, |p| reports.push(p)).unwrap();
+        let p = probe(&tools(), &out).unwrap();
+        assert!((2_800..=3_200).contains(&p.duration_ms), "{}", p.duration_ms);
+        assert_eq!(p.audio_tracks, 1);
+        let info = crate::ffmpeg::inspect(&tools(), &out).unwrap();
+        assert_eq!(info.video_codec.as_deref(), Some("h264"));
+        assert_eq!(reports.last(), Some(&1.0));
     }
 
     #[test]

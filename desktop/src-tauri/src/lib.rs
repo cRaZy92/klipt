@@ -153,6 +153,10 @@ pub fn run() {
                 if let Some(recorder) = app.try_state::<recorder::SupervisorHandle>() {
                     recorder.shutdown();
                 }
+                // And the editor's filmstrip ffmpeg, which would otherwise run on after we quit.
+                if let Some(jobs) = app.try_state::<filmstrip::Jobs>() {
+                    jobs.stop_all();
+                }
             }
         });
 }

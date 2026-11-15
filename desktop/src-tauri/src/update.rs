@@ -69,6 +69,14 @@ mod imp {
     pub async fn install(app: &AppHandle) -> Result<()> {
         let update = app.state::<Pending>().0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
         let Some(update) = update else { return Err(AppError::InvalidInput("no update is waiting".into())) };
+        // The installer replaces Klipt's files: no filmstrip ffmpeg may still be running (or
+        // holding a clip open). Stopping waits for ffmpeg to exit, so it runs off the async threads.
+        let jobs_app = app.clone();
+        if let Err(e) =
+            tauri::async_runtime::spawn_blocking(move || jobs_app.state::<crate::filmstrip::Jobs>().stop_all()).await
+        {
+            eprintln!("klipt: can't stop the filmstrip job before the update: {e}");
+        }
         update
             .download_and_install(|_, _| {}, || {})
             .await

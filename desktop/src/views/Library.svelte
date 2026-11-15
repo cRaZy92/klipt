@@ -1,11 +1,11 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { checkFolder, importing } from "../lib/imports.svelte";
   import ImportDialog from "../components/ImportDialog.svelte";
   import ImportPanel from "../components/ImportPanel.svelte";
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
-  import { libraryMemory as memory } from "../lib/libraryMemory";
   import type { RemoveWhere } from "../lib/removal";
   import { keepShown, selectClick } from "../lib/selection";
   import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
@@ -24,10 +24,13 @@
   import UploadDialog from "../components/UploadDialog.svelte";
 
   let {
+    active = true,
     hotkey,
     bufferSeconds,
     onedit,
   }: {
+    /** This is the screen shown (it's kept alive, hidden, while another one is). */
+    active?: boolean;
     /** The save shortcut as the user should press it, e.g. "Alt + `". */
     hotkey: string;
     bufferSeconds: number;
@@ -37,19 +40,18 @@
 
   // My clips = the clips on this PC plus your uploads on the server (myClips.ts merges them).
   // Back from the editor (or another tab): start from what was shown, then refresh it.
-  let local = $state<ClipView[]>(memory.local ?? []);
+  let local = $state<ClipView[]>([]);
   /** Your uploads; null when logged out (or not loaded yet). */
-  let uploads = $state<MyUpload[] | null>(memory.uploads);
+  let uploads = $state<MyUpload[] | null>(null);
   let uploadsError = $state<string | null>(null);
-  let place = $state<Place>(memory.place);
-  let game = $state<string | null>(memory.game);
-  let sort = $state<Sort>(memory.sort);
-  let search = $state(memory.search);
-  let media = $state<MediaKind>(memory.media);
+  let place = $state<Place>("all");
+  let game = $state<string | null>(null);
+  let sort = $state<Sort>("newestFirst");
+  let search = $state("");
+  let media = $state<MediaKind>("all");
   /** The screenshot shown full size. */
   let viewing = $state<ClipView | null>(null);
-  let loaded = $state(memory.local !== null);
-  let page = $state<HTMLElement>();
+  let loaded = $state(false);
   let loadError = $state<string | null>(null);
   let now = $state(Date.now());
 
@@ -120,7 +122,7 @@
   );
 
   function onkeydown(e: KeyboardEvent) {
-    if (dialogOpen) return;
+    if (!active || dialogOpen) return;
     const typing = (e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]");
     if (e.key === "Escape" && selected.size > 0) {
       clearSelection();
@@ -135,23 +137,18 @@
     if (game !== null && !games.some((g) => g.name === game)) game = null;
   });
 
+  // Shown (again): refresh both lists quietly, keeping what's on screen meanwhile. The editor
+  // may have changed a clip while this screen was hidden.
   $effect(() => {
-    Object.assign(memory, { place, game, sort, search, media });
+    if (active) untrack(load);
   });
 
+  // Hidden: stop anything playing.
   $effect(() => {
-    memory.local = $state.snapshot(local);
-    memory.uploads = $state.snapshot(uploads);
-  });
-
-  // The app scrolls its <main>, not this page: put it back where it was, then keep track of it.
-  $effect(() => {
-    const scroller = page?.closest("main");
-    if (!scroller) return;
-    if (memory.local !== null) scroller.scrollTop = memory.scrollTop;
-    const onscroll = () => (memory.scrollTop = scroller.scrollTop);
-    scroller.addEventListener("scroll", onscroll, { passive: true });
-    return () => scroller.removeEventListener("scroll", onscroll);
+    if (!active) {
+      playing = null;
+      viewing = null;
+    }
   });
 
   // Bumped to drop answers from older requests.
@@ -193,7 +190,6 @@
   }
 
   $effect(() => {
-    load();
     const timer = setInterval(() => (now = Date.now()), 30_000);
     const stops = [
       on("clip-saved", (clip) => {
@@ -419,7 +415,7 @@
   ];
 </script>
 
-<section class="page" bind:this={page}>
+<section class="page">
   <div class="page-top">
     <header class="page-head">
       <div>

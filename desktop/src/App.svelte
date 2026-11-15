@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { api, errorMessage, on, type Account, type ClipView, type HotkeyStatus, type Settings, type SettingsSaved } from "./lib/api";
   import { menu } from "./lib/a11y";
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
   import { resumeAfterLogin, stopUploadsForLogout, watchUploads } from "./lib/uploads.svelte";
   import { importing, watchImports } from "./lib/imports.svelte";
-  import { forgetLibrary } from "./lib/libraryMemory";
+  import { forgetCache } from "./lib/cache";
   import Avatar from "./components/Avatar.svelte";
   import Icon from "./components/Icon.svelte";
   import Toast from "./components/Toast.svelte";
@@ -18,6 +18,7 @@
   import SettingsView from "./views/Settings.svelte";
 
   // The screens. Library is home.
+  type Screen = "library" | "feed" | "settings";
   type View = { name: "library" } | { name: "feed" } | { name: "editor"; clip: ClipView } | { name: "settings" };
   /** Where the user asked to go while the current screen had unsaved changes. */
   type Leaving = { to: "view"; view: View } | { to: "logout" };
@@ -138,9 +139,24 @@
     account = null;
   }
 
-  // Logged out, or the login expired: the next account mustn't see this one's clips and uploads.
+  /** The screens kept alive (hidden while another is shown); the editor is never kept. */
+  let visited = $state<Set<Screen>>(new Set(["library"]));
+  /** Bumped to rebuild Settings from the saved settings (after "Discard"). */
+  let settingsEpoch = $state(0);
+
   $effect(() => {
-    if (!account) forgetLibrary();
+    const name = view.name;
+    if (name !== "editor" && !untrack(() => visited.has(name))) visited = new Set([...untrack(() => visited), name]);
+  });
+
+  // Logged out, or the login expired: the kept screens are dropped (they're unmounted with the
+  // logged-in UI) and the next account mustn't see this one's data. `view` stays, so a re-login
+  // after an expired session returns to where the user was.
+  $effect(() => {
+    if (account) return;
+    const name = untrack(() => view.name);
+    visited = new Set(name === "editor" ? [] : [name]);
+    forgetCache();
   });
 
   /** Switches screens, asking first when that would throw away unsaved changes. */
@@ -318,14 +334,20 @@
         </div>
       {/if}
 
-      <main>
-        {#if view.name === "library"}
+      <!-- Screens stay alive once visited and are only hidden, so switching back is instant and
+           keeps scroll and filters. Each has its own scroll area. The editor is built per clip. -->
+      {#if visited.has("library")}
+        <main class="screen" hidden={view.name !== "library"}>
           <Library
+            active={view.name === "library"}
             {hotkey}
             bufferSeconds={settings?.bufferSeconds ?? 30}
             onedit={(clip) => go({ name: "editor", clip })}
           />
-        {:else if view.name === "feed"}
+        </main>
+      {/if}
+      {#if visited.has("feed")}
+        <main class="screen" hidden={view.name !== "feed"}>
           <Feed
             server={hostOf(account.serverUrl)}
             onunauthorized={() => {
@@ -333,29 +355,37 @@
               loginNotice = "Your session has expired. Log in again to see the feed.";
             }}
           />
-        {:else if view.name === "editor"}
+        </main>
+      {/if}
+      {#if view.name === "editor"}
+        <main class="screen">
           {#key view.clip.id}
             <Editor
-            clip={view.clip}
-            bind:dirty={viewDirty}
-            onclose={() => go({ name: "library" })}
-            ondeleted={() => {
-              viewDirty = false;
-              view = { name: "library" };
-            }}
-          />
+              clip={view.clip}
+              bind:dirty={viewDirty}
+              onclose={() => go({ name: "library" })}
+              ondeleted={() => {
+                viewDirty = false;
+                view = { name: "library" };
+              }}
+            />
           {/key}
-        {:else if settings}
-          <SettingsView
-            {settings}
-            {account}
-            {hotkeyStatus}
-            bind:dirty={viewDirty}
-            onsaved={settingsSaved}
-            onlogout={requestLogout}
-          />
-        {/if}
-      </main>
+        </main>
+      {/if}
+      {#if visited.has("settings") && settings}
+        <main class="screen" hidden={view.name !== "settings"}>
+          {#key settingsEpoch}
+            <SettingsView
+              {settings}
+              {account}
+              {hotkeyStatus}
+              bind:dirty={viewDirty}
+              onsaved={settingsSaved}
+              onlogout={requestLogout}
+            />
+          {/key}
+        </main>
+      {/if}
     </div>
   </div>
 {/if}
@@ -685,11 +715,15 @@
     user-select: all;
   }
 
-  main {
+  .screen {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+  }
+
+  .screen[hidden] {
+    display: none;
   }
 </style>

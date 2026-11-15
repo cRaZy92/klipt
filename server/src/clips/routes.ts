@@ -10,7 +10,8 @@ import { requireUser } from '../auth/plugin.js';
 import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
 import { assertPlayable, makeThumbnail, MediaError, probeImage, probeVideo, remuxFaststart, toPng } from './media.js';
 import { newClipId } from './ids.js';
-import { MEDIA_FILE, mediaFileName } from './files.js';
+import { embedFileName, MEDIA_FILE, mediaFileName } from './files.js';
+import { createEmbed } from './embed.js';
 import {
   getClip,
   getUserStorage,
@@ -66,6 +67,8 @@ export function processingOf(row: Pick<ClipRow, 'transcodeState'>): 'queued' | '
 }
 
 const CLAIM_TTL_MS = 30 * 60 * 1000;
+/** The embed copy is made while the uploader waits (a few seconds), so it gets more cores than compression. */
+const EMBED_THREADS = 4;
 
 class AlreadyFinalizedError extends Error {}
 
@@ -223,7 +226,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     app.transcoder.cancel(found.clip.id);
     const dir = join(config.dataDir, 'clips');
     // The upload too: a compressed clip keeps it for a few minutes after the swap.
-    const files = new Set([mediaFileName(found.clip), `${found.clip.id}.mp4`, `${found.clip.id}.jpg`]);
+    const files = new Set([mediaFileName(found.clip), `${found.clip.id}.mp4`, `${found.clip.id}.jpg`, embedFileName(found.clip.id)]);
     await Promise.all([...files].map((f) => rm(join(dir, f), { force: true })));
     return reply.code(204).send();
   });
@@ -236,7 +239,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
   /** The clip's current video when `file` names an earlier version of it, else null. */
   const currentVideoFor = async (file: string): Promise<string | null> => {
     const found = await getClip(db, file.slice(0, 12));
-    if (!found || found.clip.kind !== 'clip' || versionOf(file) >= found.clip.mediaVersion) return null;
+    if (!found || found.clip.kind !== 'clip' || file.endsWith('.embed.mp4') || versionOf(file) >= found.clip.mediaVersion) return null;
     const current = mediaFileName(found.clip);
     return (await stat(join(clipsDir, current)).catch(() => null)) ? current : null;
   };
@@ -326,8 +329,9 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const tmpThumb = join(clipsDir, `.${id}.jpg.tmp`);
     const imagePath = join(clipsDir, `${id}.png`);
     const tmpImage = join(clipsDir, `.${id}.png.tmp`);
+    const embedPath = join(clipsDir, embedFileName(id));
     const cleanOutputs = () =>
-      Promise.all([videoPath, thumbPath, tmpVideo, tmpThumb, imagePath, tmpImage].map((p) => rm(p, { force: true })));
+      Promise.all([videoPath, thumbPath, tmpVideo, tmpThumb, imagePath, tmpImage, embedPath].map((p) => rm(p, { force: true })));
 
     let row: ClipRow;
     try {
@@ -348,6 +352,8 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         await remuxFaststart(source, tmpVideo);
         await makeThumbnail(tmpVideo, tmpThumb, info.durationMs, body.thumbnailMs);
         size = (await stat(tmpVideo)).size;
+        // Made now, not queued: the share link is handed out the moment this request answers.
+        await createEmbed({ clipsDir, clip: { id, ...info }, source: tmpVideo, threads: EMBED_THREADS, log: req.log });
         await rename(tmpVideo, videoPath);
       }
       await rename(tmpThumb, thumbPath);

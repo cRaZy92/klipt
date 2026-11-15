@@ -10,5 +10,13 @@ export function mediaFileName(clip: { id: string; kind: 'clip' | 'screenshot'; m
   return clip.kind === 'screenshot' ? `${clip.id}.png` : videoFileName(clip.id, clip.mediaVersion);
 }
 
-/** A name `/media/` may serve: `<id>.jpg|png|mp4` or `<id>.v<n>.mp4`. Group 1 is the clip id. */
-export const MEDIA_FILE = /^([A-Za-z0-9_-]{12})(?:\.(?:jpg|png|mp4)|\.v[1-9]\d{0,5}\.mp4)$/;
+/**
+ * A small copy of a clip's video for link embeds (Discord): its crawler downloads the whole
+ * og:video file and drops the embed when that takes more than a few seconds.
+ */
+export function embedFileName(id: string): string {
+  return `${id}.embed.mp4`;
+}
+
+/** A name `/media/` may serve: `<id>.jpg|png|mp4`, `<id>.v<n>.mp4` or `<id>.embed.mp4`. Group 1 is the clip id. */
+export const MEDIA_FILE = /^([A-Za-z0-9_-]{12})(?:\.(?:jpg|png|mp4)|\.v[1-9]\d{0,5}\.mp4|\.embed\.mp4)$/;

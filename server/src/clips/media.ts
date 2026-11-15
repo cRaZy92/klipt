@@ -19,6 +19,8 @@ export interface VideoInfo {
   height: number;
   videoCodec: string;
   audioCodec: string | null;
+  /** Frames per second, when ffprobe knows it. */
+  fps: number | null;
 }
 
 const ffmpegBin = () => process.env.FFMPEG_PATH || 'ffmpeg';
@@ -62,6 +64,16 @@ interface ProbeStream {
   width?: number;
   height?: number;
   duration?: string;
+  avg_frame_rate?: string;
+  r_frame_rate?: string;
+}
+
+/** `60/1`, `30000/1001` → a number; `0/0` and nonsense → null. */
+function parseRate(rate: string | undefined): number | null {
+  const m = /^(\d+)\/(\d+)$/.exec(rate ?? '');
+  if (!m || Number(m[2]) === 0) return null;
+  const fps = Number(m[1]) / Number(m[2]);
+  return fps > 0 && fps < 1000 ? fps : null;
 }
 
 export async function probeVideo(path: string): Promise<VideoInfo> {
@@ -97,6 +109,7 @@ export async function probeVideo(path: string): Promise<VideoInfo> {
     height: video.height,
     videoCodec: video.codec_name ?? 'unknown',
     audioCodec: audio ? (audio.codec_name ?? 'unknown') : null,
+    fps: parseRate(video.avg_frame_rate) ?? parseRate(video.r_frame_rate),
   };
 }
 
@@ -252,4 +265,39 @@ export function transcodeH264(input: string, output: string, opts: TranscodeOpti
       else reject(new Error(detail));
     });
   });
+}
+
+export interface EmbedEncode {
+  width: number;
+  height: number;
+  /** Average video bitrate (kbit/s). */
+  videoKbps: number;
+  audioKbps: number;
+  /** Frame rate cap; null keeps the source's. */
+  fps: number | null;
+  threads: number;
+}
+
+/**
+ * Writes the small link-embed copy of a clip: scaled, frame rate capped, at an average bitrate
+ * (not a constant quality) so its size is predictable. Faststart, H.264 + AAC, plays everywhere.
+ */
+export async function encodeEmbed(input: string, output: string, opts: EmbedEncode): Promise<void> {
+  const filters = [`scale=${opts.width}:${opts.height}`];
+  if (opts.fps) filters.unshift(`fps=${opts.fps}`);
+  const kbps = opts.videoKbps;
+  await run(ffmpegBin(), [
+    '-v', 'error', '-y', '-nostdin',
+    '-threads', String(opts.threads),
+    '-i', input,
+    '-map', '0:v:0', '-map', '0:a:0?',
+    '-vf', filters.join(','),
+    '-c:v', 'libx264', '-preset', 'veryfast', '-threads', String(opts.threads),
+    '-b:v', `${kbps}k`, '-maxrate', `${Math.round(kbps * 1.2)}k`, '-bufsize', `${kbps * 2}k`,
+    '-pix_fmt', 'yuv420p', '-profile:v', 'high',
+    '-c:a', 'aac', '-b:a', `${opts.audioKbps}k`, '-ac', '2',
+    '-movflags', '+faststart',
+    '-f', 'mp4',
+    output,
+  ]);
 }

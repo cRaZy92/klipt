@@ -8,7 +8,14 @@ function meta(attr: 'property' | 'name', key: string, value: string | number): s
   return `<meta ${attr}="${key}" content="${e(String(value))}" />`;
 }
 
-export function shareHead(clip: Clip): string {
+/** The small copy of the video that link embeds use instead of the full one (see clips/embed.ts). */
+export interface ShareEmbed {
+  url: string;
+  width: number;
+  height: number;
+}
+
+export function shareHead(clip: Clip, embed: ShareEmbed | null = null): string {
   if (clip.kind === 'screenshot') {
     return [
       '<meta name="robots" content="noindex" />',
@@ -25,6 +32,7 @@ export function shareHead(clip: Clip): string {
     ].join('\n');
   }
   const description = clip.gameName ? `${clip.gameName} · clipped by ${clip.owner.username}` : clip.owner.username;
+  const video = embed ?? { url: clip.videoUrl, width: clip.width, height: clip.height };
   return [
     '<meta name="robots" content="noindex" />',
     meta('property', 'og:site_name', 'Klipt'),
@@ -33,11 +41,11 @@ export function shareHead(clip: Clip): string {
     meta('property', 'og:description', description),
     meta('property', 'og:url', clip.shareUrl),
     meta('property', 'og:image', clip.thumbnailUrl),
-    meta('property', 'og:video', clip.videoUrl),
-    meta('property', 'og:video:secure_url', clip.videoUrl),
+    meta('property', 'og:video', video.url),
+    meta('property', 'og:video:secure_url', video.url),
     meta('property', 'og:video:type', 'video/mp4'),
-    meta('property', 'og:video:width', clip.width),
-    meta('property', 'og:video:height', clip.height),
+    meta('property', 'og:video:width', video.width),
+    meta('property', 'og:video:height', video.height),
     meta('name', 'twitter:card', 'player'),
     meta('name', 'theme-color', '#7c5cff'),
   ].join('\n');
@@ -67,6 +75,8 @@ function JoinCard(props: { clip: Clip }): JSX.Element {
 export function SharePage(props: {
   user: AuthUser | null;
   clip: Clip;
+  /** The clip's embed copy, when it has one. */
+  embed?: ShareEmbed | null;
   canDelete: boolean;
   /** Friends who watched it; only given to the owner. */
   viewers?: string[];
@@ -75,7 +85,7 @@ export function SharePage(props: {
 }): JSX.Element {
   const { clip } = props;
   return (
-    <Layout title={clip.title} user={props.user} head={shareHead(clip)}>
+    <Layout title={clip.title} user={props.user} head={shareHead(clip, props.embed ?? null)}>
       <div class="share" style={`--ar:${clip.width > 0 && clip.height > 0 ? `${clip.width}/${clip.height}` : '16/9'}`}>
         {clip.kind === 'screenshot' ? (
           <img class="shot" src={e(clip.videoUrl)} alt={e(clip.title)} data-view-url={`/api/clips/${e(clip.id)}/view`} />

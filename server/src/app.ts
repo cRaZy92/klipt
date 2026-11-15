@@ -10,6 +10,7 @@ import { clipRoutes } from './clips/routes.js';
 import { webRoutes } from './web/routes.js';
 import { join } from 'node:path';
 import { Transcoder } from './clips/transcoder.js';
+import { EmbedBackfill } from './clips/embed.js';
 import { ServerErrorPage } from './web/pages/serverError.js';
 
 export interface AppDeps {
@@ -52,6 +53,18 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.decorate('transcoder', transcoder);
   app.addHook('onReady', () => transcoder.start());
   app.addHook('onClose', () => transcoder.stop());
+  // Background media work is off together (TRANSCODE=off), which also keeps it out of tests.
+  if (deps.config.transcode.enabled) {
+    const backfill = new EmbedBackfill({
+      db: deps.db,
+      clipsDir: join(deps.config.dataDir, 'clips'),
+      threads: deps.config.transcode.threads,
+      log: app.log,
+    });
+    app.decorate('embedBackfill', backfill);
+    app.addHook('onReady', () => backfill.start());
+    app.addHook('onClose', () => backfill.stop());
+  }
 
   // Unexpected failures are logged and answered generically, never with err.message.
   // 4xx errors (bad JSON, body too large, rate limit, ...) go to Fastify's default handler unchanged.
@@ -83,5 +96,7 @@ declare module 'fastify' {
     config: Config;
     db: Db;
     transcoder: Transcoder;
+    /** Present when background media work is on. */
+    embedBackfill?: EmbedBackfill;
   }
 }

@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import type { Db } from '../db/client.js';
 import { clips } from '../db/schema.js';
-import { MEDIA_FILE, mediaFileName, videoFileName } from './files.js';
+import { embedFileName, MEDIA_FILE, mediaFileName, videoFileName } from './files.js';
 import { probeVideo, transcodeH264 } from './media.js';
 
 type ClipRow = typeof clips.$inferSelect;
@@ -223,7 +223,7 @@ export class Transcoder {
     const { db, clipsDir, log } = this.opts;
     const names = await readdir(clipsDir).catch(() => [] as string[]);
     const videos = names.filter((n) => n.endsWith('.mp4') && MEDIA_FILE.test(n));
-    const temps = names.filter((n) => /^\.[A-Za-z0-9_-]{12}\.v\d+\.mp4\.tmp$/.test(n));
+    const temps = names.filter((n) => /^\.[A-Za-z0-9_-]{12}\.(?:v\d+|embed)\.mp4\.tmp$/.test(n));
     const ids = [...new Set(videos.map((n) => n.slice(0, 12)))];
     const rows = ids.length
       ? await db
@@ -231,7 +231,7 @@ export class Transcoder {
           .from(clips)
           .where(inArray(clips.id, ids))
       : [];
-    const live = new Set(rows.map((r) => mediaFileName(r)));
+    const live = new Set(rows.flatMap((r) => [mediaFileName(r), embedFileName(r.id)]));
     const known = new Set(rows.map((r) => r.id));
     // Only clips that exist: a file without a row may be an upload whose finalize is still running.
     const orphans = videos.filter((n) => known.has(n.slice(0, 12)) && !live.has(n));

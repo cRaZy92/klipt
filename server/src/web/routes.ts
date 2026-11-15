@@ -14,6 +14,8 @@ import { FeedPage } from './pages/feed.js';
 import { InvitePage } from './pages/invite.js';
 import { LoginPage } from './pages/login.js';
 import { SharePage } from './pages/share.js';
+import { embedPlan, hasEmbed } from '../clips/embed.js';
+import { embedFileName } from '../clips/files.js';
 import { MePage } from './pages/me.js';
 import { NotFoundPage } from './pages/notFound.js';
 import { UserPage } from './pages/user.js';
@@ -133,7 +135,12 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const clip = toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged, found.favorite);
     const viewers = req.user?.id === found.clip.userId ? (await listViewers(db, clip.id)).map((v) => v.username) : undefined;
     const signup = !req.user && config.shareSignup && (await shareInviter(db, clip.id)) !== null;
-    return html(reply, SharePage({ user: req.user, clip, canDelete, viewers, signup }) as string);
+    const plan = clip.kind === 'clip' ? embedPlan(clip) : null;
+    const embed =
+      plan && (await hasEmbed(join(config.dataDir, 'clips'), clip.id))
+        ? { url: `${config.baseUrl}/media/${embedFileName(clip.id)}`, width: plan.width, height: plan.height }
+        : null;
+    return html(reply, SharePage({ user: req.user, clip, embed, canDelete, viewers, signup }) as string);
   });
 
   app.get('/me', async (req, reply) => {

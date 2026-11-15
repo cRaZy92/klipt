@@ -504,21 +504,22 @@ pub fn set_clip_game(app: AppHandle, state: State<'_, AppState>, id: String, nam
 }
 
 #[tauri::command]
-pub fn delete_clip(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    uploads: State<'_, Uploads>,
-    id: String,
-    delete_file: bool,
-) -> Result<()> {
-    if uploads.is_active(&id) {
+pub async fn delete_clip(app: AppHandle, id: String, delete_file: bool) -> Result<()> {
+    if app.state::<Uploads>().is_active(&id) {
         return Err(AppError::AlreadyUploading);
     }
-    lock(&state.library).remove(&id, delete_file)?;
-    if let Ok(cache) = cache_dir(&app) {
-        editor::remove_edit_cache(&cache, &id);
-    }
-    Ok(())
+    // Stops the clip's filmstrip ffmpeg first (it holds the video open, and writes into the cache
+    // being deleted); that waits for ffmpeg to exit, so it all runs off the command thread.
+    tauri::async_runtime::spawn_blocking(move || -> Result<()> {
+        app.state::<filmstrip::Jobs>().stop(&id);
+        lock(&app.state::<AppState>().library).remove(&id, delete_file)?;
+        if let Ok(cache) = cache_dir(&app) {
+            editor::remove_edit_cache(&cache, &id);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("deleting the clip failed: {e}")))?
 }
 
 #[tauri::command]

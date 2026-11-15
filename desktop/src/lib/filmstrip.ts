@@ -23,3 +23,25 @@ export function previewIndex(ms: number, ready: number): number | null {
   const i = frameIndex(ms);
   return i < ready ? i : null;
 }
+
+/**
+ * The tiles that cover a track `trackWidthPx` wide, each `tileWidthPx` wide (the last may run past
+ * the end). `ms` is the time at the middle of the part of the tile that is on the track.
+ */
+export function tiles(
+  trackWidthPx: number,
+  tileWidthPx: number,
+  durationMs: number,
+): { leftPct: number; widthPct: number; ms: number }[] {
+  if (!(trackWidthPx > 0) || !(tileWidthPx > 0)) return [];
+  const count = Math.ceil(trackWidthPx / tileWidthPx);
+  return Array.from({ length: count }, (_, i) => {
+    const left = i * tileWidthPx;
+    const visibleMiddle = (left + Math.min(left + tileWidthPx, trackWidthPx)) / 2;
+    return {
+      leftPct: (left / trackWidthPx) * 100,
+      widthPct: (tileWidthPx / trackWidthPx) * 100,
+      ms: (visibleMiddle / trackWidthPx) * durationMs,
+    };
+  });
+}

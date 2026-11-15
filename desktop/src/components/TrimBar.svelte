@@ -1,6 +1,7 @@
 <script lang="ts">
   import { clampThumb, clampTrim, defaultThumb, formatClock, MIN_TRIM_MS, msToX, xToMs } from "../lib/trim";
   import { canRemove, clampToKept, deleteSplit, keptRanges, moveSplit, toggle, type Piece } from "../lib/cuts";
+  import { frameUrl, previewIndex, tiles } from "../lib/filmstrip";
   import Icon from "./Icon.svelte";
 
   type Handle = "start" | "end" | "thumb";
@@ -14,6 +15,7 @@
     pieces = $bindable(),
     kept,
     position,
+    strip = null,
     onseek,
     onhandlemove,
     onscrubstart,
@@ -33,6 +35,8 @@
     kept: number;
     /** The playhead in ms. */
     position: number;
+    /** The clip's filmstrip folder and how many of its pictures exist so far. */
+    strip?: { dir: string; ready: number } | null;
     /** The user clicked or dragged on the bar to jump to `ms`. */
     onseek: (ms: number) => void;
     /** A handle moved to `ms` (for previewing the frame there). */
@@ -45,6 +49,18 @@
 
   let track = $state<HTMLElement>();
   /** A handle, the playhead, or the split after piece `n`. */
+  let trackWidth = $state(0);
+  let trackHeight = $state(0);
+  /** Tiles whose picture failed to load stay hidden. */
+  let brokenTiles = $state(new Set<number>());
+  const filmTiles = $derived(
+    strip
+      ? tiles(trackWidth, (trackHeight * 16) / 9, duration).flatMap((t) => {
+          const index = previewIndex(t.ms, strip.ready);
+          return index === null || brokenTiles.has(index) ? [] : [{ ...t, index, src: frameUrl(strip.dir, index) }];
+        })
+      : [],
+  );
   let dragging = $state<Handle | "playhead" | number | null>(null);
 
   const pct = (ms: number) => msToX(ms, duration, 100);
@@ -139,7 +155,7 @@
   }
 
   function move(e: PointerEvent) {
-    if (!dragging) return;
+    if (dragging === null) return;
     if (dragging === "playhead") onseek(msAt(e));
     else if (typeof dragging === "number") moveSplitTo(dragging, msAt(e));
     else moveHandle(dragging, msAt(e));
@@ -193,11 +209,29 @@
   <div
     class="track"
     bind:this={track}
+    bind:clientWidth={trackWidth}
+    bind:clientHeight={trackHeight}
     onpointerdown={grabTrack}
     onpointermove={move}
     onpointerup={release}
     onpointercancel={release}
+    onlostpointercapture={release}
   >
+    {#if filmTiles.length}
+      <div class="film" aria-hidden="true">
+        {#each filmTiles as t (t.leftPct)}
+          <img
+            src={t.src}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            style:left="{t.leftPct}%"
+            style:width="{t.widthPct}%"
+            onerror={() => (brokenTiles = new Set(brokenTiles).add(t.index))}
+          />
+        {/each}
+      </div>
+    {/if}
     <div class="dim" style:left="0" style:width="{pct(start)}%"></div>
     <div class="dim" style:left="{pct(end)}%" style:right="0"></div>
     <div class="selection" style:left="{pct(start)}%" style:width="{pct(end) - pct(start)}%"></div>
@@ -238,6 +272,7 @@
         onpointermove={move}
         onpointerup={release}
         onpointercancel={release}
+    onlostpointercapture={release}
         onkeydown={(e) => onsplitkey(e, s.i)}
       >
         <button
@@ -270,6 +305,7 @@
         onpointermove={move}
         onpointerup={release}
         onpointercancel={release}
+    onlostpointercapture={release}
         onkeydown={(e) => onkeydown(e, handle)}
       >
         <span class="grip"></span>
@@ -293,6 +329,7 @@
       onpointermove={move}
       onpointerup={release}
       onpointercancel={release}
+    onlostpointercapture={release}
       onkeydown={(e) => onkeydown(e, "thumb")}
     >
       <Icon name="image" size={13} />
@@ -484,6 +521,23 @@
     box-shadow: inset 0 0 0 1px var(--border);
     cursor: pointer;
     touch-action: none;
+  }
+
+  /* The filmstrip: clipped to the track, behind everything else, never changes its size. */
+  .film {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .film img {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
   }
 
   .dim {

@@ -727,6 +727,7 @@
         bind:pieces
         kept={keptLength(pieces, trim)}
         {position}
+        strip={data ? { dir: data.filmstrip.dir, ready: stripFrames } : null}
         onseek={seek}
         {onhandlemove}
         {onscrubstart}

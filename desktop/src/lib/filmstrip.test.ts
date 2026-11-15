@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameIndex, frameUrl, previewIndex } from "./filmstrip";
+import { frameIndex, frameUrl, previewIndex, tiles } from "./filmstrip";
 
 const asPath = (p: string) => p;
 
@@ -42,5 +42,27 @@ describe("frameUrl", () => {
 
   it("turns the path into a URL", () => {
     expect(frameUrl("/strip", 0, (p) => `asset://${p}`)).toBe("asset:///strip/000000.jpg");
+  });
+});
+
+describe("tiles", () => {
+  it("covers the track with ceil(track / tile) tiles, each with its middle's time", () => {
+    const t = tiles(1000, 100, 10_000);
+    expect(t).toHaveLength(10);
+    expect(t[0]).toEqual({ leftPct: 0, widthPct: 10, ms: 500 });
+    expect(t[9].ms).toBe(9500);
+  });
+
+  it("lets the last tile run past the end and takes its middle inside the clip", () => {
+    const t = tiles(250, 100, 10_000);
+    expect(t).toHaveLength(3);
+    expect(t[2].leftPct).toBeCloseTo(80);
+    expect(t[2].widthPct).toBeCloseTo(40);
+    expect(t[2].ms).toBe(9000);
+  });
+
+  it("is empty for a track with no width or tiles with no width", () => {
+    expect(tiles(0, 100, 10_000)).toEqual([]);
+    expect(tiles(1000, 0, 10_000)).toEqual([]);
   });
 });

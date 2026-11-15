@@ -856,8 +856,6 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     }
     let strip = filmstrip::strip_dir(&strip_cache, &clip.id);
     filmstrip::mark_opened(&strip);
-    let cap = lock(&app.state::<AppState>().settings).editor_cache_bytes();
-    filmstrip::evict(&strip_cache, cap, &clip.id);
     if let Err(e) = scope.allow_directory(&strip, false) {
         eprintln!("klipt: can't allow {} in the asset scope: {e}", strip.display());
     }
@@ -866,6 +864,9 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     if !filmstrip::is_complete(&strip) {
         let (worker_app, id, dir, video) = (app.clone(), clip.id.clone(), strip.clone(), clip.path.clone());
         app.state::<filmstrip::Jobs>().start(clip.id.clone(), move |stop| {
+            // Room for this strip first; it walks every cached strip, so not before the editor opens.
+            let cap = lock(&worker_app.state::<AppState>().settings).editor_cache_bytes();
+            filmstrip::evict(&strip_cache, cap, &id);
             let mut last = Instant::now();
             let mut latest = None;
             let result = filmstrip::extract(&strip_tools, &video, &dir, duration_ms, stop, |frames| {
@@ -891,6 +892,13 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
                     }
                 }
             }
+        });
+    } else {
+        // The strip is complete; the cache may still be over its cap (e.g. it was just lowered).
+        let (evict_app, id) = (app.clone(), clip.id.clone());
+        tauri::async_runtime::spawn_blocking(move || {
+            let cap = lock(&evict_app.state::<AppState>().settings).editor_cache_bytes();
+            filmstrip::evict(&strip_cache, cap, &id);
         });
     }
     let media = app.state::<crate::media_server::MediaServer>();

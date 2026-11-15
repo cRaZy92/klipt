@@ -436,6 +436,12 @@
     }
     video.playbackRate = 1;
     video.play().catch(() => {});
+    showVideo();
+  }
+
+  /** Hides a scrub picture still over the video, unless a seek is still bringing the video there. */
+  function showVideo() {
+    if (!video?.seeking && pendingSeek === null) scrubFrame = null;
   }
 
   /** Without sound: the video plays from `ms` (or the next kept part) and `followVideo` leads. */
@@ -448,6 +454,7 @@
     if (videoCorrection(video.currentTime * 1000, position, seekAverageMs, Infinity)) seekVideo(position);
     video.playbackRate = 1;
     video.play().catch(() => {});
+    showVideo();
   }
 
   /** Each frame while playing without sound: the playhead follows the video, which skips cuts and loops. */
@@ -563,6 +570,8 @@
 
   function onloadedmetadata() {
     if (!video) return;
+    // A (re)loaded video shows its own picture, not one left from a scrub.
+    scrubFrame = null;
     videoSize = { width: video.videoWidth, height: video.videoHeight };
     // The engine plays the sound: the video's own audio stays off (and muted) for good.
     const tracks = (video as HTMLVideoElement & { audioTracks?: Iterable<{ enabled: boolean }> }).audioTracks;

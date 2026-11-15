@@ -105,23 +105,6 @@ export class AudioEngine {
     return seg ? (this.segments[this.segments.indexOf(seg) + 1] ?? null) : null;
   }
 
-  private silenced = new WeakSet<HTMLMediaElement>();
-
-  /**
-   * Takes over `el`'s own sound and sends it into a muted node. WebKitGTK then plays no system
-   * stream for it: a muted element's stream made PipeWire remember Klipt as muted (and its volume
-   * as 0), and every new stream of the app, this engine's included, started that way.
-   */
-  silence(el: HTMLMediaElement) {
-    if (this.silenced.has(el)) return;
-    const ctx = this.context();
-    const mute = ctx.createGain();
-    mute.gain.value = 0;
-    mute.connect(ctx.destination);
-    ctx.createMediaElementSource(el).connect(mute);
-    this.silenced.add(el);
-  }
-
   close() {
     this.stop();
     void this.ctx?.close();

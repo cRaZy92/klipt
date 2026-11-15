@@ -148,6 +148,8 @@
 
   function grabTrack(e: PointerEvent) {
     if (e.button !== 0) return;
+    // Like the handles: no text selection starts, so dragging doesn't select the page around.
+    e.preventDefault();
     track!.setPointerCapture(e.pointerId);
     dragging = "playhead";
     onscrubstart?.();

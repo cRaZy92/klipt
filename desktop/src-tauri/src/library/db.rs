@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::{Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes};
+use super::{Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange};
 use crate::errors::{AppError, Result};
 
 /// Per-track volume range the editor offers (0–200 %).
@@ -69,12 +69,15 @@ const MIGRATIONS: &[&str] = &["
     -- Clips uploaded before syncing existed: the app's title and game win once, and a local star.
     UPDATE clips SET sync_pending = CASE WHEN favorite = 1 THEN 'title,game,favorite' ELSE 'title,game' END
         WHERE server_clip_id IS NOT NULL;
+", "
+    -- Parts removed in the editor: JSON list of {\"startMs\", \"endMs\"} (ms into the file).
+    ALTER TABLE clips ADD COLUMN removed_ranges TEXT NOT NULL DEFAULT '[]';
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
                        visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind, \
-                       extra_volumes, blur_video";
+                       extra_volumes, blur_video, removed_ranges";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -107,6 +110,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         // Unreadable JSON (hand-edited database) reads as "all at 1" rather than failing the clip.
         extra_volumes: serde_json::from_str(&row.get::<_, String>(26)?).unwrap_or_default(),
         blur_video: row.get(27)?,
+        removed_ranges: serde_json::from_str(&row.get::<_, String>(28)?).unwrap_or_default(),
     })
 }
 
@@ -225,6 +229,12 @@ impl Library {
     }
 
     /// The editor's "Blur video" for clip `id`.
+    /// Stores the parts removed in the editor (checked with `validate_cuts` by the caller).
+    pub fn set_removed_ranges(&self, id: &str, removed: &[CutRange]) -> Result<()> {
+        let json = serde_json::to_string(removed).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.update(id, "UPDATE clips SET removed_ranges = ?2 WHERE id = ?1", params![id, json])
+    }
+
     pub fn set_blur_video(&self, id: &str, blur: bool) -> Result<()> {
         self.update(id, "UPDATE clips SET blur_video = ?2 WHERE id = ?1", params![id, blur])
     }
@@ -349,7 +359,7 @@ impl Library {
             "SELECT {COLUMNS}, sync_pending FROM clips WHERE sync_pending != '' AND server_clip_id IS NOT NULL"
         ))?;
         let rows = stmt
-            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(28)?))))?
+            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(29)?))))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -484,6 +494,33 @@ pub fn validate_edit(trim: Trim, volumes: &Volumes) -> Result<()> {
         if !(0.0..=MAX_VOLUME).contains(&volume) {
             return Err(AppError::InvalidInput(format!("volume {volume} is outside 0..={MAX_VOLUME}")));
         }
+    }
+    Ok(())
+}
+
+/// Checks the removed parts of a clip `duration_ms` long against its trim: each non-empty, sorted,
+/// not overlapping, inside the trim, and something left to keep.
+pub fn validate_cuts(trim: Trim, removed: &[CutRange], duration_ms: u64) -> Result<()> {
+    let start = trim.start_ms.unwrap_or(0);
+    let end = trim.end_ms.unwrap_or(duration_ms);
+    let bad = |why: &str| Err(AppError::InvalidInput(format!("removed parts: {why}")));
+    let mut at = start;
+    let mut removed_ms = 0;
+    for r in removed {
+        if r.start_ms >= r.end_ms {
+            return bad("a part is empty");
+        }
+        if r.start_ms < at {
+            return bad("parts overlap, are out of order or start before the trim");
+        }
+        if r.end_ms > end {
+            return bad("a part ends after the trim");
+        }
+        removed_ms += r.end_ms - r.start_ms;
+        at = r.end_ms;
+    }
+    if !removed.is_empty() && removed_ms >= end.saturating_sub(start) {
+        return bad("nothing of the clip is kept");
     }
     Ok(())
 }
@@ -730,6 +767,35 @@ mod tests {
         assert_eq!(f.lib.get(&c.id).unwrap().extra_volumes, BTreeMap::from([(1, 0.25), (3, 2.0)]));
         let loud = Volumes { extra: BTreeMap::from([(1, 2.5)]), ..Volumes::default() };
         assert!(matches!(f.lib.update_edit(&c.id, Trim::default(), &loud), Err(AppError::InvalidInput(_))));
+    }
+
+    fn r(start_ms: u64, end_ms: u64) -> CutRange {
+        CutRange { start_ms, end_ms }
+    }
+
+    #[test]
+    fn removed_ranges_round_trip() {
+        let f = Fixture::new();
+        let c = f.add("a.mp4", 1, None);
+        assert!(f.lib.get(&c.id).unwrap().removed_ranges.is_empty(), "new clips have no cuts");
+        f.lib.set_removed_ranges(&c.id, &[r(2000, 3000), r(5000, 6000)]).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().removed_ranges, vec![r(2000, 3000), r(5000, 6000)]);
+        assert!(matches!(f.lib.set_removed_ranges("nope", &[]), Err(AppError::ClipNotFound(_))));
+    }
+
+    #[test]
+    fn validate_cuts_rejects_bad_cuts() {
+        let trim = Trim { start_ms: Some(1000), end_ms: Some(9000) };
+        let bad = |cuts: &[CutRange]| matches!(validate_cuts(trim, cuts, 10_000), Err(AppError::InvalidInput(_)));
+        assert!(bad(&[r(5000, 6000), r(2000, 3000)]), "unsorted");
+        assert!(bad(&[r(2000, 4000), r(3000, 5000)]), "overlapping");
+        assert!(bad(&[r(3000, 3000)]), "empty");
+        assert!(bad(&[r(500, 2000)]), "before the trim");
+        assert!(bad(&[r(8000, 9500)]), "after the trim");
+        assert!(bad(&[r(1000, 9000)]), "nothing kept");
+        assert!(validate_cuts(trim, &[r(1000, 2000), r(8000, 9000)], 10_000).is_ok(), "touching the edges");
+        assert!(validate_cuts(Trim::default(), &[r(0, 500)], 10_000).is_ok());
+        assert!(validate_cuts(Trim::default(), &[], 10_000).is_ok());
     }
 
     #[test]

@@ -5,7 +5,7 @@ import { gameCounts, isUploaded, matchesSearch, mergeClips, visibleClips } from 
 function local(id: string, at: number, extra: Partial<ClipView> = {}): ClipView {
   return {
     id, path: `/clips/${id}.mp4`, createdAt: at, durationMs: 1000, width: 1920, height: 1080, hasMic: false,
-    gameName: "Deadlock", steamAppId: 1, exe: null, title: id, trimStartMs: null, trimEndMs: null,
+    gameName: "Deadlock", steamAppId: 1, exe: null, title: id, trimStartMs: null, trimEndMs: null, removedRanges: [],
     gameVolume: 1, micVolume: 1, serverClipId: null, shareUrl: null, visibility: null, uploadId: null,
     uploadOffset: null, favorite: false, thumbnailMs: null, hasVoice: false, voiceVolume: 1, masterVolume: 1, kind: "clip", fileMissing: false, thumbPath: null, ...extra,
   };

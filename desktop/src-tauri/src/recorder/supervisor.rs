@@ -715,6 +715,7 @@ mod tests {
                 kind: crate::library::ClipKind::Clip,
                 extra_volumes: Default::default(),
                 blur_video: false,
+                removed_ranges: Vec::new(),
             },
             file_missing: false,
             thumb_path: None,

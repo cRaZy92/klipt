@@ -108,6 +108,7 @@
       masterVolume: masterVolume / 100,
       extraVolumes: Object.fromEntries(Object.entries(extraVolumes).map(([track, v]) => [track, v / 100])),
       blurVideo,
+      removedRanges: [],
     };
   });
 

@@ -7,6 +7,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 export type Visibility = "feed" | "link";
 export type Sort = "newestFirst" | "oldestFirst";
 
+/** A part removed in the editor, in ms into the video file. */
+export interface CutRange {
+  startMs: number;
+  endMs: number;
+}
+
 export interface ClipView {
   id: string;
   path: string;
@@ -21,6 +27,8 @@ export interface ClipView {
   title: string;
   trimStartMs: number | null;
   trimEndMs: number | null;
+  /** Parts removed in the editor, sorted, inside the trim. */
+  removedRanges: CutRange[];
   gameVolume: number;
   micVolume: number;
   serverClipId: string | null;
@@ -204,6 +212,8 @@ export interface EditInput {
   extraVolumes: Record<number, number>;
   /** Blur the picture in uploads and exports. */
   blurVideo: boolean;
+  /** Parts removed inside the trim: uploads and exports join the rest. */
+  removedRanges: CutRange[];
 }
 
 export interface ExportProgress {

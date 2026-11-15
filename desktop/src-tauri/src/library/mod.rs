@@ -1,7 +1,7 @@
 //! The local clip library: one SQLite row per saved clip, plus generated thumbnails.
 
 mod db;
-pub use db::validate_edit;
+pub use db::{validate_cuts, validate_edit};
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -85,6 +85,16 @@ pub struct Clip {
     pub extra_volumes: BTreeMap<u32, f32>,
     /// Uploads and exports blur the picture: a clip where only the sound matters.
     pub blur_video: bool,
+    /// Parts removed in the editor (ms into the video file), sorted, inside the trim.
+    pub removed_ranges: Vec<CutRange>,
+}
+
+/// A part of a clip removed in the editor, `start_ms..end_ms` into the video file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CutRange {
+    pub start_ms: u64,
+    pub end_ms: u64,
 }
 
 impl Clip {

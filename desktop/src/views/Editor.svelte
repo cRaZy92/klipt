@@ -6,6 +6,7 @@
   import { AudioEngine } from "../lib/audioEngine";
   import { videoCorrection, type Segment } from "../lib/playSchedule";
   import { exportFileName, hueOf } from "../lib/format";
+  import { frameUrl, previewIndex } from "../lib/filmstrip";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
   import {
     clampToKept,
@@ -90,6 +91,20 @@
   let playing = $state(false);
   let position = $state(0);
 
+  /** How many filmstrip pictures of this clip are on disk (0 once a picture fails to load). */
+  let stripFrames = $state(0);
+  /** The pointer is down on the timeline: playback is paused and moves show filmstrip pictures. */
+  let scrubbing = false;
+  /** Playback was on when the scrub started: it goes on when the pointer is released. */
+  let wasPlaying = false;
+  /** The filmstrip picture shown over the video while scrubbing; null = the video shows. */
+  let scrubFrame = $state<string | null>(null);
+  /** The picture shown is ahead of the video: it seeks there once the scrub rests or ends. */
+  let scrubAhead = false;
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** How long the pointer rests before the video seeks to the exact frame under it. */
+  const SCRUB_SETTLE_MS = 150;
+
   let saving = $state(false);
   // svelte-ignore state_referenced_locally
   let gameName = $state(clip.gameName);
@@ -173,6 +188,7 @@
       blurVideo = d.clip.blurVideo ?? false;
       thumb = d.clip.thumbnailMs;
       position = trim.start;
+      stripFrames = d.filmstrip.frames;
       data = d;
       stored = edit;
       storedThumb = thumb;
@@ -214,11 +230,16 @@
     const stopProgress = on("export-progress", ({ id, progress }) => {
       if (id === clip.id && exportProgress !== null) exportProgress = progress;
     });
+    const stopFilmstrip = on("filmstrip-progress", ({ id, frames }) => {
+      if (id === clip.id) stripFrames = frames;
+    });
 
     return () => {
       closed = true;
       cancelAnimationFrame(frame);
       stopProgress();
+      stopFilmstrip();
+      clearTimeout(settleTimer);
       video?.pause();
       engine.close();
       api.closeEditor(clip.id).catch(() => {});
@@ -282,7 +303,11 @@
     const done = () => {
       clearTimeout(unfreezeTimer);
       // Another seek may have started meanwhile; keep the snapshot up for it.
-      if (!video?.seeking) frozen = false;
+      if (!video?.seeking) {
+        frozen = false;
+        // The video caught up with the filmstrip picture: show the video again.
+        if (!scrubAhead) scrubFrame = null;
+      }
     };
     const v = video as (HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }) | undefined;
     v?.requestVideoFrameCallback?.(() => requestAnimationFrame(done));
@@ -304,7 +329,60 @@
   function seek(ms: number) {
     position = ms;
     if (playing) startPlayback(ms);
+    else if (scrubbing) scrubTo(ms);
     else seekVideo(ms);
+  }
+
+  /**
+   * While scrubbing: shows the filmstrip picture at `ms` at once, and seeks the video there only
+   * once the pointer rests. Without a picture (not made yet, or deleted), seeks the video.
+   */
+  function scrubTo(ms: number) {
+    const index = data && !mediaError ? previewIndex(ms, stripFrames) : null;
+    if (index === null || !data) {
+      // The picture stays up until the video has painted this frame.
+      scrubAhead = false;
+      clearTimeout(settleTimer);
+      seekVideo(ms);
+      return;
+    }
+    scrubFrame = frameUrl(data.filmstrip.dir, index);
+    scrubAhead = true;
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(settleScrub, SCRUB_SETTLE_MS);
+  }
+
+  /** Seeks the video to the playhead's exact frame; the picture hides once that frame is painted. */
+  function settleScrub() {
+    clearTimeout(settleTimer);
+    if (!scrubAhead) return;
+    scrubAhead = false;
+    seekVideo(position);
+  }
+
+  /** The pointer went down on the timeline: pause (even if it never moves). */
+  function onscrubstart() {
+    scrubbing = true;
+    wasPlaying = playing;
+    if (playing) pause();
+  }
+
+  function onscrubend() {
+    scrubbing = false;
+    settleScrub();
+    if (wasPlaying && !playing && !mediaError && audioReady) startPlayback(position);
+    wasPlaying = false;
+  }
+
+  /** A filmstrip picture failed to load: the strip is gone, so scrub with the video from now on. */
+  function onscruberror() {
+    stripFrames = 0;
+    scrubFrame = null;
+    if (scrubAhead) {
+      scrubAhead = false;
+      clearTimeout(settleTimer);
+      seekVideo(position);
+    }
   }
 
   /** The segment the audio played on the last frame: a new one that doesn't follow it is a cut. */
@@ -603,6 +681,9 @@
         style:filter={previewBlur}
       ></video>
       <canvas bind:this={freeze} class="freeze" class:show={frozen} aria-hidden="true" style:filter={previewBlur}></canvas>
+      {#if scrubFrame}
+        <img class="scrub" src={scrubFrame} alt="" aria-hidden="true" style:filter={previewBlur} onerror={onscruberror} />
+      {/if}
       {#if mediaError}
         <div class="media-error">
           <Icon name="alert" size={28} />
@@ -648,6 +729,8 @@
         {position}
         onseek={seek}
         {onhandlemove}
+        {onscrubstart}
+        {onscrubend}
       />
     </div>
 
@@ -912,13 +995,16 @@
     box-shadow: 0 24px 60px -30px rgba(124, 92, 255, 0.35);
   }
 
-  .freeze {
+  .freeze,
+  .scrub {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     object-fit: contain;
     pointer-events: none;
+  }
+  .freeze {
     visibility: hidden;
   }
   .freeze.show {

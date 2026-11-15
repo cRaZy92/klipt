@@ -16,6 +16,8 @@
     position,
     onseek,
     onhandlemove,
+    onscrubstart,
+    onscrubend,
   }: {
     /** The clip's length in ms. */
     duration: number;
@@ -35,6 +37,10 @@
     onseek: (ms: number) => void;
     /** A handle moved to `ms` (for previewing the frame there). */
     onhandlemove?: (handle: Moved, ms: number) => void;
+    /** The pointer went down on the bar, a handle or a split (keyboard nudges don't count). */
+    onscrubstart?: () => void;
+    /** That pointer was released, or the browser took it away (pointercancel). */
+    onscrubend?: () => void;
   } = $props();
 
   let track = $state<HTMLElement>();
@@ -71,6 +77,7 @@
     (e.currentTarget as HTMLElement).focus();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragging = i;
+    onscrubstart?.();
   }
 
   function onsplitkey(e: KeyboardEvent, i: number) {
@@ -120,12 +127,14 @@
     (e.currentTarget as HTMLElement).focus();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragging = handle;
+    onscrubstart?.();
   }
 
   function grabTrack(e: PointerEvent) {
     if (e.button !== 0) return;
     track!.setPointerCapture(e.pointerId);
     dragging = "playhead";
+    onscrubstart?.();
     onseek(msAt(e));
   }
 
@@ -137,7 +146,10 @@
   }
 
   function release() {
+    // A handle's pointerup also bubbles to the bar: end the scrub once.
+    if (dragging === null) return;
     dragging = null;
+    onscrubend?.();
   }
 
   function onkeydown(e: KeyboardEvent, handle: Handle) {

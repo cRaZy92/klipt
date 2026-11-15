@@ -479,8 +479,10 @@
     if (video) {
       video.pause();
       video.playbackRate = 1;
-      // The video trails or leads the audio a little: show the playhead's own frame.
-      if (!mediaError && Math.abs(video.currentTime * 1000 - position) > 20) seekVideo(position);
+      // The video trails or leads the audio a little: the playhead takes the frame on screen, so a
+      // split lands where the user sees it. No seek: on WebKitGTK a seek right after pausing
+      // flashes a black frame.
+      if (!mediaError && !video.seeking) position = video.currentTime * 1000;
     }
   }
 

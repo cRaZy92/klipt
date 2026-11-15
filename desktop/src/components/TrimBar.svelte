@@ -1,14 +1,18 @@
 <script lang="ts">
   import { clampThumb, clampTrim, defaultThumb, formatClock, MIN_TRIM_MS, msToX, xToMs } from "../lib/trim";
+  import { canRemove, clampToKept, deleteSplit, keptRanges, moveSplit, toggle, type Piece } from "../lib/cuts";
   import Icon from "./Icon.svelte";
 
   type Handle = "start" | "end" | "thumb";
+  type Moved = Handle | "split";
 
   let {
     duration,
     start = $bindable(),
     end = $bindable(),
     thumb = $bindable(null),
+    pieces = $bindable(),
+    kept,
     position,
     onseek,
     onhandlemove,
@@ -21,19 +25,67 @@
     end: number;
     /** The thumbnail's frame in ms; null = automatic (shown where it would be taken). */
     thumb?: number | null;
+    /** The timeline split into kept and removed pieces (covering the whole clip). */
+    pieces: Piece[];
+    /** How long the kept parts inside the trim are, in ms. */
+    kept: number;
     /** The playhead in ms. */
     position: number;
     /** The user clicked or dragged on the bar to jump to `ms`. */
     onseek: (ms: number) => void;
     /** A handle moved to `ms` (for previewing the frame there). */
-    onhandlemove?: (handle: Handle, ms: number) => void;
+    onhandlemove?: (handle: Moved, ms: number) => void;
   } = $props();
 
   let track = $state<HTMLElement>();
-  let dragging = $state<Handle | "playhead" | null>(null);
+  /** A handle, the playhead, or the split after piece `n`. */
+  let dragging = $state<Handle | "playhead" | number | null>(null);
 
   const pct = (ms: number) => msToX(ms, duration, 100);
-  const thumbAt = $derived(thumb === null ? defaultThumb({ start, end }) : clampThumb(thumb, { start, end }));
+  const keptParts = $derived(keptRanges(pieces, { start, end }));
+  const thumbAt = $derived(
+    clampToKept(thumb === null ? defaultThumb({ start, end }) : clampThumb(thumb, { start, end }), keptParts),
+  );
+  /** The pieces as far as they show inside the trim (the rest is hidden, not forgotten). */
+  const shown = $derived(
+    pieces
+      .map((p, i) => ({ ...p, i, from: Math.max(p.start, start), to: Math.min(p.end, end) }))
+      .filter((p) => p.to > p.from),
+  );
+  /** Split lines inside the trim: the boundary after piece `i`. */
+  const splits = $derived(
+    pieces.slice(0, -1).map((p, i) => ({ i, at: p.end })).filter((s) => s.at > start && s.at < end),
+  );
+
+  function moveSplitTo(i: number, ms: number) {
+    const next = moveSplit(pieces, i, ms);
+    if (next === pieces) return;
+    pieces = next;
+    onhandlemove?.("split", next[i].end);
+  }
+
+  function grabSplit(e: PointerEvent, i: number) {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).focus();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragging = i;
+  }
+
+  function onsplitkey(e: KeyboardEvent, i: number) {
+    const step = e.shiftKey ? 1000 : 100;
+    const at = pieces[i].end;
+    if (e.key === "Delete" || e.key === "Backspace") pieces = deleteSplit(pieces, i);
+    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") moveSplitTo(i, at - step);
+    else if (e.key === "ArrowRight" || e.key === "ArrowUp") moveSplitTo(i, at + step);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  /** Buttons on the bar must not start a seek on it. */
+  const stop = (e: PointerEvent) => e.stopPropagation();
 
   function msAt(e: PointerEvent): number {
     const rect = track!.getBoundingClientRect();
@@ -80,6 +132,7 @@
   function move(e: PointerEvent) {
     if (!dragging) return;
     if (dragging === "playhead") onseek(msAt(e));
+    else if (typeof dragging === "number") moveSplitTo(dragging, msAt(e));
     else moveHandle(dragging, msAt(e));
   }
 
@@ -136,6 +189,57 @@
     <div class="dim" style:left="0" style:width="{pct(start)}%"></div>
     <div class="dim" style:left="{pct(end)}%" style:right="0"></div>
     <div class="selection" style:left="{pct(start)}%" style:width="{pct(end) - pct(start)}%"></div>
+    {#each shown as p (p.i)}
+      {#if p.removed}
+        <div class="cut" style:left="{pct(p.from)}%" style:width="{pct(p.to) - pct(p.from)}%"></div>
+      {/if}
+      {#if shown.length > 1}
+        {@const allowed = canRemove(pieces, p.i, { start, end })}
+        <button
+          class="piece-toggle"
+          class:removed={p.removed}
+          style:left="{(pct(p.from) + pct(p.to)) / 2}%"
+          disabled={!allowed}
+          aria-label={p.removed ? "Keep this part" : "Remove this part"}
+          title={!allowed ? "Keep at least part of the clip" : p.removed ? "Keep this part" : "Remove this part"}
+          onpointerdown={stop}
+          onclick={() => (pieces = toggle(pieces, p.i))}
+        >
+          {#if p.removed}<Icon name="retry" size={12} />{:else}<Icon name="scissors" size={12} />{/if}
+        </button>
+      {/if}
+    {/each}
+    {#each splits as s (s.i)}
+      <div
+        class="split"
+        style:left="{pct(s.at)}%"
+        role="slider"
+        tabindex="0"
+        aria-label="Split"
+        aria-orientation="horizontal"
+        aria-valuemin={0}
+        aria-valuemax={duration}
+        aria-valuenow={s.at}
+        aria-valuetext={formatClock(s.at)}
+        title="Split: drag to move, Delete to remove"
+        onpointerdown={(e) => grabSplit(e, s.i)}
+        onpointermove={move}
+        onpointerup={release}
+        onpointercancel={release}
+        onkeydown={(e) => onsplitkey(e, s.i)}
+      >
+        <button
+          class="split-remove"
+          aria-label="Remove split"
+          title="Remove split"
+          tabindex="-1"
+          onpointerdown={stop}
+          onclick={() => (pieces = deleteSplit(pieces, s.i))}
+        >
+          <Icon name="close" size={10} />
+        </button>
+      </div>
+    {/each}
     <div class="playhead" style:left="{pct(position)}%"></div>
 
     {#each [["start", start], ["end", end]] as const as [handle, value] (handle)}
@@ -185,7 +289,7 @@
 
   <div class="labels">
     <span>{formatClock(start)}</span>
-    <span class="length">Clip length <strong>{formatClock(end - start)}</strong></span>
+    <span class="length">Clip length <strong>{formatClock(kept)}</strong></span>
     <span>{formatClock(end)}</span>
   </div>
 </div>
@@ -237,6 +341,124 @@
   .thumb-mark:focus-visible {
     border-color: #ffc53d;
     color: #ffc53d;
+  }
+
+  /* A removed part: red hatching over the bar. */
+  .cut {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+      135deg,
+      rgba(255, 93, 108, 0.32) 0 6px,
+      rgba(255, 93, 108, 0.1) 6px 12px
+    );
+    box-shadow:
+      inset 2px 0 0 var(--danger),
+      inset -2px 0 0 var(--danger);
+    pointer-events: none;
+  }
+
+  /* Remove / keep a part: shown while the bar is hovered or the button has focus. */
+  .piece-toggle {
+    position: absolute;
+    top: 4px;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    margin-left: -0.675rem;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--surface-3);
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .track:hover .piece-toggle,
+  .piece-toggle:focus-visible {
+    opacity: 1;
+  }
+
+  .piece-toggle:hover:not(:disabled) {
+    border-color: var(--danger);
+    color: var(--danger-text);
+  }
+
+  .piece-toggle.removed:hover {
+    border-color: var(--success);
+    color: var(--success);
+  }
+
+  .piece-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0;
+  }
+
+  .track:hover .piece-toggle:disabled {
+    opacity: 0.4;
+  }
+
+  /* A split line: dashed, draggable, with a remove button underneath. */
+  .split {
+    position: absolute;
+    top: -6px;
+    bottom: -6px;
+    z-index: 2;
+    width: 12px;
+    margin-left: -6px;
+    cursor: ew-resize;
+    touch-action: none;
+  }
+
+  .split::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 5px;
+    border-left: 2px dashed var(--warning);
+  }
+
+  .split:focus-visible {
+    outline: none;
+  }
+
+  .split:focus-visible::before {
+    border-left-style: solid;
+  }
+
+  .split-remove {
+    position: absolute;
+    bottom: -1.1rem;
+    left: 50%;
+    display: grid;
+    place-items: center;
+    width: 1rem;
+    height: 1rem;
+    margin-left: -0.5rem;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 50%;
+    background: var(--surface-3);
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .split:hover .split-remove,
+  .split:focus-visible .split-remove {
+    opacity: 1;
+  }
+
+  .split-remove:hover {
+    border-color: var(--danger);
+    color: var(--danger-text);
   }
 
   .track {

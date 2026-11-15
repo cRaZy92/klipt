@@ -6,6 +6,18 @@
   import { AudioSync } from "../lib/audioSync";
   import { exportFileName, hueOf } from "../lib/format";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
+  import {
+    clampToKept,
+    keptLength,
+    keptRanges,
+    piecesFromRanges,
+    playFrom,
+    removedRanges,
+    sameRanges,
+    splitAt,
+    wholeClip,
+    type Piece,
+  } from "../lib/cuts";
   import { toast } from "../lib/toasts.svelte";
   import { isBusy, uploads } from "../lib/uploads.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
@@ -39,6 +51,10 @@
 
   let duration = $state(0);
   let trim = $state<TrimRange>({ start: 0, end: 0 });
+  /** The timeline's kept and removed pieces (the split lines are their boundaries). */
+  let pieces = $state<Piece[]>(wholeClip(0));
+  /** The parts that play and get uploaded: the trim minus the removed pieces. */
+  const kept = $derived(keptRanges(pieces, trim));
   let gameVolume = $state(100);
   let micVolume = $state(100);
   let voiceVolume = $state(100);
@@ -88,6 +104,7 @@
   const uploading = $derived(isBusy(job));
   const exporting = $derived(exportProgress !== null);
   const busy = $derived(saving || exporting || uploading);
+  const nothingKept = "Keep at least part of the clip";
 
   // An upload saves its title as the clip's: show it here at once, not on the next open.
   $effect(() => {
@@ -108,7 +125,7 @@
       masterVolume: masterVolume / 100,
       extraVolumes: Object.fromEntries(Object.entries(extraVolumes).map(([track, v]) => [track, v / 100])),
       blurVideo,
-      removedRanges: [],
+      removedRanges: removedRanges(pieces, trim),
     };
   });
 
@@ -127,6 +144,7 @@
         edit.masterVolume !== stored.masterVolume ||
         !sameVolumes(edit.extraVolumes, stored.extraVolumes) ||
         edit.blurVideo !== stored.blurVideo ||
+        !sameRanges(edit.removedRanges, stored.removedRanges) ||
         thumb !== storedThumb),
   );
 
@@ -145,6 +163,7 @@
       const d = await api.openEditor(clip.id);
       duration = d.durationMs;
       trim = clampTrim(d.clip.trimStartMs ?? 0, d.clip.trimEndMs ?? d.durationMs, d.durationMs);
+      pieces = piecesFromRanges(d.clip.removedRanges ?? [], d.durationMs);
       gameVolume = percent(d.clip.gameVolume);
       micVolume = percent(d.clip.micVolume);
       voiceVolume = percent(d.clip.voiceVolume ?? 1);
@@ -173,8 +192,12 @@
       if (video && !video.seeking) {
         const ms = video.currentTime * 1000;
         position = ms;
-        // Playback loops inside the trim.
-        if (!video.paused && (ms >= trim.end || ms < trim.start - 50)) seek(trim.start);
+        // Playback jumps over removed parts (one seek each) and loops inside the trim. A frame
+        // up to 50 ms early is where a seek to a part's start can land: no jump for that.
+        if (!video.paused) {
+          const to = kept.length ? playFrom(ms, kept) : ms >= trim.end || ms < trim.start - 50 ? trim.start : ms;
+          if (to !== ms && !(to > ms && to - ms <= 50)) seek(to);
+        }
       }
       frame = requestAnimationFrame(tick);
     });
@@ -273,7 +296,11 @@
     if (!video || mediaError) return;
     if (video.paused) {
       const ms = video.currentTime * 1000;
-      if (ms < trim.start || ms >= trim.end - 50) seek(trim.start);
+      const last = kept[kept.length - 1];
+      if (!last) {
+        if (ms < trim.start || ms >= trim.end - 50) seek(trim.start);
+      } else if (ms >= last.end - 50) seek(kept[0].start);
+      else if (playFrom(ms, kept) !== ms) seek(playFrom(ms, kept));
       video.play().catch(() => {});
     } else {
       video.pause();
@@ -311,30 +338,38 @@
   }
 
   function onended() {
-    // The trim runs to the clip's end: loop from the start.
-    seek(trim.start);
+    // The trim runs to the clip's end: loop from the first kept part.
+    seek(kept[0]?.start ?? trim.start);
     video?.play().catch(() => {});
   }
 
-  function onhandlemove(_handle: "start" | "end" | "thumb", ms: number) {
+  function onhandlemove(_handle: "start" | "end" | "thumb" | "split", ms: number) {
     // Show the frame under the handle while paused; while playing, the loop takes care of it.
     if (video?.paused) seek(ms);
   }
 
+  function splitHere() {
+    const next = splitAt(pieces, position, trim);
+    if (next) pieces = next;
+    else toast("Can't split here: too close to a split or the trim, or outside the trim", "error");
+  }
+
   function onkeydown(e: KeyboardEvent) {
-    if (e.key !== " " || e.defaultPrevented || uploadOpen) return;
+    const split = (e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if ((e.key !== " " && !split) || e.defaultPrevented || uploadOpen) return;
     const target = e.target as HTMLElement | null;
     // Buttons and form fields use the space bar themselves.
     if (target?.closest("button, input, textarea, select, [contenteditable], [role='dialog']")) return;
     e.preventDefault();
-    togglePlay();
+    if (split) splitHere();
+    else togglePlay();
   }
 
   async function saveEdit(): Promise<boolean> {
     if (!stored || !changed) return true;
     saving = true;
     const next = edit;
-    const nextThumb = thumb;
+    const nextThumb = thumb === null ? null : clampToKept(thumb, kept);
     try {
       await api.saveEdit(clip.id, next, nextThumb);
       stored = next;
@@ -351,6 +386,7 @@
           masterVolume: next.masterVolume,
           extraVolumes: next.extraVolumes,
           blurVideo: next.blurVideo,
+          removedRanges: next.removedRanges,
           uploadId: null,
           uploadOffset: null,
         };
@@ -551,6 +587,14 @@
             {/if}
           </svg>
         </button>
+        <button
+          class="btn btn-sm split-btn"
+          onclick={splitHere}
+          disabled={mediaError}
+          title="Split at the playhead (S), then switch the parts you don't want off"
+        >
+          <Icon name="scissors" size={15} /> Split
+        </button>
         <span class="clock"><strong>{formatClock(position)}</strong> / {formatClock(duration)}</span>
       </div>
       <TrimBar
@@ -558,6 +602,8 @@
         bind:start={trim.start}
         bind:end={trim.end}
         bind:thumb
+        bind:pieces
+        kept={keptLength(pieces, trim)}
         {position}
         onseek={seek}
         {onhandlemove}
@@ -659,14 +705,14 @@
             <div class="progress" style:--value={exportProgress ?? 0}><div></div></div>
           </div>
         {/if}
-        <button class="btn" onclick={onsave} disabled={!changed || busy}>
+        <button class="btn" onclick={onsave} disabled={!changed || busy || !kept.length} title={kept.length ? undefined : nothingKept}>
           {#if saving}<span class="spinner"></span>{:else}<Icon name="check" size={16} />{/if}
           Save edit
         </button>
-        <button class="btn" onclick={onexport} disabled={busy}>
+        <button class="btn" onclick={onexport} disabled={busy || !kept.length} title={kept.length ? undefined : nothingKept}>
           <Icon name="film" size={16} /> Export copy…
         </button>
-        <button class="btn btn-primary" onclick={onupload} disabled={busy}>
+        <button class="btn btn-primary" onclick={onupload} disabled={busy || !kept.length} title={kept.length ? undefined : nothingKept}>
           <Icon name="upload" size={16} /> Upload
         </button>
       </div>

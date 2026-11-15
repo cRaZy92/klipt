@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { untrack } from "svelte";
   import { api, errorCode, errorMessage, type FeedClip, type GameCount } from "../lib/api";
   import { neighbors } from "../lib/clipNav";
   import { formatDuration, groupByDay, hueOf, relativeDate, viewsLabel } from "../lib/format";
@@ -12,9 +12,12 @@
   import SearchInput from "../components/SearchInput.svelte";
 
   let {
+    active = true,
     server = null,
     onunauthorized,
   }: {
+    /** This is the screen shown (it's kept alive, hidden, while another one is). */
+    active?: boolean;
     /** The server's host name, shown under the heading. */
     server?: string | null;
     onunauthorized: () => void;
@@ -69,6 +72,7 @@
       // The unfiltered first page is the whole feed's newest end: you've now seen it.
       if (!more && !game && !search.trim() && !withMe && !kind && !favoritesOnly && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
       now = Date.now();
+      if (!more) loadedAt = now;
       loaded = true;
     } catch (e) {
       if (id !== request) return;
@@ -122,7 +126,16 @@
     }
   }
 
-  onMount(refresh);
+  /** When the list was last loaded from the top (ms); shown again after longer than 30 s, it refreshes. */
+  let loadedAt = 0;
+  $effect(() => {
+    if (active) untrack(() => Date.now() - loadedAt > 30_000 && refresh());
+  });
+
+  // Hidden: stop anything playing.
+  $effect(() => {
+    if (!active) playing = null;
+  });
 </script>
 
 <section class="page">

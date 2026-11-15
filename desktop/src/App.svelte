@@ -349,6 +349,7 @@
       {#if visited.has("feed")}
         <main class="screen" hidden={view.name !== "feed"}>
           <Feed
+            active={view.name === "feed"}
             server={hostOf(account.serverUrl)}
             onunauthorized={() => {
               account = null;

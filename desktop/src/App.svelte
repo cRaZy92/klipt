@@ -175,6 +175,8 @@
     leaving = null;
     if (!next) return;
     viewDirty = false;
+    // Rebuild Settings from the saved settings, so coming back doesn't show the discarded draft.
+    if (view.name === "settings") settingsEpoch++;
     if (next.to === "logout") {
       view = { name: "library" };
       void logout();
@@ -377,6 +379,7 @@
         <main class="screen" hidden={view.name !== "settings"}>
           {#key settingsEpoch}
             <SettingsView
+              active={view.name === "settings"}
               {settings}
               {account}
               {hotkeyStatus}

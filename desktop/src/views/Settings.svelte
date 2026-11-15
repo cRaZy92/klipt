@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { tick, untrack } from "svelte";
+  import { cached, refresh } from "../lib/cache";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import {
     api,
@@ -10,6 +11,7 @@
     type AudioDevice,
     type Display,
     type HotkeyStatus,
+    type MyStorage,
     type Quality,
     type Resolution,
     type Settings,
@@ -37,6 +39,7 @@
   import Keys from "../components/Keys.svelte";
 
   let {
+    active = true,
     settings,
     account,
     hotkeyStatus,
@@ -44,6 +47,8 @@
     onlogout,
     dirty = $bindable(false),
   }: {
+    /** This is the screen shown (it's kept alive, hidden, while another one is). */
+    active?: boolean;
     /** The saved settings. */
     settings: Settings;
     account: Account;
@@ -97,10 +102,18 @@
   /** A shortcut problem from the last save (e.g. taken), shown in the Hotkey section. */
   let hotkeyProblem = $state<string | null>(null);
 
-  let displays = $state<Display[] | null>(null);
+  // What the system and server report, shown at once from the last answer (see cache.ts) and
+  // refreshed quietly whenever this screen is shown. A "failed" note shows only with no answer at all.
+  type AppInfo = Awaited<ReturnType<typeof api.appInfo>>;
+  let info = $state(cached<AppInfo>("appInfo"));
+  let displays = $state<Display[] | null>(cached<Display[]>("displays") ?? null);
   let displaysFailed = $state(false);
-  let mics = $state<AudioDevice[] | null>(null);
+  let mics = $state<AudioDevice[] | null>(cached<AudioDevice[]>("mics") ?? null);
   let micsFailed = $state(false);
+  let folderSize = $state(cached<number>("folderSize"));
+  let folderSizeFailed = $state(false);
+  let storage = $state(cached<MyStorage>("storage"));
+  let storageFailed = $state(false);
 
   /** Which shortcut is being recorded. */
   let capturing = $state<"hotkey" | "screenshotHotkey" | null>(null);
@@ -144,21 +157,42 @@
     draft.micDeviceId && mics && !mics.some((m) => m.id === draft.micDeviceId) ? draft.micDeviceId : null,
   );
 
-  onMount(() => {
-    api
-      .listDisplays()
-      .then((d) => (displays = d))
+  function refreshAll() {
+    if (!info) refresh("appInfo", api.appInfo).then((i) => (info = i)).catch(() => {});
+    refresh("displays", api.listDisplays)
+      .then((d) => ((displays = d), (displaysFailed = false)))
       .catch(() => {
-        displays = [];
-        displaysFailed = true;
+        if (displays === null) (displays = []), (displaysFailed = true);
       });
-    api
-      .listAudioDevices()
-      .then((m) => (mics = m))
+    refresh("mics", api.listAudioDevices)
+      .then((m) => ((mics = m), (micsFailed = false)))
       .catch(() => {
-        mics = [];
-        micsFailed = true;
+        if (mics === null) (mics = []), (micsFailed = true);
       });
+    refresh("storage", api.myStorage)
+      .then((st) => ((storage = st), (storageFailed = false)))
+      .catch(() => (storageFailed = storage === undefined));
+    refreshFolderSize();
+  }
+
+  function refreshFolderSize() {
+    refresh("folderSize", api.clipsFolderSize)
+      .then((b) => ((folderSize = b), (folderSizeFailed = false)))
+      .catch(() => (folderSizeFailed = folderSize === undefined));
+  }
+
+  $effect(() => {
+    if (active) untrack(refreshAll);
+  });
+
+  // A save may have moved the clips folder: measure the new one.
+  // svelte-ignore state_referenced_locally
+  let measuredDir = settings.outputDir;
+  $effect(() => {
+    if (settings.outputDir !== measuredDir) {
+      measuredDir = settings.outputDir;
+      untrack(refreshFolderSize);
+    }
   });
 
   function displayLabel(d: Display): string {
@@ -549,7 +583,7 @@
           <small class="help">Klipt couldn't list your microphones, so it uses the default one.</small>
         {/if}
       </label>
-      {#await api.appInfo() then info}
+      {#if info}
         {#if info.platform === "linux"}
           <label class="row">
             <span class="label">Voice chat apps</span>
@@ -570,7 +604,7 @@
             {/if}
           </label>
         {/if}
-      {/await}
+      {/if}
     </section>
 
     {:else if tab === "hotkey"}
@@ -669,13 +703,13 @@
       {#if fieldErrors.outputDir}<small class="error">{fieldErrors.outputDir}</small>{/if}
       {#if draft.outputDir === settings.outputDir}
         <p class="muted folder-size">
-          {#await api.clipsFolderSize()}
-            Measuring the folder…
-          {:then bytes}
-            The folder takes <strong>{formatSize(bytes)}</strong>.
-          {:catch}
+          {#if folderSize !== undefined}
+            The folder takes <strong>{formatSize(folderSize)}</strong>.
+          {:else if folderSizeFailed}
             Can't measure the folder.
-          {/await}
+          {:else}
+            Measuring the folder…
+          {/if}
         </p>
       {/if}
     </section>
@@ -743,13 +777,13 @@
         <dd>{account.username}</dd>
         <dt>Your clips on the server</dt>
         <dd>
-          {#await api.myStorage()}
-            …
-          {:then storage}
+          {#if storage}
             {storage.clips === 1 ? "1 clip" : `${storage.clips} clips`} · {formatSize(storage.bytes)}
-          {:catch}
+          {:else if storageFailed}
             <span class="muted">Can't reach the server</span>
-          {/await}
+          {:else}
+            …
+          {/if}
         </dd>
       </dl>
       <div>
@@ -759,7 +793,7 @@
 
     <section>
       <h2>About</h2>
-      {#await api.appInfo() then info}
+      {#if info}
         <p class="about">
           {#if info.dev}
             Klipt · development build
@@ -770,7 +804,7 @@
             {/if}
           {/if}
         </p>
-      {/await}
+      {/if}
       <div class="update-check">
         <button class="btn" onclick={checkForUpdate} disabled={updateCheck.checking || updateCheck.installing}>
           {#if updateCheck.checking}<span class="spinner"></span> Checking…{:else}<Icon name="retry" size={16} /> Check for updates{/if}

@@ -336,10 +336,10 @@
         </div>
       {/if}
 
-      <!-- Screens stay alive once visited and are only hidden, so switching back is instant and
+      <!-- Screens stay alive once visited and are only hidden (see .screen:not(.here)), so switching back is instant and
            keeps scroll and filters. Each has its own scroll area. The editor is built per clip. -->
       {#if visited.has("library")}
-        <main class="screen" hidden={view.name !== "library"}>
+        <main class="screen" class:here={view.name === "library"} inert={view.name !== "library"}>
           <Library
             active={view.name === "library"}
             {hotkey}
@@ -349,7 +349,7 @@
         </main>
       {/if}
       {#if visited.has("feed")}
-        <main class="screen" hidden={view.name !== "feed"}>
+        <main class="screen" class:here={view.name === "feed"} inert={view.name !== "feed"}>
           <Feed
             active={view.name === "feed"}
             server={hostOf(account.serverUrl)}
@@ -361,7 +361,7 @@
         </main>
       {/if}
       {#if view.name === "editor"}
-        <main class="screen">
+        <main class="screen here">
           {#key view.clip.id}
             <Editor
               clip={view.clip}
@@ -376,7 +376,7 @@
         </main>
       {/if}
       {#if visited.has("settings") && settings}
-        <main class="screen" hidden={view.name !== "settings"}>
+        <main class="screen" class:here={view.name === "settings"} inert={view.name !== "settings"}>
           {#key settingsEpoch}
             <SettingsView
               active={view.name === "settings"}
@@ -664,6 +664,7 @@
 
   /* Everything right of the rail. A faint glow sits behind the top of every page. */
   .content {
+    position: relative;
     display: flex;
     flex: 1;
     flex-direction: column;
@@ -727,7 +728,13 @@
     overflow-y: auto;
   }
 
-  .screen[hidden] {
-    display: none;
+  /* A screen kept alive while another is shown. Not display: none: that would replay every entrance
+     animation (the cards' staggered rise) each time it's shown again. Hidden and laid on top
+     instead; content-visibility skips drawing it, and `inert` keeps it out of focus and clicks. */
+  .screen:not(.here) {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    content-visibility: hidden;
   }
 </style>

@@ -1,5 +1,6 @@
 // Pure helpers for playing the kept parts of a clip back to back on one audio clock.
 
+import { playFrom } from "./cuts";
 import type { TrimRange } from "./trim";
 
 /** `at` is seconds after play starts; `from`/`to` are ms in the clip. */
@@ -79,4 +80,15 @@ export function cutSeekAhead(audioMs: number, seg: Segment, next: Segment | null
   const remaining = seg.to - audioMs;
   if (remaining > seekMs) return null;
   return Math.min(next.from + Math.max(0, seekMs - remaining), next.to);
+}
+
+/**
+ * With no audio clock (the video plays on its own): where the video at `ms` must jump to skip
+ * removed parts and loop, or null to play on. A frame up to 50 ms before a part's start is where
+ * a seek to it can land: no jump for that.
+ */
+export function videoLedJump(ms: number, ranges: TrimRange[]): number | null {
+  const to = playFrom(ms, ranges);
+  if (to === ms || (to > ms && to - ms <= 50)) return null;
+  return to;
 }

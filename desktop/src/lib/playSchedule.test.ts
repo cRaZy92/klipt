@@ -6,6 +6,7 @@ import {
   SEEK_LATENCY_START_MS,
   seekLatency,
   videoCorrection,
+  videoLedJump,
 } from "./playSchedule";
 
 const skip = [
@@ -89,4 +90,11 @@ describe("cutSeekAhead", () => {
   it("doesn't seek where the next part follows on", () =>
     expect(cutSeekAhead(1900, seg, { at: 1, from: 2000, to: 3000 }, 200)).toBeNull());
   it("doesn't seek after the last part", () => expect(cutSeekAhead(1900, seg, null, 200)).toBeNull());
+});
+
+describe("videoLedJump", () => {
+  it("plays on inside a kept part", () => expect(videoLedJump(1500, skip)).toBeNull());
+  it("jumps over a removed part", () => expect(videoLedJump(2100, skip)).toBe(3000));
+  it("doesn't jump from just before a part's start", () => expect(videoLedJump(2960, skip)).toBeNull());
+  it("loops from the end", () => expect(videoLedJump(5000, skip)).toBe(0));
 });

@@ -4,7 +4,14 @@
   import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount } from "../lib/api";
   import type { RemoveWhere } from "../lib/removal";
   import { AudioEngine } from "../lib/audioEngine";
-  import { cutSeekAhead, SEEK_LATENCY_START_MS, seekLatency, videoCorrection, type Segment } from "../lib/playSchedule";
+  import {
+    cutSeekAhead,
+    SEEK_LATENCY_START_MS,
+    seekLatency,
+    videoCorrection,
+    videoLedJump,
+    type Segment,
+  } from "../lib/playSchedule";
   import { exportFileName, hueOf } from "../lib/format";
   import { frameUrl, previewIndex } from "../lib/filmstrip";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
@@ -13,6 +20,7 @@
     keptLength,
     keptRanges,
     piecesFromRanges,
+    playFrom,
     removedRanges,
     sameRanges,
     splitAt,
@@ -46,6 +54,8 @@
   const engine = new AudioEngine();
   /** The tracks are decoded (or failed): playback can start and the sliders apply. */
   let audioReady = $state(false);
+  /** The audio engine can't play at all: the video plays without sound, on its own clock. */
+  let silent = false;
   /** The editor was closed: a load finishing late must not toast. */
   let closed = false;
 
@@ -210,7 +220,17 @@
 
   async function loadAudio(d: EditorData) {
     const tracks = audioTracks(d);
-    const failed = await engine.load(tracks);
+    let failed: string[];
+    try {
+      failed = await engine.load(tracks);
+    } catch {
+      // No sound at all (e.g. Web Audio isn't available): the video still plays, silently.
+      if (closed) return;
+      silent = true;
+      toast("Couldn't play sound for this clip.", "error");
+      audioReady = true;
+      return;
+    }
     if (closed) return;
     for (const t of tracks) {
       if (failed.includes(t.key)) toast(`Couldn't load the ${t.name} track`, "error");
@@ -249,19 +269,19 @@
   // Playback gain: the sliders' 0–100% is a gain of 0.0–1.0; Master scales every track. A track
   // still loading drops its gain, so these run again once the audio is ready.
   $effect(() => {
-    if (audioReady) engine.setMaster(masterVolume / 100);
+    if (audioReady && !silent) engine.setMaster(masterVolume / 100);
   });
   $effect(() => {
-    if (audioReady) engine.setGain("game", gameVolume / 100);
+    if (audioReady && !silent) engine.setGain("game", gameVolume / 100);
   });
   $effect(() => {
-    if (audioReady) engine.setGain("mic", micVolume / 100);
+    if (audioReady && !silent) engine.setGain("mic", micVolume / 100);
   });
   $effect(() => {
-    if (audioReady) engine.setGain("voice", voiceVolume / 100);
+    if (audioReady && !silent) engine.setGain("voice", voiceVolume / 100);
   });
   $effect(() => {
-    if (!audioReady) return;
+    if (!audioReady || silent) return;
     for (const t of data?.extraTracks ?? []) engine.setGain(`track-${t.index}`, (extraVolumes[t.index] ?? 100) / 100);
   });
 
@@ -398,6 +418,10 @@
   /** Starts the audio at `ms` (or the next kept part) and the video with it. */
   function startPlayback(ms: number) {
     if (!video) return;
+    if (silent) {
+      startSilentPlayback(ms);
+      return;
+    }
     engine.play(ms, playRanges);
     playingRanges = playRanges;
     lastSegment = engine.segment();
@@ -412,6 +436,31 @@
     }
     video.playbackRate = 1;
     video.play().catch(() => {});
+  }
+
+  /** Without sound: the video plays from `ms` (or the next kept part) and `followVideo` leads. */
+  function startSilentPlayback(ms: number) {
+    if (!video) return;
+    playingRanges = playRanges;
+    seekedPastCut = null;
+    playing = true;
+    position = playFrom(ms, playRanges);
+    if (videoCorrection(video.currentTime * 1000, position, seekAverageMs, Infinity)) seekVideo(position);
+    video.playbackRate = 1;
+    video.play().catch(() => {});
+  }
+
+  /** Each frame while playing without sound: the playhead follows the video, which skips cuts and loops. */
+  function followVideo() {
+    if (!video || video.seeking || pendingSeek !== null) return;
+    const ms = video.currentTime * 1000;
+    position = ms;
+    // The video can end a little before the clip's recorded length: loop from there too.
+    const to = video.ended ? playRanges[0].start : videoLedJump(ms, playRanges);
+    if (to === null) return;
+    seekVideo(to);
+    // At the video's end it stopped by itself.
+    if (video.paused) video.play().catch(() => {});
   }
 
   function pause() {
@@ -429,6 +478,10 @@
   /** Each frame while playing: the playhead follows the audio, and the video follows both. */
   function follow() {
     if (!video) return;
+    if (silent) {
+      followVideo();
+      return;
+    }
     const seg = engine.segment();
     const ms = engine.positionMs();
     if (!seg || ms === null) {

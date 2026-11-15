@@ -18,6 +18,10 @@ pub const WIDTH: u32 = 640;
 const COMPLETE_MARKER: &str = "complete";
 const OPENED_MARKER: &str = "opened";
 const STRIP_SUFFIX: &str = "-strip";
+/// How often a running extraction looks at its stop flag.
+const STOP_POLL: std::time::Duration = std::time::Duration::from_millis(20);
+/// How long `Jobs` waits for a stopped job to finish before carrying on.
+const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Where the filmstrip of clip `id` lives: `<cache>/edit/<id>-strip`.
 pub fn strip_dir(cache_dir: &Path, id: &str) -> PathBuf {
@@ -185,18 +189,37 @@ pub fn extract(
         let _ = stderr.read_to_string(&mut text);
         text
     });
+    // Progress lines are read on their own thread, so a stop is noticed within a few
+    // milliseconds even while ffmpeg is quiet (it is niced, and may be slow to print).
+    let stdout = child.stdout.take().expect("piped");
+    let (lines_tx, lines_rx) = std::sync::mpsc::channel::<String>();
+    let stdout_reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(std::result::Result::ok) {
+            if lines_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
     let mut stopped = false;
-    for line in BufReader::new(child.stdout.take().expect("piped")).lines().map_while(std::result::Result::ok) {
+    loop {
         if stop.load(Ordering::SeqCst) {
             stopped = true;
             let _ = child.kill();
             break;
         }
-        if line.starts_with("out_time_us=") {
-            progress(ready_frames(dir));
+        match lines_rx.recv_timeout(STOP_POLL) {
+            Ok(line) => {
+                if line.starts_with("out_time_us=") {
+                    progress(ready_frames(dir));
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
+    drop(lines_rx);
     let status = child.wait()?;
+    let _ = stdout_reader.join();
     let stderr = stderr_reader.join().unwrap_or_default();
     if stopped || stop.load(Ordering::SeqCst) {
         return Err(AppError::ToolFailed { tool: "ffmpeg", detail: "stopped".into() });
@@ -213,39 +236,99 @@ pub fn extract(
     Ok(())
 }
 
+/// Signalled when a job's closure has returned (also if it panicked).
+#[derive(Default)]
+struct Done {
+    finished: std::sync::Mutex<bool>,
+    changed: std::sync::Condvar,
+}
+
+impl Done {
+    fn finish(&self) {
+        *self.finished.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.changed.notify_all();
+    }
+
+    /// Waits until the job finished; false if it didn't within `STOP_WAIT`.
+    fn wait(&self) -> bool {
+        let guard = self.finished.lock().unwrap_or_else(|e| e.into_inner());
+        let (guard, _) = self
+            .changed
+            .wait_timeout_while(guard, STOP_WAIT, |finished| !*finished)
+            .unwrap_or_else(|e| e.into_inner());
+        *guard
+    }
+}
+
+struct Running {
+    id: String,
+    stop: Arc<AtomicBool>,
+    done: Arc<Done>,
+}
+
 /// The one filmstrip extraction that may be running: starting another stops it.
 #[derive(Default)]
 pub struct Jobs {
-    running: std::sync::Mutex<Option<(String, Arc<AtomicBool>)>>,
+    running: std::sync::Mutex<Option<Running>>,
 }
 
 impl Jobs {
-    /// Stops the running job, if any, then runs `run` for clip `id` on a blocking thread. `run`
-    /// should return soon after its flag turns true.
+    /// Stops the running job, if any, then runs `run` for clip `id` on a blocking thread, once
+    /// the stopped job has finished (so two never write the same folder). `run` should return
+    /// soon after its flag turns true.
     pub fn start(&self, id: String, run: impl FnOnce(&AtomicBool) + Send + 'static) {
         let stop = Arc::new(AtomicBool::new(false));
-        if let Some((_, previous)) = self.slot().replace((id, stop.clone())) {
-            previous.store(true, Ordering::Relaxed);
+        let done = Arc::new(Done::default());
+        let previous = self.slot().replace(Running { id, stop: stop.clone(), done: done.clone() });
+        if let Some(previous) = &previous {
+            previous.stop.store(true, Ordering::SeqCst);
         }
-        tauri::async_runtime::spawn_blocking(move || run(&stop));
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Some(previous) = previous {
+                if !previous.done.wait() {
+                    eprintln!("klipt: the previous filmstrip job didn't stop in time");
+                }
+            }
+            // Signals even if `run` panics.
+            struct Finish(Arc<Done>);
+            impl Drop for Finish {
+                fn drop(&mut self) {
+                    self.0.finish();
+                }
+            }
+            let _finish = Finish(done);
+            run(&stop);
+        });
     }
 
-    /// Stops the job of clip `id`, if that is the one running.
+    /// Stops the job of clip `id`, if that is the one running, and waits (a few seconds at most)
+    /// until it has finished, so nothing is still writing its folder when this returns.
+    /// Blocks: call it off the async threads.
     pub fn stop(&self, id: &str) {
-        if let Some((running, stop)) = &*self.slot() {
-            if running == id {
-                stop.store(true, Ordering::Relaxed);
+        let done = match &*self.slot() {
+            Some(running) if running.id == id => {
+                running.stop.store(true, Ordering::SeqCst);
+                running.done.clone()
             }
+            _ => return,
+        };
+        if !done.wait() {
+            eprintln!("klipt: the filmstrip job of clip {id} didn't stop in time");
         }
     }
 
     pub fn stop_all(&self) {
-        if let Some((_, stop)) = &*self.slot() {
-            stop.store(true, Ordering::Relaxed);
-        }
+        let done = match &*self.slot() {
+            Some(running) => {
+                running.stop.store(true, Ordering::SeqCst);
+                running.done.clone()
+            }
+            None => return,
+        };
+        done.wait();
     }
 
-    fn slot(&self) -> std::sync::MutexGuard<'_, Option<(String, Arc<AtomicBool>)>> {
+    fn slot(&self) -> std::sync::MutexGuard<'_, Option<Running>> {
         self.running.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
@@ -356,5 +439,70 @@ mod tests {
         assert!(is_complete(dir.path()));
         assert_eq!(ready_frames(dir.path()), 60);
         assert_eq!(fs::metadata(frame_path(dir.path(), 0)).unwrap().modified().unwrap(), first_modified);
+    }
+
+    #[test]
+    fn a_new_job_waits_for_the_one_it_stops() {
+        let jobs = Jobs::default();
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let l = log.clone();
+        jobs.start("a".into(), move |stop| {
+            started_tx.send(()).unwrap();
+            while !stop.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            l.lock().unwrap().push("a ended");
+        });
+        started_rx.recv().unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let l = log.clone();
+        jobs.start("b".into(), move |_| {
+            l.lock().unwrap().push("b started");
+            done_tx.send(()).unwrap();
+        });
+        done_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert_eq!(*log.lock().unwrap(), vec!["a ended", "b started"]);
+    }
+
+    #[test]
+    fn stopping_another_clip_leaves_the_job_running() {
+        let jobs = Jobs::default();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let seen_stop = Arc::new(AtomicBool::new(false));
+        let (flag, release) = (seen_stop.clone(), Arc::new(AtomicBool::new(false)));
+        let r = release.clone();
+        jobs.start("a".into(), move |stop| {
+            started_tx.send(()).unwrap();
+            while !r.load(Ordering::SeqCst) {
+                flag.store(stop.load(Ordering::SeqCst), Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        });
+        started_rx.recv().unwrap();
+        jobs.stop("other");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(!seen_stop.load(Ordering::SeqCst));
+        release.store(true, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn stop_returns_after_the_job_returned() {
+        let jobs = Jobs::default();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let finished = Arc::new(AtomicBool::new(false));
+        let f = finished.clone();
+        jobs.start("a".into(), move |stop| {
+            started_tx.send(()).unwrap();
+            while !stop.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            f.store(true, Ordering::SeqCst);
+        });
+        started_rx.recv().unwrap();
+        jobs.stop("a");
+        assert!(finished.load(Ordering::SeqCst));
     }
 }

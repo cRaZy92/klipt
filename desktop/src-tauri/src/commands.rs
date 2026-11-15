@@ -620,8 +620,17 @@ pub fn upload_clip(
                     }
                 };
                 // The upload is the end of the clip's editing: its cached audio and strip go.
-                app.state::<crate::filmstrip::Jobs>().stop(&id);
-                editor::remove_edit_cache(&cache_dir, &id);
+                // Waits for the strip's ffmpeg to stop first, so it can't hold files being deleted.
+                let cleanup_app = app.clone();
+                let (cleanup_id, cleanup_cache) = (id.clone(), cache_dir.clone());
+                let cleanup = tauri::async_runtime::spawn_blocking(move || {
+                    cleanup_app.state::<crate::filmstrip::Jobs>().stop(&cleanup_id);
+                    editor::remove_edit_cache(&cleanup_cache, &cleanup_id);
+                })
+                .await;
+                if let Err(e) = cleanup {
+                    eprintln!("klipt: cleanup after the upload of clip {id} failed: {e}");
+                }
                 emit(&app, events::UPLOAD_DONE, serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied }));
             }
             Err(e) => {
@@ -910,8 +919,12 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
 
 /// The editor closed: stops that clip's filmstrip extraction (the frames made so far stay cached).
 #[tauri::command]
-pub fn close_editor(app: AppHandle, id: String) {
-    app.state::<filmstrip::Jobs>().stop(&id);
+pub async fn close_editor(app: AppHandle, id: String) {
+    // `stop` waits for ffmpeg to exit, so it runs off the command thread.
+    let result = tauri::async_runtime::spawn_blocking(move || app.state::<filmstrip::Jobs>().stop(&id)).await;
+    if let Err(e) = result {
+        eprintln!("klipt: can't stop the filmstrip job: {e}");
+    }
 }
 
 fn edit_from(

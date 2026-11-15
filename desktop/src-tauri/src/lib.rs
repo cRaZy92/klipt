@@ -66,12 +66,15 @@ pub fn run() {
             app.manage(state);
             app.manage(commands::Uploads::default());
             app.manage(hotkey::HotkeyStatusState::default());
+            // Development builds start in the tray, like an autostart launch, while
+            // `<app data>/dev-start-hidden` exists: rebuilds don't pop the window over a game.
+            let dev_start_hidden = cfg!(debug_assertions) && data_dir.join("dev-start-hidden").exists();
             // The tray exists before the recorder so its first events reach the icon.
             tray::create(app.handle())?;
             app.manage(recorder::spawn_for_app(app.handle(), data_dir, &settings));
             apply_autostart(app.handle(), settings.start_with_os);
             // The window starts hidden (tauri.conf.json); an autostart launch stays in the tray.
-            if !std::env::args().any(|arg| arg == AUTOSTART_ARG) {
+            if !dev_start_hidden && !std::env::args().any(|arg| arg == AUTOSTART_ARG) {
                 tray::show_main_window(app.handle());
             }
             app.manage(hotkey::start_for_app(app.handle(), hotkey::Keys::from_settings(&settings)));

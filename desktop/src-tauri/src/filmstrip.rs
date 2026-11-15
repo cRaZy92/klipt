@@ -123,6 +123,23 @@ pub fn evict(cache_dir: &Path, cap_bytes: u64, keep_id: &str) {
     }
 }
 
+/// The ffmpeg arguments that write the frames of `input` from frame `start` on into `dir`.
+fn ffmpeg_args(input: &Path, dir: &Path, start: u32) -> Vec<std::ffi::OsString> {
+    let step_ms = 1000 / FRAMES_PER_SECOND as u64;
+    let mut args: Vec<std::ffi::OsString> = ["-nostdin", "-hide_banner", "-loglevel", "error", "-y"].map(Into::into).into();
+    // Two threads for decoding (before `-i`), one for the filters, two for the JPEG encoder: a
+    // background job that leaves the CPU to the game and the editor.
+    args.extend(["-threads", "2", "-filter_threads", "1", "-ss"].map(Into::into));
+    args.push(format!("{:.3}", start as f64 * step_ms as f64 / 1000.0).into());
+    args.extend(["-i".into(), input.into(), "-an".into(), "-vf".into()]);
+    args.push(format!("fps={FRAMES_PER_SECOND},scale={WIDTH}:-2").into());
+    args.extend(["-q:v", "5", "-start_number"].map(Into::into));
+    args.push(start.to_string().into());
+    args.extend(["-threads", "2", "-progress", "pipe:1", "-nostats"].map(Into::into));
+    args.push(dir.join("%06d.jpg").into());
+    args
+}
+
 /// Extracts the filmstrip of `input` into `dir` at the lowest CPU priority, continuing after the
 /// frames already there (the half-written trailing one is deleted first). `progress` gets the
 /// number of readable frames as ffmpeg advances; `stop` kills ffmpeg (returns "stopped"). Writes
@@ -142,24 +159,13 @@ pub fn extract(
     let start = ready_frames(dir);
     // Not counted by `ready_frames`, so possibly half-written; ffmpeg rewrites it.
     let _ = fs::remove_file(frame_path(dir, start));
-    let step_ms = 1000 / FRAMES_PER_SECOND as u64;
     if start >= expected_frames(duration_ms) {
         fs::write(dir.join(COMPLETE_MARKER), b"")?;
         return Ok(());
     }
 
     let mut command = Command::new(&tools.ffmpeg);
-    command
-        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-ss"])
-        .arg(format!("{:.3}", start as f64 * step_ms as f64 / 1000.0))
-        .arg("-i")
-        .arg(input)
-        .args(["-an", "-vf"])
-        .arg(format!("fps={FRAMES_PER_SECOND},scale={WIDTH}:-2"))
-        .args(["-q:v", "5", "-start_number"])
-        .arg(start.to_string())
-        .args(["-threads", "2", "-progress", "pipe:1", "-nostats"])
-        .arg(dir.join("%06d.jpg"));
+    command.args(ffmpeg_args(input, dir, start));
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
@@ -224,7 +230,16 @@ pub fn extract(
     if stopped || stop.load(Ordering::SeqCst) {
         return Err(AppError::ToolFailed { tool: "ffmpeg", detail: "stopped".into() });
     }
-    if !status.success() || !frame_path(dir, start).exists() {
+    // No new frame after a resume: the strip had already reached the video's end (the clip can be
+    // recorded as a little longer than its video). ffmpeg fails on an empty output, so its status
+    // can't tell this apart; a run from frame 0 that wrote nothing is a real failure.
+    let wrote_nothing = !frame_path(dir, start).exists();
+    if wrote_nothing && (status.success() || start > 0) {
+        fs::write(dir.join(COMPLETE_MARKER), b"")?;
+        progress(ready_frames(dir));
+        return Ok(());
+    }
+    if !status.success() || wrote_nothing {
         let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
         return Err(AppError::ToolFailed {
             tool: "ffmpeg",
@@ -404,6 +419,36 @@ mod tests {
         evict(cache.path(), 150, "");
         assert!(!strip_dir(cache.path(), "old").exists());
         assert!(strip_dir(cache.path(), "new").exists());
+    }
+
+    /// The value right after `flag` in `args`, and where `flag` is.
+    fn arg_after(args: &[std::ffi::OsString], flag: &str, from: usize) -> Option<(usize, String)> {
+        let i = args.iter().skip(from).position(|a| a == flag)? + from;
+        Some((i, args.get(i + 1)?.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn ffmpeg_limits_decoding_and_filtering_threads_too() {
+        let args = ffmpeg_args(Path::new("in.mp4"), Path::new("strip"), 0);
+        let input = args.iter().position(|a| a == "-i").unwrap();
+        let (before_input, decode) = arg_after(&args, "-threads", 0).unwrap();
+        assert!(before_input < input, "no -threads before -i: {args:?}");
+        assert_eq!(decode, "2");
+        let (_, encode) = arg_after(&args, "-threads", input).expect("no -threads after -i");
+        assert_eq!(encode, "2");
+        let (_, filter) = arg_after(&args, "-filter_threads", 0).expect("no -filter_threads");
+        assert_eq!(filter, "1");
+    }
+
+    #[test]
+    fn extract_completes_a_strip_that_stopped_at_the_last_frame() {
+        // The clip is recorded as longer than its video (7 s vs 6 s): the strip stopped after the
+        // video's last frame, and resuming there makes ffmpeg write nothing new.
+        let dir = strip_with_frames(&(0..=60).collect::<Vec<_>>());
+        let stop = AtomicBool::new(false);
+        extract(&crate::ffmpeg::tests::tools(), crate::ffmpeg::tests::fixture(), dir.path(), 7000, &stop, |_| {}).unwrap();
+        assert!(is_complete(dir.path()));
+        assert_eq!(ready_frames(dir.path()), 60);
     }
 
     #[test]

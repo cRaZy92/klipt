@@ -471,14 +471,22 @@
   }
 
   function togglePlay() {
-    if (!video || mediaError || !audioReady) return;
+    if (!video) return;
+    // Pausing works even once the video failed, so the sound can always be stopped.
     if (playing) {
       pause();
       return;
     }
+    if (mediaError || !audioReady) return;
     // At the end of the last part (or within a frame or so of it): start over from the first.
     const last = playRanges[playRanges.length - 1];
     startPlayback(position >= last.end - 50 ? playRanges[0].start : position);
+  }
+
+  /** The video can't be played: stop the sound too, or it would play on with no way to pause. */
+  function onmediaerror() {
+    mediaError = true;
+    if (playing) pause();
   }
 
   function onseeked() {
@@ -705,7 +713,7 @@
         playsinline
         preload="auto"
         onseeked={onseeked}
-        onerror={() => (mediaError = true)}
+        onerror={onmediaerror}
         onclick={togglePlay}
         {onloadedmetadata}
         style:filter={previewBlur}
@@ -727,7 +735,7 @@
         <button
           class="btn btn-primary btn-icon play"
           onclick={togglePlay}
-          disabled={mediaError || !audioReady}
+          disabled={(mediaError || !audioReady) && !playing}
           aria-label={playing ? "Pause" : "Play"}
           title={!audioReady ? "Loading audio…" : playing ? "Pause (Space)" : "Play (Space)"}
         >

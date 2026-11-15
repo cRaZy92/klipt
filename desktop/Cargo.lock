@@ -2419,6 +2419,7 @@ dependencies = [
  "dunce",
  "futures-util",
  "gethostname",
+ "libc",
  "nix",
  "reqwest",
  "rodio",

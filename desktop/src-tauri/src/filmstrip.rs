@@ -2,8 +2,14 @@
 //! so the timeline can show frames and scrub without decoding the video.
 
 use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
+
+use crate::errors::{AppError, Result};
+use crate::ffmpeg::Tools;
 
 pub const FRAMES_PER_SECOND: u32 = 10;
 pub const WIDTH: u32 = 640;
@@ -112,9 +118,104 @@ pub fn evict(cache_dir: &Path, cap_bytes: u64, keep_id: &str) {
     }
 }
 
+/// Extracts the filmstrip of `input` into `dir` at the lowest CPU priority, continuing after the
+/// frames already there (the half-written trailing one is deleted first). `progress` gets the
+/// number of readable frames as ffmpeg advances; `stop` kills ffmpeg (returns "stopped"). Writes
+/// the `complete` marker on success.
+pub fn extract(
+    tools: &Tools,
+    input: &Path,
+    dir: &Path,
+    duration_ms: u64,
+    stop: &AtomicBool,
+    mut progress: impl FnMut(u32),
+) -> Result<()> {
+    fs::create_dir_all(dir)?;
+    if is_complete(dir) {
+        return Ok(());
+    }
+    let start = ready_frames(dir);
+    // Not counted by `ready_frames`, so possibly half-written; ffmpeg rewrites it.
+    let _ = fs::remove_file(frame_path(dir, start));
+    let step_ms = 1000 / FRAMES_PER_SECOND as u64;
+    if start >= expected_frames(duration_ms) {
+        fs::write(dir.join(COMPLETE_MARKER), b"")?;
+        return Ok(());
+    }
+
+    let mut command = Command::new(&tools.ffmpeg);
+    command
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-ss"])
+        .arg(format!("{:.3}", start as f64 * step_ms as f64 / 1000.0))
+        .arg("-i")
+        .arg(input)
+        .args(["-an", "-vf"])
+        .arg(format!("fps={FRAMES_PER_SECOND},scale={WIDTH}:-2"))
+        .args(["-q:v", "5", "-start_number"])
+        .arg(start.to_string())
+        .args(["-threads", "2", "-progress", "pipe:1", "-nostats"])
+        .arg(dir.join("%06d.jpg"));
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: setpriority is async-signal-safe, so it is fine between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                libc::setpriority(libc::PRIO_PROCESS, 0, 19);
+                Ok(())
+            });
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const IDLE_PRIORITY_CLASS: u32 = 0x40;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(IDLE_PRIORITY_CLASS | CREATE_NO_WINDOW);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| AppError::ToolFailed { tool: "ffmpeg", detail: format!("can't start {}: {e}", tools.ffmpeg.display()) })?;
+    // stderr on its own thread, so a chatty ffmpeg can't block on a full pipe.
+    let mut stderr = child.stderr.take().expect("piped");
+    let stderr_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
+    let mut stopped = false;
+    for line in BufReader::new(child.stdout.take().expect("piped")).lines().map_while(std::result::Result::ok) {
+        if stop.load(Ordering::SeqCst) {
+            stopped = true;
+            let _ = child.kill();
+            break;
+        }
+        if line.starts_with("out_time_us=") {
+            progress(ready_frames(dir));
+        }
+    }
+    let status = child.wait()?;
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if stopped || stop.load(Ordering::SeqCst) {
+        return Err(AppError::ToolFailed { tool: "ffmpeg", detail: "stopped".into() });
+    }
+    if !status.success() || !frame_path(dir, start).exists() {
+        let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
+        return Err(AppError::ToolFailed {
+            tool: "ffmpeg",
+            detail: format!("exited with {status}: {}", tail.into_iter().rev().collect::<Vec<_>>().join(" | ")),
+        });
+    }
+    fs::write(dir.join(COMPLETE_MARKER), b"")?;
+    progress(ready_frames(dir));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     fn info(id: &str, bytes: u64, secs: u64) -> StripInfo {
@@ -182,5 +283,40 @@ mod tests {
         evict(cache.path(), 150, "");
         assert!(!strip_dir(cache.path(), "old").exists());
         assert!(strip_dir(cache.path(), "new").exists());
+    }
+
+    #[test]
+    fn extract_writes_ten_frames_per_second() {
+        let dir = tempfile::tempdir().unwrap();
+        let stop = AtomicBool::new(false);
+        extract(&crate::ffmpeg::tests::tools(), crate::ffmpeg::tests::fixture(), dir.path(), 6000, &stop, |_| {}).unwrap();
+        assert_eq!(ready_frames(dir.path()), expected_frames(6000));
+        assert_eq!(ready_frames(dir.path()), 60);
+        assert!(is_complete(dir.path()));
+        let probe = crate::ffmpeg::probe(&crate::ffmpeg::tests::tools(), &frame_path(dir.path(), 0)).unwrap();
+        assert_eq!(probe.width, 640);
+    }
+
+    #[test]
+    fn extract_resumes_after_stop() {
+        let tools = crate::ffmpeg::tests::tools();
+        let dir = tempfile::tempdir().unwrap();
+        let stop = AtomicBool::new(false);
+        let result = extract(&tools, crate::ffmpeg::tests::fixture(), dir.path(), 6000, &stop, |count| {
+            if count >= 10 {
+                stop.store(true, Ordering::SeqCst);
+            }
+        });
+        assert!(result.is_err());
+        assert!(!is_complete(dir.path()));
+        let partial = ready_frames(dir.path());
+        assert!((10..60).contains(&partial), "partial = {partial}");
+        let first_modified = fs::metadata(frame_path(dir.path(), 0)).unwrap().modified().unwrap();
+
+        let stop = AtomicBool::new(false);
+        extract(&tools, crate::ffmpeg::tests::fixture(), dir.path(), 6000, &stop, |_| {}).unwrap();
+        assert!(is_complete(dir.path()));
+        assert_eq!(ready_frames(dir.path()), 60);
+        assert_eq!(fs::metadata(frame_path(dir.path(), 0)).unwrap().modified().unwrap(), first_modified);
     }
 }

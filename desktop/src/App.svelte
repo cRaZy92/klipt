@@ -131,6 +131,9 @@
 
   async function logout() {
     accountMenu = false;
+    // Logging out on purpose starts the next login on Clips (an expired session keeps `view`).
+    viewDirty = false;
+    view = { name: "library" };
     stopUploadsForLogout();
     try {
       await api.logout();

@@ -25,6 +25,12 @@ function fakeContext() {
       gains.push(g);
       return g;
     },
+    elementSources: [] as { el: unknown; connected: unknown }[],
+    createMediaElementSource(el: unknown) {
+      const n = { el, connected: null as unknown, connect(to: unknown) { n.connected = to; } };
+      ctx.elementSources.push(n);
+      return n;
+    },
     createBufferSource() {
       const s = {
         buffer: null as { url: string } | null,
@@ -122,5 +128,20 @@ describe("AudioEngine", () => {
     expect(engine.nextSegment()).toEqual({ at: 0.5, from: 3000, to: 5000 });
     ctx.currentTime = 10.05 + 0.75;
     expect(engine.nextSegment()).toBeNull();
+  });
+});
+
+describe("AudioEngine.silence", () => {
+  it("takes over an element's sound once and sends it into a muted node", () => {
+    const f = fakeContext();
+    const engine = new AudioEngine(() => f.ctx as unknown as AudioContext);
+    const video = { tag: "video" } as unknown as HTMLMediaElement;
+    engine.silence(video);
+    engine.silence(video);
+    const sources = (f.ctx as unknown as { elementSources: { el: unknown; connected: { gain: { value: number } } }[] })
+      .elementSources;
+    expect(sources).toHaveLength(1);
+    expect(sources[0].el).toBe(video);
+    expect(sources[0].connected.gain.value).toBe(0);
   });
 });

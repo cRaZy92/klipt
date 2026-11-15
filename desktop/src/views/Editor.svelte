@@ -236,6 +236,13 @@
     for (const t of tracks) {
       if (failed.includes(t.key)) toast(`Couldn't load the ${t.name} track`, "error");
     }
+    // The video's own sound goes into the engine (muted there), so it opens no system stream of
+    // its own: a muted one made PipeWire start Klipt's other streams muted too.
+    try {
+      if (video) engine.silence(video);
+    } catch (e) {
+      console.warn("klipt: can't take over the video's sound", e);
+    }
     audioReady = true;
   }
 

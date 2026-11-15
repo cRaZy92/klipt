@@ -6,6 +6,7 @@
   import { AudioEngine } from "../lib/audioEngine";
   import {
     cutSeekAhead,
+    schedule,
     SEEK_LATENCY_START_MS,
     seekLatency,
     videoCorrection,
@@ -260,6 +261,7 @@
       stopProgress();
       stopFilmstrip();
       clearTimeout(settleTimer);
+      clearTimeout(startTimer);
       video?.pause();
       engine.close();
       api.closeEditor(clip.id).catch(() => {});
@@ -422,21 +424,43 @@
       startSilentPlayback(ms);
       return;
     }
-    engine.play(ms, playRanges);
+    // The picture starts first; the sound joins once the video really plays (`beginAudio`), from
+    // the video's own position. Started together, nothing has to catch up: on WebKitGTK the video
+    // takes a while to get going, and the audio running ahead meanwhile set off correction seeks
+    // that each flashed black.
     playingRanges = playRanges;
-    lastSegment = engine.segment();
+    lastSegment = null;
     seekedPastCut = null;
     playing = true;
-    if (lastSegment) {
-      position = lastSegment.from;
-      // Off by more than the drift the video catches up on by itself: move it.
-      if (videoCorrection(video.currentTime * 1000, lastSegment.from, seekAverageMs, lastSegment.to)) {
-        seekVideo(lastSegment.from);
-      }
-    }
+    const from = schedule(ms, playRanges)[0]?.from ?? ms;
+    position = from;
+    if (Math.abs(video.currentTime * 1000 - from) > 80) seekVideo(from);
     video.playbackRate = 1;
+    starting = true;
+    clearTimeout(startTimer);
+    startTimer = setTimeout(beginAudio, START_TIMEOUT_MS);
     video.play().catch(() => {});
     showVideo();
+  }
+
+  /** Playback was asked for and the video is getting going; the sound hasn't started yet. */
+  let starting = false;
+  let startTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The sound starts anyway if the video hasn't said it's playing by then. */
+  const START_TIMEOUT_MS = 700;
+
+  /** The video plays: the sound starts from where the picture is. */
+  function beginAudio() {
+    if (!starting || !video) return;
+    starting = false;
+    clearTimeout(startTimer);
+    engine.play(video.currentTime * 1000, playingRanges);
+    lastSegment = engine.segment();
+    if (lastSegment) position = lastSegment.from;
+  }
+
+  function onplaying() {
+    if (starting && !video?.seeking) beginAudio();
   }
 
   /** Hides a scrub picture still over the video, unless a seek is still bringing the video there. */
@@ -471,7 +495,10 @@
   }
 
   function pause() {
-    position = engine.positionMs() ?? position;
+    const wasStarting = starting;
+    starting = false;
+    clearTimeout(startTimer);
+    position = wasStarting ? position : (engine.positionMs() ?? position);
     engine.stop();
     playing = false;
     lastSegment = null;
@@ -491,6 +518,11 @@
     if (!video) return;
     if (silent) {
       followVideo();
+      return;
+    }
+    // Waiting for the video to get going: the playhead shows the picture's time meanwhile.
+    if (starting) {
+      if (!video.seeking) position = video.currentTime * 1000;
       return;
     }
     const seg = engine.segment();
@@ -568,6 +600,8 @@
     // Unfreeze only once the new frame is actually on screen (WebKitGTK paints it after
     // `seeked`); fall back to a short delay where requestVideoFrameCallback is missing.
     unfreezeAfterPaint();
+    // Playback was waiting for this seek (a loop or a jump while playing): the sound joins now.
+    if (starting && video && !video.paused) beginAudio();
   }
 
   function onloadedmetadata() {
@@ -779,6 +813,7 @@
         playsinline
         preload="auto"
         onseeked={onseeked}
+        onplaying={onplaying}
         onerror={onmediaerror}
         onclick={togglePlay}
         {onloadedmetadata}

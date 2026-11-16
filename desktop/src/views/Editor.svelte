@@ -29,6 +29,7 @@
     type Piece,
   } from "../lib/cuts";
   import { formatTenths, stepMs } from "../lib/timecode";
+  import { toggleMute } from "../lib/lanes";
   import { menu } from "../lib/a11y";
   import { Autosave, type SaveStatus } from "../lib/autosave";
   import { EditHistory } from "../lib/editHistory";
@@ -38,6 +39,7 @@
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
   import Icon from "../components/Icon.svelte";
   import Modal from "../components/Modal.svelte";
+  import TrackLanes from "../components/TrackLanes.svelte";
   import TrimBar from "../components/TrimBar.svelte";
   import UploadDialog from "../components/UploadDialog.svelte";
 
@@ -80,6 +82,8 @@
   let masterVolume = $state(100);
   /** The other audio tracks' sliders (0–100), by track index. */
   let extraVolumes = $state<Record<number, number>>({});
+  /** A muted track's level before it was muted, by engine key (editor UI only, not saved). */
+  let unmuteLevels = $state<Record<string, number>>({});
   /** "Blur video": uploads and exports blur the picture (a clip where only the sound matters). */
   let blurVideo = $state(false);
   /** The thumbnail's frame; null = automatic. */
@@ -312,14 +316,69 @@
     }
   }
 
-  /** The engine's key for each track, with the name the "couldn't load" toast uses. */
-  function audioTracks(d: EditorData): { key: string; url: string; name: string }[] {
+  /**
+   * The engine's key for each track, with the name the "couldn't load" toast uses and its lane's
+   * label.
+   */
+  function audioTracks(d: EditorData): { key: string; url: string; name: string; label: string }[] {
     return [
-      { key: "game", url: d.gameAudioUrl, name: "game" },
-      ...(d.micAudioUrl ? [{ key: "mic", url: d.micAudioUrl, name: "microphone" }] : []),
-      ...(d.voiceAudioUrl ? [{ key: "voice", url: d.voiceAudioUrl, name: "voice chat" }] : []),
-      ...d.extraTracks.map((t) => ({ key: `track-${t.index}`, url: t.audioUrl, name: `track ${t.index + 1}` })),
+      // An imported clip with more tracks: Klipt can't know which one is the game.
+      { key: "game", url: d.gameAudioUrl, name: "game", label: d.extraTracks.length > 0 ? "Track 1" : "Game" },
+      ...(d.micAudioUrl ? [{ key: "mic", url: d.micAudioUrl, name: "microphone", label: "Mic" }] : []),
+      ...(d.voiceAudioUrl ? [{ key: "voice", url: d.voiceAudioUrl, name: "voice chat", label: "Voice chat" }] : []),
+      ...d.extraTracks.map((t) => ({
+        key: `track-${t.index}`,
+        url: t.audioUrl,
+        name: `track ${t.index + 1}`,
+        label: `Track ${t.index + 1}`,
+      })),
     ];
+  }
+
+  /** How many waveform buckets the lanes get (each lane fits them to its width in pixels). */
+  const PEAK_BUCKETS = 4096;
+  /** Each track's waveform, once the audio is decoded (null for a track that failed). */
+  const lanePeaks = $derived<Record<string, Float32Array | null>>(
+    audioReady && data ? Object.fromEntries(audioTracks(data).map((t) => [t.key, engine.peaks(t.key, PEAK_BUCKETS)])) : {},
+  );
+
+  /** A track's slider (0–100) by its engine key. */
+  function volumeOf(key: string): number {
+    if (key === "game") return gameVolume;
+    if (key === "mic") return micVolume;
+    if (key === "voice") return voiceVolume;
+    return extraVolumes[Number(key.slice("track-".length))] ?? 100;
+  }
+
+  function setVolume(key: string, volume: number) {
+    if (key === "game") gameVolume = volume;
+    else if (key === "mic") micVolume = volume;
+    else if (key === "voice") voiceVolume = volume;
+    else extraVolumes[Number(key.slice("track-".length))] = volume;
+  }
+
+  const laneTracks = $derived(
+    data
+      ? audioTracks(data).map((t) => {
+          const volume = volumeOf(t.key);
+          return { key: t.key, name: t.label, peaks: lanePeaks[t.key] ?? null, volume, muted: volume === 0 };
+        })
+      : [],
+  );
+
+  /** A lane's slider moved: a level set by hand replaces the one a mute remembered. */
+  function onvolume(key: string, volume: number) {
+    if (uploading) return;
+    delete unmuteLevels[key];
+    setVolume(key, volume);
+  }
+
+  function onmute(key: string) {
+    if (uploading) return;
+    const next = toggleMute(volumeOf(key), unmuteLevels[key] ?? null);
+    if (next.remembered === null) delete unmuteLevels[key];
+    else unmuteLevels[key] = next.remembered;
+    setVolume(key, next.volume);
   }
 
   async function loadAudio(d: EditorData) {
@@ -1070,21 +1129,44 @@
           <Icon name="scissors" size={15} /> Split
         </button>
       </div>
-      <TrimBar
+      <TrackLanes
         {duration}
-        bind:start={trim.start}
-        bind:end={trim.end}
-        bind:thumb
-        bind:pieces
-        kept={keptLength(pieces, trim)}
+        {trim}
+        {pieces}
         {position}
-        strip={data ? { dir: data.filmstrip.dir, ready: stripFrames } : null}
+        tracks={laneTracks}
+        master={masterVolume}
+        blur={blurVideo}
+        locked={uploading}
+        {onvolume}
+        {onmute}
+        onmaster={(v) => {
+          if (!uploading) masterVolume = v;
+        }}
+        onblur={(b) => {
+          if (!uploading) blurVideo = b;
+        }}
         onseek={seek}
-        {onhandlemove}
         {onscrubstart}
         {onscrubend}
-        locked={uploading}
-      />
+      >
+        {#snippet video()}
+          <TrimBar
+            {duration}
+            bind:start={trim.start}
+            bind:end={trim.end}
+            bind:thumb
+            bind:pieces
+            {position}
+            strip={data ? { dir: data.filmstrip.dir, ready: stripFrames } : null}
+            onseek={seek}
+            {onhandlemove}
+            {onscrubstart}
+            {onscrubend}
+            locked={uploading}
+          />
+        {/snippet}
+      </TrackLanes>
       <p class="hints">
         <span><kbd>Space</kbd> play</span>
         <span><kbd>S</kbd> split</span>
@@ -1092,98 +1174,6 @@
         <span><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> one second</span>
         <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
       </p>
-    </div>
-
-    <div class="panel">
-      <div class="mixer">
-        <label class="blur-toggle" title="For clips where only the sound matters: uploads and exports blur the picture">
-          <input type="checkbox" bind:checked={blurVideo} disabled={uploading} />
-          <span class="switch" aria-hidden="true"></span>
-          Blur video
-        </label>
-        <label class="volume master" title="The whole clip: every track together">
-          <span class="vol-label"><Icon name="volume" size={17} /> Master</span>
-          <input
-            class="range"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            bind:value={masterVolume}
-            disabled={uploading}
-            style:--fill="{masterVolume}%"
-            aria-label="Master volume"
-          />
-          <output>{masterVolume}%</output>
-        </label>
-        <label class="volume">
-          <!-- An imported clip with more tracks: Klipt can't know which one is the game. -->
-          <span class="vol-label"><Icon name="volume" size={17} /> {data.extraTracks.length > 0 ? "Track 1" : "Game"}</span>
-          <input
-            class="range"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            bind:value={gameVolume}
-            disabled={uploading}
-            style:--fill="{gameVolume}%"
-            aria-label={data.extraTracks.length > 0 ? "Track 1 volume" : "Game volume"}
-          />
-          <output>{gameVolume}%</output>
-        </label>
-        {#if data.micAudioPath}
-          <label class="volume">
-            <span class="vol-label"><Icon name="mic" size={17} /> Mic</span>
-            <input
-              class="range"
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              bind:value={micVolume}
-              disabled={uploading}
-              style:--fill="{micVolume}%"
-              aria-label="Mic volume"
-            />
-            <output>{micVolume}%</output>
-          </label>
-        {/if}
-        {#if data.voiceAudioPath}
-          <label class="volume" title="Discord and other voice chat. Turn it down to share the clip without your friends' voices.">
-            <span class="vol-label"><Icon name="users" size={17} /> Voice chat</span>
-            <input
-              class="range"
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              bind:value={voiceVolume}
-              disabled={uploading}
-              style:--fill="{voiceVolume}%"
-              aria-label="Voice chat volume"
-            />
-            <output>{voiceVolume}%</output>
-          </label>
-        {/if}
-        {#each data.extraTracks as t (t.index)}
-          <label class="volume">
-            <span class="vol-label"><Icon name="volume" size={17} /> Track {t.index + 1}</span>
-            <input
-              class="range"
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              bind:value={extraVolumes[t.index]}
-              disabled={uploading}
-              style:--fill="{extraVolumes[t.index]}%"
-              aria-label="Track {t.index + 1} volume"
-            />
-            <output>{extraVolumes[t.index]}%</output>
-          </label>
-        {/each}
-      </div>
     </div>
   {/if}
 </section>
@@ -1498,124 +1488,5 @@
     font: inherit;
     font-size: 0.74rem;
     text-align: center;
-  }
-
-  .timeline :global(.trimbar) {
-    min-width: 0;
-  }
-
-  .panel {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem 2rem;
-    flex: none;
-    padding: 0.85rem 0.9rem 0.85rem 1.2rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--surface);
-  }
-
-  .mixer {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem 2.25rem;
-  }
-
-  .blur-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding-right: 2.25rem;
-    border-right: 1px solid var(--border);
-    font-weight: 600;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-
-  /* While the clip uploads, the edit can't change. */
-  .blur-toggle:has(input:disabled),
-  .volume:has(input:disabled) {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-
-  .blur-toggle input {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .switch {
-    position: relative;
-    flex: none;
-    width: 2.1rem;
-    height: 1.2rem;
-    border-radius: 999px;
-    background: var(--surface-3);
-    transition: background 0.15s;
-  }
-
-  .switch::after {
-    content: "";
-    position: absolute;
-    top: 0.15rem;
-    left: 0.15rem;
-    width: 0.9rem;
-    height: 0.9rem;
-    border-radius: 50%;
-    background: var(--text-muted);
-    transition:
-      transform 0.15s var(--ease-out),
-      background 0.15s;
-  }
-
-  .blur-toggle input:checked + .switch {
-    background: var(--accent);
-  }
-
-  .blur-toggle input:checked + .switch::after {
-    background: #fff;
-    transform: translateX(0.9rem);
-  }
-
-  .blur-toggle input:focus-visible + .switch {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
-  /* Master sits apart from the per-track sliders. */
-  .volume.master {
-    padding-right: 2.25rem;
-    border-right: 1px solid var(--border);
-  }
-
-  .volume {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    font-weight: 600;
-  }
-
-  .vol-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    white-space: nowrap;
-    width: 4.6rem;
-    color: var(--text-muted);
-    font-size: 0.9rem;
-  }
-
-  .volume .range {
-    width: 10rem;
-  }
-
-  output {
-    width: 2.8rem;
-    font-size: 0.88rem;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
   }
 </style>

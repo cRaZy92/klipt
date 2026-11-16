@@ -13,7 +13,6 @@
     end = $bindable(),
     thumb = $bindable(null),
     pieces = $bindable(),
-    kept,
     position,
     strip = null,
     onseek,
@@ -32,8 +31,6 @@
     thumb?: number | null;
     /** The timeline split into kept and removed pieces (covering the whole clip). */
     pieces: Piece[];
-    /** How long the kept parts inside the trim are, in ms. */
-    kept: number;
     /** The playhead in ms. */
     position: number;
     /** The clip's filmstrip folder and how many of its pictures exist so far. */
@@ -349,12 +346,6 @@
       <Icon name="image" size={13} />
     </div>
   </div>
-
-  <div class="labels">
-    <span>{formatClock(start)}</span>
-    <span class="length">Clip length <strong>{formatClock(kept)}</strong></span>
-    <span>{formatClock(end)}</span>
-  </div>
 </div>
 
 <style>
@@ -365,10 +356,8 @@
     cursor: not-allowed;
   }
 
+  /* Room above the track for the thumbnail marker's tab. */
   .trimbar {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
     padding-top: 1.6rem;
     user-select: none;
   }
@@ -534,6 +523,7 @@
   .track {
     position: relative;
     height: 3.5rem;
+    /* TrackLanes insets its lanes as far (--inset), so they line up with this track. */
     margin: 0 0.9rem;
     border-radius: var(--radius-sm);
     background:
@@ -651,25 +641,5 @@
     border-radius: 1px;
     background: rgba(255, 255, 255, 0.9);
     box-shadow: 3px 0 0 -0.5px rgba(255, 255, 255, 0.35);
-  }
-
-  .labels {
-    display: flex;
-    justify-content: space-between;
-    padding: 0 0.9rem;
-    color: var(--text-muted);
-    font-size: 0.82rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .length {
-    padding: 0.05rem 0.55rem;
-    border-radius: 999px;
-    background: var(--accent-softer);
-  }
-
-  .length strong {
-    color: var(--text);
-    font-weight: 650;
   }
 </style>

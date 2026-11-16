@@ -92,3 +92,20 @@ export function videoLedJump(ms: number, ranges: TrimRange[]): number | null {
   if (to === ms || (to > ms && to - ms <= 50)) return null;
   return to;
 }
+
+/** The audio engine starts what it's asked to play this long after it's asked (ms). */
+export const AUDIO_LEAD_MS = 50;
+
+/**
+ * Whether the video, asked to play from `startMs`, is really playing now (at `videoMs`): its
+ * position has moved on and it isn't seeking. WebKitGTK sometimes never sends `playing` (e.g.
+ * pressed right after a scrub), so the editor watches the position instead of waiting for it.
+ */
+export function videoStarted(startMs: number, videoMs: number, seeking: boolean): boolean {
+  return !seeking && videoMs > startMs + 1;
+}
+
+/** Where the sound starts so it lines up with a video now at `videoMs` (see AUDIO_LEAD_MS). */
+export function audioStartMs(videoMs: number): number {
+  return videoMs + AUDIO_LEAD_MS;
+}

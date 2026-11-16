@@ -8,6 +8,7 @@ import {
   videoCorrection,
   videoLedJump,
 } from "./playSchedule";
+import { AUDIO_LEAD_MS, audioStartMs, videoStarted } from "./playSchedule";
 
 const skip = [
   { start: 0, end: 2000 },
@@ -97,4 +98,23 @@ describe("videoLedJump", () => {
   it("jumps over a removed part", () => expect(videoLedJump(2100, skip)).toBe(3000));
   it("doesn't jump from just before a part's start", () => expect(videoLedJump(2960, skip)).toBeNull());
   it("loops from the end", () => expect(videoLedJump(5000, skip)).toBe(0));
+});
+
+describe("videoStarted", () => {
+  it("is false while the video seeks or hasn't moved past where it started", () => {
+    expect(videoStarted(5000, 5000, false)).toBe(false);
+    expect(videoStarted(5000, 5000.5, false)).toBe(false);
+    expect(videoStarted(5000, 5040, true)).toBe(false);
+  });
+
+  it("is true once the video's position moves on", () => {
+    expect(videoStarted(5000, 5017, false)).toBe(true);
+  });
+});
+
+describe("audioStartMs", () => {
+  it("starts the sound ahead by the engine's start delay, so both line up", () => {
+    expect(audioStartMs(5000)).toBe(5000 + AUDIO_LEAD_MS);
+    expect(AUDIO_LEAD_MS).toBe(50);
+  });
 });

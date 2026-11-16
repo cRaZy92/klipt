@@ -1,11 +1,11 @@
 // Plays every audio track through Web Audio on one clock, skipping removed parts exactly by
 // scheduling each kept part as its own source. The editor follows `positionMs` with the video.
 
-import { clipMsAt, schedule, segmentAt, type Segment } from "./playSchedule";
+import { clipMsAt, schedule, segmentAt, type Segment, AUDIO_LEAD_MS } from "./playSchedule";
 import type { TrimRange } from "./trim";
 import { peaks } from "./waveform";
 
-const LEAD_S = 0.05;
+const LEAD_S = AUDIO_LEAD_MS / 1000;
 
 export class AudioEngine {
   private ctx: AudioContext | null = null;

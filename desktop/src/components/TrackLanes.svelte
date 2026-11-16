@@ -23,12 +23,10 @@
     pieces,
     position,
     tracks,
-    master,
     blur,
     locked = false,
     onvolume,
     onmute,
-    onmaster,
     onblur,
     onseek,
     onscrubstart,
@@ -44,15 +42,12 @@
     position: number;
     /** One lane per audio track, top to bottom. */
     tracks: LaneTrack[];
-    /** The master volume, 0–100. */
-    master: number;
     /** "Blur video" is on. */
     blur: boolean;
     /** The edit can't change now (the clip is uploading or exporting): only the playhead moves. */
     locked?: boolean;
     onvolume: (key: string, volume: number) => void;
     onmute: (key: string) => void;
-    onmaster: (volume: number) => void;
     onblur: (blur: boolean) => void;
     /** The user clicked or dragged on a lane to jump to `ms`. */
     onseek: (ms: number) => void;
@@ -66,8 +61,8 @@
 
   const ticks = $derived(rulerTicks(duration));
   const shading = $derived(laneShading(duration, trim, pieces));
-  /** Ruler, video, one row per track, master: the playhead spans the audio rows. */
-  const rows = $derived(["auto", "auto", ...tracks.map(() => "auto"), "auto"].join(" "));
+  /** Ruler, video, one row per track: the playhead spans the audio rows. */
+  const rows = $derived(["auto", "auto", ...tracks.map(() => "auto")].join(" "));
 
   const level = (v: number) => (v === 0 ? "Off" : `${v}%`);
 
@@ -164,8 +159,8 @@
   </div>
   <div class="lane video">{@render video()}</div>
 
-  {#each tracks as t (t.key)}
-    <div class="label">
+  {#each tracks as t, i (t.key)}
+    <div class="label" class:last={i === tracks.length - 1}>
       <div class="line">
         <span class="name" title={t.name}>{t.name}</span>
         <output>{level(t.volume)}</output>
@@ -196,7 +191,7 @@
         />
       </div>
     </div>
-    <div class="lane audio">
+    <div class="lane audio" class:last={i === tracks.length - 1}>
       <!-- A pointer target for seeking, like the video lane's track; keyboard users seek with the
            player controls and the arrow keys. -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -219,29 +214,6 @@
     </div>
   {/each}
 
-  <div class="label master">
-    <div class="line">
-      <span class="name">Master</span>
-      <output>{level(master)}</output>
-    </div>
-    <div class="line">
-      <span class="mute-space"></span>
-      <input
-        class="range"
-        type="range"
-        min="0"
-        max="100"
-        step="1"
-        value={master}
-        disabled={locked}
-        style:--fill="{master}%"
-        aria-label="Master volume"
-        title="The whole clip: every track together"
-        oninput={(e) => onmaster(Number(e.currentTarget.value))}
-      />
-    </div>
-  </div>
-  <div class="lane master"></div>
 
   {#if tracks.length}
     <div class="playhead-span" style:grid-row="3 / span {tracks.length}" aria-hidden="true">
@@ -406,8 +378,9 @@
     background: var(--bg);
   }
 
-  .lane.master,
-  .label.master {
+  /* The lanes' rounded border closes the last row. */
+  .lane.last,
+  .label.last {
     border-bottom: none;
   }
 

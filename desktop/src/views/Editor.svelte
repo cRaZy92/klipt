@@ -1119,6 +1119,8 @@
 
     <div class="timeline">
       <div class="transport">
+        <span class="transport-side"></span>
+        <div class="transport-main">
         <button class="btn btn-ghost btn-icon" onclick={() => stepBy(-frameMs)} aria-label="Previous frame" title="Previous frame (←)">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M6 5h2v14H6zM18.2 5.6v12.8a.7.7 0 0 1-1.1.6L9.4 12.6a.7.7 0 0 1 0-1.2l7.7-6.4a.7.7 0 0 1 1.1.6z" />
@@ -1154,6 +1156,25 @@
         >
           <Icon name="scissors" size={15} /> Split
         </button>
+        </div>
+        <label class="master" title="The whole clip: every track together">
+          <Icon name="volume" size={17} />
+          <input
+            class="range"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={masterVolume}
+            disabled={editLocked}
+            style:--fill="{masterVolume}%"
+            aria-label="Master volume"
+            oninput={(e) => {
+              if (!editLocked) masterVolume = Number(e.currentTarget.value);
+            }}
+          />
+          <output>{masterVolume === 0 ? "Off" : `${masterVolume}%`}</output>
+        </label>
       </div>
       <TrackLanes
         {duration}
@@ -1161,14 +1182,10 @@
         {pieces}
         {position}
         tracks={laneTracks}
-        master={masterVolume}
         blur={blurVideo}
         locked={editLocked}
         {onvolume}
         {onmute}
-        onmaster={(v) => {
-          if (!editLocked) masterVolume = v;
-        }}
         onblur={(b) => {
           if (!editLocked) blurVideo = b;
         }}
@@ -1465,12 +1482,38 @@
     flex: none;
   }
 
+  /* Controls centred under the video; the master volume at the right. */
   .transport {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0.9rem;
+  }
+
+  .transport-main {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem 0.9rem;
     flex-wrap: wrap;
+  }
+
+  .master {
+    justify-self: end;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-muted);
+  }
+
+  .master .range {
+    width: 8rem;
+  }
+
+  .master output {
+    min-width: 2.6rem;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
   }
 
   .play {

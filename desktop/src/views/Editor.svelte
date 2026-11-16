@@ -34,6 +34,7 @@
   import { Autosave, type SaveStatus } from "../lib/autosave";
   import { EditHistory } from "../lib/editHistory";
   import { Gestures } from "../lib/gestures";
+  import { editorKeyAction, keyTarget, RELEASES_FOCUS } from "../lib/editorKeys";
   import { toast } from "../lib/toasts.svelte";
   import { isBusy, uploads } from "../lib/uploads.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
@@ -811,36 +812,27 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (e.defaultPrevented || uploadOpen) return;
-    const target = e.target as HTMLElement | null;
-    const ctrl = (e.ctrlKey || e.metaKey) && !e.altKey;
-    const key = e.key.toLowerCase();
-    const step = ctrl && key === "z" ? (e.shiftKey ? "redo" : "undo") : ctrl && !e.shiftKey && key === "y" ? "redo" : null;
-    if (step) {
-      // Text fields undo their own typing; sliders and switches don't, so undo works there too.
-      const typing = target?.closest(
-        "input:not([type='range'], [type='checkbox'], [type='radio'], [type='button']), textarea, select, [contenteditable], [role='dialog']",
-      );
-      if (typing) return;
-      e.preventDefault();
-      if (step === "undo") undo();
-      else redo();
-      return;
-    }
-    if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !ctrl && !e.altKey) {
-      // Sliders and the timeline's handles use the arrows themselves.
-      if (target?.closest("input, textarea, select, [contenteditable], [role='dialog'], [role='slider']")) return;
-      e.preventDefault();
-      stepBy((e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : frameMs));
-      return;
-    }
-    const split = key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey;
-    if (e.key !== " " && !split) return;
-    // Buttons and form fields use the space bar themselves.
-    if (target?.closest("button, input, textarea, select, [contenteditable], [role='dialog']")) return;
+    if (e.defaultPrevented) return;
+    // Text fields and dialogs keep their keys, and a slider focused from the keyboard its arrows;
+    // Space plays even on a focused button (its press is prevented, so it isn't clicked).
+    const action = editorKeyAction(e, keyTarget(e.target instanceof Element ? e.target : null), uploadOpen);
+    if (!action) return;
     e.preventDefault();
-    if (split) splitHere();
+    if (action.kind === "undo") undo();
+    else if (action.kind === "redo") redo();
+    else if (action.kind === "step") stepBy(action.direction * (action.second ? 1000 : frameMs));
+    else if (action.kind === "split") splitHere();
     else togglePlay();
+  }
+
+  /**
+   * The pointer let go: a timeline control it clicked or dragged gives the keyboard back, so Space
+   * and the arrows reach the editor again (one focused with Tab keeps its own keys).
+   */
+  function onpointerup() {
+    gestures.end("slider");
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.closest(".timeline") && focused.matches(RELEASES_FOCUS)) focused.blur();
   }
 
   /** Writes the edit as it is now; throws when the save is refused (e.g. while uploading). */
@@ -975,7 +967,7 @@
   {onkeydown}
   onclick={closeMore}
   {onpointerdown}
-  onpointerup={() => gestures.end("slider")}
+  {onpointerup}
   onpointercancel={() => gestures.end("slider")}
 />
 

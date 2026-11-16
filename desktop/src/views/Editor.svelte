@@ -914,6 +914,21 @@
     }
   }
 
+  /** The clip is uploaded: into the feed or link-only, in place (same upload and link). */
+  async function toggleVisibility() {
+    moreOpen = false;
+    const id = data?.clip.serverClipId;
+    if (!id || !data) return;
+    const visibility = data.clip.visibility === "link" ? "feed" : "link";
+    try {
+      await api.updateUpload(id, { visibility });
+      if (data) data.clip = { ...data.clip, visibility };
+      toast(visibility === "feed" ? "Now in the feed." : "Now link-only.", "success");
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    }
+  }
+
   function showInFolder() {
     moreOpen = false;
     api.showInFolder(clip.id).catch((e) => toast(errorMessage(e), "error"));
@@ -1038,6 +1053,12 @@
         </button>
         {#if moreOpen}
           <div class="menu" role="menu" use:menu={{ close: () => (moreOpen = false) }}>
+            {#if data?.clip.serverClipId}
+              <button role="menuitem" onclick={toggleVisibility} disabled={uploading}>
+                <Icon name="eye" size={16} />
+                {data.clip.visibility === "link" ? "Show in feed" : "Hide from feed"}
+              </button>
+            {/if}
             <button role="menuitem" onclick={showInFolder}><Icon name="folder" size={16} /> Show in folder</button>
             <button
               role="menuitem"

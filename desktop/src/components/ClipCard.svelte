@@ -18,6 +18,7 @@
     onremove,
     onshowfolder,
     oncopy,
+    onvisibility,
     onfavorite,
     onview,
     onplay,
@@ -40,6 +41,8 @@
     onremove: () => void;
     onshowfolder: () => void;
     oncopy: () => void;
+    /** Uploaded: shows the upload in the feed or makes it link-only, in place (same link). */
+    onvisibility?: () => void;
     /** Stars or unstars the clip; without it there's no star. */
     onfavorite?: () => void;
     /** Changes when the thumbnail file is rewritten, so the cached picture isn't shown. */
@@ -229,6 +232,12 @@
             <button role="menuitem" onclick={() => pick(onshowfolder)}>
               <Icon name="folder" size={16} /> Show in folder
             </button>
+            {#if uploaded && onvisibility}
+              <button role="menuitem" onclick={() => pick(onvisibility)} disabled={busy}>
+                <Icon name="eye" size={16} />
+                {clip.visibility === "link" ? "Show in feed" : "Hide from feed"}
+              </button>
+            {/if}
             {#if uploaded}
               <button role="menuitem" onclick={() => pick(onupload)} disabled={busy}>
                 <Icon name="upload" size={16} /> Upload again

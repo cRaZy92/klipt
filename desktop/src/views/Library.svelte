@@ -382,6 +382,18 @@
     );
   }
 
+  /** An uploaded clip on this PC: into the feed or link-only, same upload and link. */
+  async function toggleLocalVisibility(clip: ClipView) {
+    const id = clip.serverClipId;
+    if (!id) return;
+    const visibility = clip.visibility === "link" ? "feed" : "link";
+    await act(async () => {
+      replaceUpload(await api.updateUpload(id, { visibility }));
+      // The server's answer is copied into the clip on this PC: show it.
+      await loadLocal();
+    }, visibility === "feed" ? "Now in the feed." : "Now link-only.");
+  }
+
   async function download(upload: MyUpload) {
     downloading = new Set(downloading).add(upload.id);
     if (await act(() => api.downloadUpload(upload.id), "Downloaded to your clips folder.")) await loadLocal();
@@ -566,6 +578,7 @@
                   thumbVersion={thumbVersion[clip.id] ?? clip.thumbnailMs ?? 0}
                   onshowfolder={() => act(() => api.showInFolder(clip.id))}
                   oncopy={() => copyLink(clip)}
+                  onvisibility={clip.serverClipId ? () => toggleLocalVisibility(clip) : undefined}
                 />
               {:else}
                 {@const upload = item.upload}

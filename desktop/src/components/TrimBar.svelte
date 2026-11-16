@@ -4,6 +4,16 @@
   import { frameUrl, previewIndex, tiles } from "../lib/filmstrip";
   import Icon from "./Icon.svelte";
 
+  /**
+   * Moves an element to the end of <body> while it's shown, so no container can cover or clip it
+   * (the lanes clip their overflow and the video lane is its own stacking layer; WebKitGTK also
+   * clips fixed elements inside rounded overflow containers).
+   */
+  function toBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
   type Handle = "start" | "end" | "thumb";
   type Moved = Handle | "split";
 
@@ -381,7 +391,7 @@
       <Icon name="image" size={13} />
     </div>
     {#if thumbActive}
-      <div class="thumb-pop" style:left="{pop.left}px" style:top="{pop.top}px" aria-hidden="true">
+      <div class="thumb-pop" use:toBody style:left="{pop.left}px" style:top="{pop.top}px" aria-hidden="true">
         {#if thumbPicture}<img src={thumbPicture} alt="" decoding="async" />{/if}
         <span>Thumbnail · {formatClock(thumbAt)}</span>
       </div>

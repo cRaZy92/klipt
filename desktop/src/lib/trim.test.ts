@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampThumb, clampTrim, defaultThumb, formatClock, msToX, savedTrim, xToMs } from "./trim";
+import { clampPopupLeft, clampThumb, clampTrim, defaultThumb, formatClock, msToX, savedTrim, xToMs } from "./trim";
 
 describe("clampTrim", () => {
   it("keeps a valid range as it is", () => {
@@ -120,5 +120,20 @@ describe("thumbnail frame", () => {
     expect(clampThumb(1000, cut)).toBe(4000);
     expect(clampThumb(12000, cut)).toBe(9999);
     expect(clampThumb(6000.6, cut)).toBe(6001);
+  });
+});
+
+describe("clampPopupLeft", () => {
+  it("centres the popup on the marker when there is room", () => {
+    expect(clampPopupLeft(300, 120, 100, 800)).toBe(240);
+  });
+
+  it("keeps it inside the left and right edges", () => {
+    expect(clampPopupLeft(110, 120, 100, 800)).toBe(100);
+    expect(clampPopupLeft(790, 120, 100, 800)).toBe(680);
+  });
+
+  it("pins it to the left edge when the area is narrower than the popup", () => {
+    expect(clampPopupLeft(150, 120, 100, 180)).toBe(100);
   });
 });

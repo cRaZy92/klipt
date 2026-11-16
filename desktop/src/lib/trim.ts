@@ -73,3 +73,11 @@ export function defaultThumb(trim: TrimRange): number {
 export function clampThumb(ms: number, trim: TrimRange): number {
   return clamp(Math.round(ms), trim.start, Math.max(trim.start, trim.end - 1));
 }
+
+/**
+ * The left edge for a popup `width` px wide centred on `centre`, kept between `min` and `max`
+ * (all px). If the area is narrower than the popup it sits at `min`.
+ */
+export function clampPopupLeft(centre: number, width: number, min: number, max: number): number {
+  return Math.max(min, Math.min(centre - width / 2, max - width));
+}

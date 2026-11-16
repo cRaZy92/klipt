@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { clampThumb, clampTrim, defaultThumb, formatClock, MIN_TRIM_MS, msToX, xToMs } from "../lib/trim";
+  import { clampPopupLeft, clampThumb, clampTrim, defaultThumb, formatClock, MIN_TRIM_MS, msToX, xToMs } from "../lib/trim";
   import { canRemove, clampToKept, deleteSplit, keptRanges, moveSplit, toggle, type Piece } from "../lib/cuts";
   import { frameUrl, previewIndex, tiles } from "../lib/filmstrip";
   import Icon from "./Icon.svelte";
@@ -62,6 +62,35 @@
       : [],
   );
   let dragging = $state<Handle | "playhead" | number | null>(null);
+
+  /** The thumbnail marker's preview shows while it is hovered, focused or dragged. */
+  const POP_WIDTH = 120;
+  let thumbEl = $state<HTMLElement>();
+  let thumbHover = $state(false);
+  let thumbFocus = $state(false);
+  const thumbActive = $derived(thumbHover || thumbFocus || dragging === "thumb");
+  const thumbPicture = $derived.by(() => {
+    if (!strip) return null;
+    const index = previewIndex(thumbAt, strip.ready);
+    return index === null ? null : frameUrl(strip.dir, index);
+  });
+  /**
+   * Where the preview goes, in viewport px: fixed, so the lanes' overflow doesn't clip it. Centred
+   * over the marker and kept inside the track's width.
+   */
+  let pop = $state({ left: 0, top: 0 });
+  $effect(() => {
+    if (!thumbActive || !thumbEl || !track) return;
+    // Re-place it when the marker moves or the track resizes.
+    void thumbAt;
+    void trackWidth;
+    const mark = thumbEl.getBoundingClientRect();
+    const bar = track.getBoundingClientRect();
+    pop = {
+      left: clampPopupLeft(mark.left + mark.width / 2, POP_WIDTH, bar.left, bar.right),
+      top: mark.top - 6,
+    };
+  });
 
   const pct = (ms: number) => msToX(ms, duration, 100);
   const keptParts = $derived(keptRanges(pieces, { start, end }));
@@ -325,6 +354,12 @@
     <div
       class="thumb-mark"
       class:picked={thumb !== null}
+      class:active={thumbActive}
+      bind:this={thumbEl}
+      onpointerenter={() => (thumbHover = true)}
+      onpointerleave={() => (thumbHover = false)}
+      onfocus={() => (thumbFocus = true)}
+      onblur={() => (thumbFocus = false)}
       style:left="{pct(thumbAt)}%"
       role="slider"
       tabindex="0"
@@ -345,6 +380,12 @@
     >
       <Icon name="image" size={13} />
     </div>
+    {#if thumbActive}
+      <div class="thumb-pop" style:left="{pop.left}px" style:top="{pop.top}px" aria-hidden="true">
+        {#if thumbPicture}<img src={thumbPicture} alt="" decoding="async" />{/if}
+        <span>Thumbnail · {formatClock(thumbAt)}</span>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -396,10 +437,42 @@
   }
 
   .thumb-mark.picked,
+  .thumb-mark.active,
   .thumb-mark:hover,
   .thumb-mark:focus-visible {
-    border-color: #ffc53d;
-    color: #ffc53d;
+    border-color: var(--warning);
+    color: var(--warning);
+  }
+
+  /* The preview above the marker: fixed (the lanes clip their overflow), never takes the pointer. */
+  .thumb-pop {
+    position: fixed;
+    z-index: 20;
+    width: 120px;
+    overflow: hidden;
+    border: 1px solid var(--warning);
+    border-radius: 6px;
+    background: var(--surface-3, var(--surface-2));
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    transform: translateY(-100%);
+    pointer-events: none;
+  }
+
+  .thumb-pop img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+  }
+
+  .thumb-pop span {
+    display: block;
+    padding: 0.15rem 0.3rem;
+    color: var(--warning);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    white-space: nowrap;
   }
 
   /* A removed part: red hatching over the bar. */

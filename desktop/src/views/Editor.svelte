@@ -28,6 +28,7 @@
     wholeClip,
     type Piece,
   } from "../lib/cuts";
+  import { formatTenths, stepMs } from "../lib/timecode";
   import { menu } from "../lib/a11y";
   import { Autosave, type SaveStatus } from "../lib/autosave";
   import { EditHistory } from "../lib/editHistory";
@@ -736,6 +737,15 @@
     else toast("Can't split here: too close to a split or the trim, or outside the trim", "error");
   }
 
+  /** One frame, in ms. */
+  const frameMs = $derived(stepMs(data?.fps ?? 0));
+
+  /** Moves the playhead by `ms` (clamped to the clip); playback goes on from there. Not an edit. */
+  function stepBy(ms: number) {
+    if (!data) return;
+    seek(Math.min(duration, Math.max(0, position + ms)));
+  }
+
   function onkeydown(e: KeyboardEvent) {
     if (e.defaultPrevented || uploadOpen) return;
     const target = e.target as HTMLElement | null;
@@ -751,6 +761,13 @@
       e.preventDefault();
       if (step === "undo") undo();
       else redo();
+      return;
+    }
+    if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !ctrl && !e.altKey) {
+      // Sliders and the timeline's handles use the arrows themselves.
+      if (target?.closest("input, textarea, select, [contenteditable], [role='dialog'], [role='slider']")) return;
+      e.preventDefault();
+      stepBy((e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : frameMs));
       return;
     }
     const split = key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey;
@@ -1017,6 +1034,11 @@
 
     <div class="timeline">
       <div class="transport">
+        <button class="btn btn-ghost btn-icon" onclick={() => stepBy(-frameMs)} aria-label="Previous frame" title="Previous frame (←)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M6 5h2v14H6zM18.2 5.6v12.8a.7.7 0 0 1-1.1.6L9.4 12.6a.7.7 0 0 1 0-1.2l7.7-6.4a.7.7 0 0 1 1.1.6z" />
+          </svg>
+        </button>
         <button
           class="btn btn-primary btn-icon play"
           onclick={togglePlay}
@@ -1032,6 +1054,13 @@
             {/if}
           </svg>
         </button>
+        <button class="btn btn-ghost btn-icon" onclick={() => stepBy(frameMs)} aria-label="Next frame" title="Next frame (→)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M16 5h2v14h-2zM5.8 5.6v12.8a.7.7 0 0 0 1.1.6l7.7-6.4a.7.7 0 0 0 0-1.2L6.9 5a.7.7 0 0 0-1.1.6z" />
+          </svg>
+        </button>
+        <span class="clock"><strong>{formatTenths(position)}</strong> / {formatClock(duration)}</span>
+        <span class="kept">Kept <strong>{formatClock(keptLength(pieces, trim))}</strong></span>
         <button
           class="btn btn-sm split-btn"
           onclick={splitHere}
@@ -1040,7 +1069,6 @@
         >
           <Icon name="scissors" size={15} /> Split
         </button>
-        <span class="clock"><strong>{formatClock(position)}</strong> / {formatClock(duration)}</span>
       </div>
       <TrimBar
         {duration}
@@ -1057,6 +1085,13 @@
         {onscrubend}
         locked={uploading}
       />
+      <p class="hints">
+        <span><kbd>Space</kbd> play</span>
+        <span><kbd>S</kbd> split</span>
+        <span><kbd>←</kbd><kbd>→</kbd> one frame</span>
+        <span><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> one second</span>
+        <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
+      </p>
     </div>
 
     <div class="panel">
@@ -1409,18 +1444,17 @@
 
   .timeline {
     display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
+    flex-direction: column;
+    gap: 0.6rem;
     flex: none;
   }
 
   .transport {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 0.4rem;
-    flex: none;
-    width: 7.5rem;
+    justify-content: center;
+    gap: 0.5rem 0.9rem;
+    flex-wrap: wrap;
   }
 
   .play {
@@ -1429,20 +1463,44 @@
     border-radius: 50%;
   }
 
-  .clock {
+  .clock,
+  .kept {
     color: var(--text-muted);
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
-  .clock strong {
+  .clock strong,
+  .kept strong {
     color: var(--text);
     font-weight: 650;
   }
 
+  .hints {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.3rem 1.1rem;
+    color: var(--text-faint);
+    font-size: 0.78rem;
+  }
+
+  kbd {
+    display: inline-block;
+    min-width: 1.4rem;
+    margin-right: 0.2rem;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.74rem;
+    text-align: center;
+  }
+
   .timeline :global(.trimbar) {
-    flex: 1;
     min-width: 0;
   }
 

@@ -28,6 +28,9 @@
     wholeClip,
     type Piece,
   } from "../lib/cuts";
+  import { menu } from "../lib/a11y";
+  import { Autosave, type SaveStatus } from "../lib/autosave";
+  import { EditHistory } from "../lib/editHistory";
   import { toast } from "../lib/toasts.svelte";
   import { isBusy, uploads } from "../lib/uploads.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
@@ -40,15 +43,12 @@
     clip,
     onclose,
     ondeleted,
-    dirty = $bindable(false),
   }: {
     clip: ClipView;
-    /** Back to the library (the app asks about unsaved changes). */
+    /** Back to the library (a change not saved yet is saved on the way out). */
     onclose: () => void;
-    /** The clip was deleted: back to the library without asking about unsaved changes. */
+    /** The clip was deleted: back to the library. */
     ondeleted: () => void;
-    /** Whether there are unsaved changes, for the app's "Discard changes?" guard. */
-    dirty?: boolean;
   } = $props();
 
   /** Plays every audio track on one clock; the muted video follows it. */
@@ -82,7 +82,7 @@
   let blurVideo = $state(false);
   /** The thumbnail's frame; null = automatic. */
   let thumb = $state<number | null>(null);
-  /** The edit as last loaded or saved; `dirty` compares against it. */
+  /** The edit as last loaded or saved; `changed` compares against it. */
   let stored = $state<EditInput | null>(null);
   let storedThumb = $state<number | null>(null);
 
@@ -116,7 +116,10 @@
   /** How long the pointer rests before the video seeks to the exact frame under it. */
   const SCRUB_SETTLE_MS = 150;
 
-  let saving = $state(false);
+  /** The header's save status. */
+  let saveStatus = $state<SaveStatus>("saved");
+  /** The ⋯ menu (Show in folder, Delete) is open. */
+  let moreOpen = $state(false);
   // svelte-ignore state_referenced_locally
   let gameName = $state(clip.gameName);
   /** "Set game": the name being typed and the games Klipt knows (for suggestions). */
@@ -130,7 +133,7 @@
   const job = $derived(uploads[clip.id]);
   const uploading = $derived(isBusy(job));
   const exporting = $derived(exportProgress !== null);
-  const busy = $derived(saving || exporting || uploading);
+  const busy = $derived(exporting || uploading);
   const nothingKept = "Keep at least part of the clip";
 
   // An upload saves its title as the clip's: show it here at once, not on the next open.
@@ -156,6 +159,9 @@
     };
   });
 
+  /** The thumbnail frame as it is saved: on a kept part. */
+  const savedThumb = $derived(thumb === null ? null : clampToKept(thumb, kept));
+
   function sameVolumes(a: Record<number, number>, b: Record<number, number>): boolean {
     const keys = new Set([...Object.keys(a), ...Object.keys(b)].map(Number));
     return [...keys].every((k) => (a[k] ?? 1) === (b[k] ?? 1));
@@ -172,11 +178,84 @@
         !sameVolumes(edit.extraVolumes, stored.extraVolumes) ||
         edit.blurVideo !== stored.blurVideo ||
         !sameRanges(edit.removedRanges, stored.removedRanges) ||
-        thumb !== storedThumb),
+        savedThumb !== storedThumb),
   );
 
+  /** What undo and redo bring back: everything the editor saves. */
+  interface EditState {
+    trim: TrimRange;
+    pieces: Piece[];
+    gameVolume: number;
+    micVolume: number;
+    voiceVolume: number;
+    masterVolume: number;
+    extraVolumes: Record<number, number>;
+    blurVideo: boolean;
+    thumb: number | null;
+  }
+
+  const editState = $derived<EditState>({
+    trim: { start: trim.start, end: trim.end },
+    pieces: pieces.map((p) => ({ start: p.start, end: p.end, removed: p.removed })),
+    gameVolume,
+    micVolume,
+    voiceVolume,
+    masterVolume,
+    extraVolumes: { ...extraVolumes },
+    blurVideo,
+    thumb,
+  });
+
+  /** The edits made since the editor opened (created once the clip is loaded). */
+  let history: EditHistory<EditState> | null = null;
+
+  function applyState(s: EditState) {
+    trim = s.trim;
+    pieces = s.pieces;
+    gameVolume = s.gameVolume;
+    micVolume = s.micVolume;
+    voiceVolume = s.voiceVolume;
+    masterVolume = s.masterVolume;
+    extraVolumes = s.extraVolumes;
+    blurVideo = s.blurVideo;
+    thumb = s.thumb;
+  }
+
+  function undo() {
+    const s = history?.undo();
+    if (s) applyState(s);
+  }
+
+  function redo() {
+    const s = history?.redo();
+    if (s) applyState(s);
+  }
+
+  /** The clip was deleted here: nothing is saved on the way out. */
+  let deleted = false;
+  /** The edit as it is now, for the save on the way out (kept up to date by the effect below). */
+  let latest: { edit: EditInput; thumb: number | null; saveable: boolean } | null = null;
+
+  const autosave = new Autosave({
+    save: writeEdit,
+    dirty: () => changed && kept.length > 0,
+    onstatus: (status, error) => {
+      saveStatus = status;
+      if (status === "failed" && !closed) toast(`Couldn't save: ${errorMessage(error)}`, "error");
+    },
+  });
+
+  // Every change to the edit is an undo step (a drag is one) and is saved a moment later. An
+  // undo or redo is a change too: the history skips the state it already holds, so applying it
+  // doesn't add a step.
   $effect(() => {
-    dirty = changed;
+    const state = editState;
+    untrack(() => {
+      if (!history) return;
+      history.record(state);
+      latest = { edit, thumb: savedThumb, saveable: kept.length > 0 };
+      if (changed || autosave.pending) autosave.changed();
+    });
   });
 
   /** A stored gain (0.0–2.0 in the library) as a 0–100% slider value. */
@@ -202,7 +281,8 @@
       stripFrames = d.filmstrip.frames;
       data = d;
       stored = edit;
-      storedThumb = thumb;
+      storedThumb = savedThumb;
+      history = new EditHistory(editState);
       void loadAudio(d);
     } catch (e) {
       loadError = errorMessage(e);
@@ -257,6 +337,11 @@
 
     return () => {
       closed = true;
+      // Leaving with a change not saved yet (or whose save failed): save it now.
+      if (autosave.pending && latest?.saveable && !deleted) {
+        api.saveEdit(clip.id, latest.edit, latest.thumb).catch((e) => console.error("Couldn't save the edit on leaving", e));
+      }
+      autosave.stop();
       cancelAnimationFrame(frame);
       stopProgress();
       stopFilmstrip();
@@ -626,9 +711,24 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    const split = (e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.altKey;
-    if ((e.key !== " " && !split) || e.defaultPrevented || uploadOpen) return;
+    if (e.defaultPrevented || uploadOpen) return;
     const target = e.target as HTMLElement | null;
+    const ctrl = (e.ctrlKey || e.metaKey) && !e.altKey;
+    const key = e.key.toLowerCase();
+    const step = ctrl && key === "z" ? (e.shiftKey ? "redo" : "undo") : ctrl && !e.shiftKey && key === "y" ? "redo" : null;
+    if (step) {
+      // Text fields undo their own typing; sliders and switches don't, so undo works there too.
+      const typing = target?.closest(
+        "input:not([type='range'], [type='checkbox'], [type='radio'], [type='button']), textarea, select, [contenteditable], [role='dialog']",
+      );
+      if (typing) return;
+      e.preventDefault();
+      if (step === "undo") undo();
+      else redo();
+      return;
+    }
+    const split = key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (e.key !== " " && !split) return;
     // Buttons and form fields use the space bar themselves.
     if (target?.closest("button, input, textarea, select, [contenteditable], [role='dialog']")) return;
     e.preventDefault();
@@ -636,43 +736,30 @@
     else togglePlay();
   }
 
-  async function saveEdit(): Promise<boolean> {
-    if (!stored || !changed) return true;
-    saving = true;
+  /** Writes the edit as it is now; throws when the save is refused (e.g. while uploading). */
+  async function writeEdit() {
     const next = edit;
-    const nextThumb = thumb === null ? null : clampToKept(thumb, kept);
-    try {
-      await api.saveEdit(clip.id, next, nextThumb);
-      stored = next;
-      storedThumb = nextThumb;
-      if (data) {
-        data.clip = {
-          ...data.clip,
-          thumbnailMs: nextThumb,
-          trimStartMs: next.trimStartMs,
-          trimEndMs: next.trimEndMs,
-          gameVolume: next.gameVolume,
-          micVolume: next.micVolume,
-          voiceVolume: next.voiceVolume,
-          masterVolume: next.masterVolume,
-          extraVolumes: next.extraVolumes,
-          blurVideo: next.blurVideo,
-          removedRanges: next.removedRanges,
-          uploadId: null,
-          uploadOffset: null,
-        };
-      }
-      return true;
-    } catch (e) {
-      toast(errorMessage(e), "error");
-      return false;
-    } finally {
-      saving = false;
+    const nextThumb = savedThumb;
+    await api.saveEdit(clip.id, next, nextThumb);
+    stored = next;
+    storedThumb = nextThumb;
+    if (data) {
+      data.clip = {
+        ...data.clip,
+        thumbnailMs: nextThumb,
+        trimStartMs: next.trimStartMs,
+        trimEndMs: next.trimEndMs,
+        gameVolume: next.gameVolume,
+        micVolume: next.micVolume,
+        voiceVolume: next.voiceVolume,
+        masterVolume: next.masterVolume,
+        extraVolumes: next.extraVolumes,
+        blurVideo: next.blurVideo,
+        removedRanges: next.removedRanges,
+        uploadId: null,
+        uploadOffset: null,
+      };
     }
-  }
-
-  async function onsave() {
-    if (await saveEdit()) toast("Edit saved", "success");
   }
 
   async function onexport() {
@@ -719,7 +806,17 @@
     }
   }
 
+  function showInFolder() {
+    moreOpen = false;
+    api.showInFolder(clip.id).catch((e) => toast(errorMessage(e), "error"));
+  }
+
+  function closeMore(e: MouseEvent) {
+    if (moreOpen && !(e.target as Element).closest?.(".more")) moreOpen = false;
+  }
+
   async function askDelete() {
+    moreOpen = false;
     pause();
     // Uploaded from this editor? The library knows its server copy now; `clip` may not.
     let current = data?.clip ?? clip;
@@ -744,6 +841,7 @@
         "success",
       );
       removing = null;
+      deleted = true;
       ondeleted();
     } catch (err) {
       toast(errorMessage(err), "error");
@@ -754,14 +852,14 @@
 
   async function onupload() {
     // The upload exports the saved edit, so save first: it uploads the cut the user sees.
-    if (await saveEdit()) {
+    if (await autosave.flush()) {
       pause();
       uploadOpen = true;
     }
   }
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} onclick={closeMore} />
 
 <section class="editor">
   <header class="bar">
@@ -777,15 +875,62 @@
         <Icon name="chevronDown" size={13} />
       </button>
     </div>
-    {#if changed}<span class="unsaved">Unsaved changes</span>{/if}
-    <button
-      class="btn btn-ghost delete"
-      onclick={askDelete}
-      disabled={uploading || deleting}
-      title={uploading ? "Wait for the upload to finish" : "Delete this clip"}
-    >
-      <Icon name="trash" size={16} /> Delete
-    </button>
+    <div class="actions">
+      {#if data}
+        {#if changed && !kept.length}
+          <span class="save-status warn" role="status">Not saved: {nothingKept.toLowerCase()}</span>
+        {:else if saveStatus === "saving"}
+          <span class="save-status" role="status"><span class="spinner"></span> Saving…</span>
+        {:else if saveStatus === "saved"}
+          <span class="save-status" role="status">✓ Saved</span>
+        {:else}
+          <span class="save-status failed" role="status">
+            <Icon name="alert" size={15} /> Couldn't save
+            <button class="btn btn-sm" onclick={() => autosave.flush()}><Icon name="retry" size={14} /> Retry</button>
+          </span>
+        {/if}
+        <button class="btn" onclick={onexport} disabled={busy || !kept.length} title={kept.length ? "Export a copy of the edited clip" : nothingKept}>
+          {#if exporting}
+            <span class="spinner"></span> Exporting… {Math.round((exportProgress ?? 0) * 100)}%
+          {:else}
+            <Icon name="film" size={16} /> Export…
+          {/if}
+        </button>
+        <button class="btn btn-primary" onclick={onupload} disabled={busy || !kept.length} title={kept.length ? undefined : nothingKept}>
+          {#if uploading}
+            <span class="spinner"></span> Uploading…
+          {:else}
+            <Icon name="upload" size={16} /> Upload
+          {/if}
+        </button>
+      {/if}
+      <div class="more">
+        <button
+          class="btn btn-ghost btn-icon"
+          onclick={() => (moreOpen = !moreOpen)}
+          aria-expanded={moreOpen}
+          aria-haspopup="menu"
+          aria-label="More actions"
+          title="More actions"
+        >
+          <Icon name="more" size={18} />
+        </button>
+        {#if moreOpen}
+          <div class="menu" role="menu" use:menu={{ close: () => (moreOpen = false) }}>
+            <button role="menuitem" onclick={showInFolder}><Icon name="folder" size={16} /> Show in folder</button>
+            <button
+              role="menuitem"
+              class="danger"
+              onclick={askDelete}
+              disabled={uploading || deleting}
+              title={uploading ? "Wait for the upload to finish" : undefined}
+            >
+              <Icon name="trash" size={16} /> Delete
+            </button>
+          </div>
+        {/if}
+      </div>
+    </div>
   </header>
 
   {#if loadError}
@@ -959,27 +1104,6 @@
           </label>
         {/each}
       </div>
-
-      <div class="actions">
-        {#if uploading}
-          <p class="note muted">Uploading — you can change this clip when it's done.</p>
-        {:else if exporting}
-          <div class="exporting">
-            <span>Exporting… {Math.round((exportProgress ?? 0) * 100)}%</span>
-            <div class="progress" style:--value={exportProgress ?? 0}><div></div></div>
-          </div>
-        {/if}
-        <button class="btn" onclick={onsave} disabled={!changed || busy || !kept.length} title={kept.length ? undefined : nothingKept}>
-          {#if saving}<span class="spinner"></span>{:else}<Icon name="check" size={16} />{/if}
-          Save edit
-        </button>
-        <button class="btn" onclick={onexport} disabled={busy || !kept.length} title={kept.length ? undefined : nothingKept}>
-          <Icon name="film" size={16} /> Export copy…
-        </button>
-        <button class="btn btn-primary" onclick={onupload} disabled={busy || !kept.length} title={kept.length ? undefined : nothingKept}>
-          <Icon name="upload" size={16} /> Upload
-        </button>
-      </div>
     </div>
   {/if}
 </section>
@@ -1080,30 +1204,94 @@
     font-style: italic;
   }
 
-  .delete {
+  .actions {
+    display: flex;
     flex: none;
+    align-items: center;
+    gap: 0.5rem;
     margin-left: auto;
+  }
+
+  .save-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-right: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+
+  .save-status .spinner {
+    width: 0.85rem;
+    height: 0.85rem;
+  }
+
+  .save-status.warn {
+    color: var(--warning);
+  }
+
+  .save-status.failed {
     color: var(--danger-text, var(--danger));
   }
 
-  .unsaved + .delete {
-    margin-left: 0;
+  .more {
+    position: relative;
   }
 
-  .delete:hover:not(:disabled) {
+  .menu {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    min-width: 12rem;
+    padding: 0.35rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+    animation: menu-in 0.15s var(--ease-out);
+  }
+
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+
+  .menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--text-muted);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .menu button:hover:not(:disabled) {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+
+  .menu button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .menu .danger {
+    color: var(--danger-text, var(--danger));
+  }
+
+  .menu .danger:hover:not(:disabled) {
     background: var(--danger-soft);
-  }
-
-  .unsaved {
-    flex: none;
-    margin-left: auto;
-    padding: 0.2rem 0.65rem;
-    border-radius: 999px;
-    background: var(--warning-soft);
-    color: var(--warning);
-    font-size: 0.8rem;
-    font-weight: 650;
-    animation: rise 0.25s var(--ease-out);
+    color: var(--danger-text, var(--danger));
   }
 
   .center {
@@ -1319,27 +1507,5 @@
     font-size: 0.88rem;
     font-variant-numeric: tabular-nums;
     text-align: right;
-  }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    margin-left: auto;
-  }
-
-  .note {
-    font-size: 0.87rem;
-  }
-
-  .exporting {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    width: 10rem;
-    font-size: 0.82rem;
-    font-weight: 600;
   }
 </style>

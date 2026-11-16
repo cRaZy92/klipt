@@ -35,7 +35,7 @@
   let accountMenu = $state(false);
   /** A newer version waiting to be installed; `command` installs it on Linux. */
   let update = $state<{ version: string; command: string | null; installing: boolean } | null>(null);
-  /** The current screen (editor or settings) has unsaved changes. */
+  /** Settings has unsaved changes (the editor saves by itself). */
   let viewDirty = $state(false);
   /** Friends' clips you haven't seen (the Feed tab's badge). */
   let feedNew = $state(0);
@@ -367,15 +367,7 @@
       {#if view.name === "editor"}
         <main class="screen here">
           {#key view.clip.id}
-            <Editor
-              clip={view.clip}
-              bind:dirty={viewDirty}
-              onclose={() => go({ name: "library" })}
-              ondeleted={() => {
-                viewDirty = false;
-                view = { name: "library" };
-              }}
-            />
+            <Editor clip={view.clip} onclose={() => go({ name: "library" })} ondeleted={() => (view = { name: "library" })} />
           {/key}
         </main>
       {/if}
@@ -400,11 +392,7 @@
 
 {#if leaving}
   <Modal title="Discard changes?" onclose={() => (leaving = null)}>
-    {#if view.name === "settings"}
-      <p>Your settings changes haven't been saved.</p>
-    {:else}
-      <p>Your trim and volume changes to this clip haven't been saved.</p>
-    {/if}
+    <p>Your settings changes haven't been saved.</p>
     {#snippet footer()}
       <button class="btn" onclick={() => (leaving = null)}>Keep editing</button>
       <button class="btn btn-danger" onclick={discardAndLeave}>Discard</button>

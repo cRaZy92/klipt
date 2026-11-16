@@ -119,6 +119,20 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 @media (min-width: 960px) {
   .share:has(.join-card) video, .share:has(.join-card) img.shot { width: min(calc(100% - 404px), calc((100vh - 130px) * var(--ar, 16/9))); }
 }
+.guide { max-width: 720px; margin: 0 auto; }
+.guide .lead { font-size: 1.05rem; max-width: 60ch; }
+.steps { list-style: none; counter-reset: step; margin: 24px 0; padding: 0; display: grid; gap: 14px; }
+.step { counter-increment: step; position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 16px 16px 60px; }
+.step::before { content: counter(step); position: absolute; left: 16px; top: 14px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; font-weight: 700; }
+.step h2 { font-size: 1.1rem; margin: 4px 0 8px; }
+.step p { margin: 8px 0; }
+.substeps { margin: 8px 0; padding-left: 20px; }
+.copy-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.copy-line code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; word-break: break-all; min-width: 0; }
+kbd { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .85em; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--panel-2); }
+.linux { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; }
+.linux summary { cursor: pointer; font-weight: 600; }
+.guide-next { margin-top: 24px; }
 .join-card { margin-top: 24px; max-width: 400px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .join-card h2 { margin: 0 0 12px; font-size: 1rem; }
 .join-card .form { gap: 10px; }

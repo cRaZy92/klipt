@@ -24,6 +24,7 @@ export function Layout(props: { title: string; user: AuthUser | null; head?: str
               <nav>
                 <a href="/">Feed</a>
                 <a href="/me">My clips</a>
+                <a href="/get-app">Get the app</a>
                 {user.isAdmin ? <a href="/admin">Admin</a> : ''}
                 <span class="who">{e(user.username)}</span>
                 <button type="button" class="btn ghost" data-action="logout">Log out</button>

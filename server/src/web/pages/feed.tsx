@@ -30,7 +30,7 @@ export function FeedPage(props: {
             ? 'No favorites yet. Open a clip and press Favorite to keep it here.'
             : props.withMe
               ? 'Nobody has tagged you in a clip yet.'
-              : 'No clips yet. Upload one from the Klipt desktop app.',
+              : 'No clips yet. Save one with the Klipt desktop app (Get the app, at the top).',
         )}
       />
       <Pager nextCursor={props.nextCursor} basePath={base} game={props.game} search={props.search} />

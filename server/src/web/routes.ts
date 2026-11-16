@@ -11,6 +11,7 @@ import { users } from '../db/schema.js';
 import { getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, shareInviter, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage, TranscodeSection } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
+import { GetAppPage } from './pages/getApp.js';
 import { InvitePage } from './pages/invite.js';
 import { LoginPage } from './pages/login.js';
 import { SharePage } from './pages/share.js';
@@ -19,6 +20,7 @@ import { embedFileName } from '../clips/files.js';
 import { MePage } from './pages/me.js';
 import { NotFoundPage } from './pages/notFound.js';
 import { UserPage } from './pages/user.js';
+import { createLatestInstaller } from './latestInstaller.js';
 import { createSteamArt, parseAppId } from './steamArt.js';
 
 /**
@@ -106,6 +108,19 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const { code } = req.params as { code: string };
     const valid = await isInviteActive(db, code.slice(0, 100));
     return html(reply, InvitePage({ code, valid }) as string);
+  });
+
+  // How to install the desktop app. Public, so the link can be sent to a friend; new accounts land
+  // here (`welcome=1`), and `next` is where its Continue button goes.
+  app.get('/get-app', async (req, reply) => {
+    const q = req.query as { next?: unknown; welcome?: unknown };
+    return html(reply, GetAppPage({ user: req.user, server: config.baseUrl, next: safeNext(q.next), welcome: q.welcome === '1' }) as string);
+  });
+
+  // The download button: the newest installer, found through the release's latest.json.
+  const latestInstaller = createLatestInstaller();
+  app.get('/get-app/windows', async (_req, reply) => {
+    return reply.header('cache-control', 'no-store').redirect(await latestInstaller(), 302);
   });
 
   app.get('/', async (req, reply) => {

@@ -232,8 +232,28 @@ describe('web pages', () => {
     const ok = await get('/invite/goodcode');
     expect(ok.body).not.toContain('no longer valid');
     expect(ok.body).toContain('goodcode');
+    expect(ok.body).toContain('data-next="/get-app?welcome=1"');
     await t.db.update(invites).set({ revokedAt: new Date() }).where(eq(invites.code, 'goodcode'));
     expect((await get('/invite/goodcode')).body).toContain('no longer valid');
+  });
+
+  it('serves the install guide publicly and links it from the top bar', async () => {
+    const pub = await get('/get-app');
+    expect(pub.statusCode).toBe(200);
+    expect(pub.body).toContain('Get the Klipt app');
+    expect(pub.body).toContain('href="/get-app/windows"');
+    expect(pub.body).toContain('Run anyway');
+    expect(pub.body).not.toContain('Go to the feed');
+
+    const a = await mk('alice');
+    expect((await get('/', a.cookie)).body).toContain('<a href="/get-app">Get the app</a>');
+    const welcome = await get('/get-app?welcome=1&next=%2Fc%2Fabc', a.cookie);
+    expect(welcome.body).toContain('Welcome, alice!');
+    expect(welcome.body).toContain('<strong>alice</strong>');
+    expect(welcome.body).toContain('href="/c/abc">Back to the clip');
+    const evil = await get('/get-app?next=%2F%2Fevil.com', a.cookie);
+    expect(evil.body).toContain('href="/">Go to the feed');
+    expect(evil.body).not.toContain('Welcome');
   });
 
   it('renders HTML 404 for unknown pages and JSON for api', async () => {

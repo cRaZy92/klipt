@@ -34,8 +34,10 @@ link, with no help.
       ledger lists these as pending, and nothing since records them as done.
 - [ ] **Server live for friends.** The Docker Compose stack runs on Dokploy, with real accounts and
       invite links.
-- [ ] **Install instructions for friends.** The spec asks for a page showing the SmartScreen step
-      ("More info → Run anyway") with a screenshot. It doesn't exist yet.
+- [x] **Install instructions for friends.** `/get-app` (2026-11-16): new accounts land there, and
+      it's in the top bar. Download button (newest installer via the release's `latest.json`), the
+      SmartScreen step ("More info → Run anyway"), the server address to log in with, the save
+      shortcut, and the Arch command. Still missing: a screenshot of the SmartScreen window.
 - [ ] **First friend test.** One friend with an RTX 40xx and one with an AMD card (the AMF encoder
       is still unverified). Note anything they get stuck on.
 

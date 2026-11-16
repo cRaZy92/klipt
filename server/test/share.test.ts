@@ -105,7 +105,7 @@ describe('share page', () => {
 
 describe('signing up from a share link', () => {
   const register = (payload: Record<string, unknown>) => t.app.inject({ method: 'POST', url: '/api/register', payload });
-  const joinForm = /<form data-form="register" data-next="\/c\/joinclip0001"[\s\S]*name="clipId" value="joinclip0001"/;
+  const joinForm = /<form data-form="register" data-next="\/get-app\?welcome=1&amp;next=%2Fc%2Fjoinclip0001"[\s\S]*name="clipId" value="joinclip0001"/;
 
   it('offers logged-out visitors an account beside the clip, not logged-in ones', async () => {
     const owner = await createUser(t.db, { username: 'kim' });

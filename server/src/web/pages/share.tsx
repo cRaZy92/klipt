@@ -58,7 +58,8 @@ function JoinCard(props: { clip: Clip }): JSX.Element {
   return (
     <section class="join-card" aria-labelledby="join-title">
       <h2 id="join-title">Create an account</h2>
-      <form data-form="register" data-next={e(here)} class="form">
+      {/* A new account first gets the install guide; its Continue button comes back here. */}
+      <form data-form="register" data-next={e(`/get-app?welcome=1&next=${encodeURIComponent(here)}`)} class="form">
         <input type="hidden" name="clipId" value={e(clip.id)} />
         <label>Username<input name="username" autocomplete="username" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="3-24 letters, numbers or underscores" /></label>
         <label>Password<input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="1024" /></label>

@@ -155,6 +155,8 @@ describe("peaks", () => {
     const { engine } = await loaded();
     const old = engine.peaks("game", 2)!;
     engine.close();
+    // Not observable through the public API: checks the cached arrays' memory is released.
+    expect((engine as unknown as { peakCache: Map<string, unknown> }).peakCache.size).toBe(0);
     expect(engine.peaks("game", 2)).toBeNull();
     await engine.load([{ key: "game", url: "game" }]);
     const fresh = engine.peaks("game", 2)!;

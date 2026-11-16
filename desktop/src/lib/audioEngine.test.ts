@@ -21,7 +21,8 @@ function fakeContext() {
       return {
         url,
         numberOfChannels: 1,
-        getChannelData: () => new Float32Array([0, 0.5, -1, 0.25]),
+        getChannelData: () =>
+          new Float32Array(url === "loud" ? [0.8, 0, 0, 0] : [0, 0.5, -1, 0.25]),
       };
     },
     createGain() {
@@ -139,6 +140,26 @@ describe("peaks", () => {
     const { engine } = await loaded();
     expect(engine.peaks("game", 2)).toBe(engine.peaks("game", 2));
     expect(engine.peaks("game", 4)).not.toBe(engine.peaks("game", 2));
+  });
+
+  it("recomputes when the key is reloaded with a different buffer", async () => {
+    const { engine } = await loaded();
+    const old = engine.peaks("game", 2)!;
+    await engine.load([{ key: "game", url: "loud" }]);
+    const fresh = engine.peaks("game", 2)!;
+    expect(fresh).not.toBe(old);
+    expect(Array.from(fresh)).toEqual([Math.fround(0.8), 0]);
+  });
+
+  it("forgets tracks and cached peaks on close", async () => {
+    const { engine } = await loaded();
+    const old = engine.peaks("game", 2)!;
+    engine.close();
+    expect(engine.peaks("game", 2)).toBeNull();
+    await engine.load([{ key: "game", url: "game" }]);
+    const fresh = engine.peaks("game", 2)!;
+    expect(fresh).not.toBe(old);
+    expect(Array.from(fresh)).toEqual([0.5, 1]);
   });
 
   it("is null for a key that is not loaded", async () => {

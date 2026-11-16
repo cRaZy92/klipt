@@ -48,7 +48,7 @@
     master: number;
     /** "Blur video" is on. */
     blur: boolean;
-    /** The edit can't change now (the clip is uploading): only the playhead moves. */
+    /** The edit can't change now (the clip is uploading or exporting): only the playhead moves. */
     locked?: boolean;
     onvolume: (key: string, volume: number) => void;
     onmute: (key: string) => void;

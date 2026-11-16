@@ -43,7 +43,7 @@
     onscrubstart?: () => void;
     /** That pointer was released, or the browser took it away (pointercancel). */
     onscrubend?: () => void;
-    /** The edit can't change now (the clip is uploading): only the playhead moves. */
+    /** The edit can't change now (the clip is uploading or exporting): only the playhead moves. */
     locked?: boolean;
   } = $props();
 

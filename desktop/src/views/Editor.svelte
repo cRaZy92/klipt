@@ -140,6 +140,11 @@
   const uploading = $derived(isBusy(job));
   const exporting = $derived(exportProgress !== null);
   const busy = $derived(exporting || uploading);
+  /**
+   * The clip can't be saved while it uploads or exports (both hold it busy): the edit is locked
+   * until they end.
+   */
+  const editLocked = $derived(uploading || exporting);
   const nothingKept = "Keep at least part of the clip";
 
   // An upload saves its title as the clip's: show it here at once, not on the next open.
@@ -233,13 +238,13 @@
   }
 
   function undo() {
-    if (uploading) return;
+    if (editLocked) return;
     const s = history?.undo();
     if (s) applyState(s);
   }
 
   function redo() {
-    if (uploading) return;
+    if (editLocked) return;
     const s = history?.redo();
     if (s) applyState(s);
   }
@@ -252,8 +257,8 @@
   const autosave = new Autosave({
     save: writeEdit,
     dirty: () => changed && kept.length > 0,
-    // The clip can't be saved while it uploads: the change waits for the upload to end.
-    blocked: () => uploading,
+    // The clip can't be saved while it uploads or exports: the change waits for that to end.
+    blocked: () => editLocked,
     onstatus: (status, error) => {
       saveStatus = status;
       if (status !== "failed") return;
@@ -262,9 +267,9 @@
     },
   });
 
-  // The upload ended: save what changed meanwhile.
+  // The upload or export ended: save what is still waiting.
   $effect(() => {
-    if (!uploading) {
+    if (!editLocked) {
       untrack(() => {
         if (autosave.pending) void autosave.flush();
       });
@@ -368,13 +373,13 @@
 
   /** A lane's slider moved: a level set by hand replaces the one a mute remembered. */
   function onvolume(key: string, volume: number) {
-    if (uploading) return;
+    if (editLocked) return;
     delete unmuteLevels[key];
     setVolume(key, volume);
   }
 
   function onmute(key: string) {
-    if (uploading) return;
+    if (editLocked) return;
     const next = toggleMute(volumeOf(key), unmuteLevels[key] ?? null);
     if (next.remembered === null) delete unmuteLevels[key];
     else unmuteLevels[key] = next.remembered;
@@ -789,8 +794,8 @@
   }
 
   function splitHere() {
-    // The clip can't change while it uploads.
-    if (uploading) return;
+    // The clip can't change while it uploads or exports.
+    if (editLocked) return;
     const next = splitAt(pieces, position, trim);
     if (next) pieces = next;
     else toast("Can't split here: too close to a split or the trim, or outside the trim", "error");
@@ -992,8 +997,8 @@
       {#if data}
         {#if changed && !kept.length}
           <span class="save-status warn" role="status">Not saved: {nothingKept.toLowerCase()}</span>
-        {:else if uploading || saveStatus === "waiting"}
-          <span class="save-status" role="status">Uploading — you can edit when it's done</span>
+        {:else if editLocked || saveStatus === "waiting"}
+          <span class="save-status" role="status">{exporting ? "Exporting" : "Uploading"} — you can edit when it's done</span>
         {:else if saveStatus === "saving"}
           <span class="save-status" role="status"><span class="spinner"></span> Saving…</span>
         {:else if saveStatus === "saved"}
@@ -1123,7 +1128,7 @@
         <button
           class="btn btn-sm split-btn"
           onclick={splitHere}
-          disabled={mediaError || uploading}
+          disabled={mediaError || editLocked}
           title="Split at the playhead (S), then switch the parts you don't want off"
         >
           <Icon name="scissors" size={15} /> Split
@@ -1137,14 +1142,14 @@
         tracks={laneTracks}
         master={masterVolume}
         blur={blurVideo}
-        locked={uploading}
+        locked={editLocked}
         {onvolume}
         {onmute}
         onmaster={(v) => {
-          if (!uploading) masterVolume = v;
+          if (!editLocked) masterVolume = v;
         }}
         onblur={(b) => {
-          if (!uploading) blurVideo = b;
+          if (!editLocked) blurVideo = b;
         }}
         onseek={seek}
         {onscrubstart}
@@ -1163,7 +1168,7 @@
             {onhandlemove}
             {onscrubstart}
             {onscrubend}
-            locked={uploading}
+            locked={editLocked}
           />
         {/snippet}
       </TrackLanes>

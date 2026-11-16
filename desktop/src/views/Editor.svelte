@@ -228,11 +228,13 @@
   }
 
   function undo() {
+    if (uploading) return;
     const s = history?.undo();
     if (s) applyState(s);
   }
 
   function redo() {
+    if (uploading) return;
     const s = history?.redo();
     if (s) applyState(s);
   }
@@ -727,6 +729,8 @@
   }
 
   function splitHere() {
+    // The clip can't change while it uploads.
+    if (uploading) return;
     const next = splitAt(pieces, position, trim);
     if (next) pieces = next;
     else toast("Can't split here: too close to a split or the trim, or outside the trim", "error");
@@ -912,8 +916,8 @@
       {#if data}
         {#if changed && !kept.length}
           <span class="save-status warn" role="status">Not saved: {nothingKept.toLowerCase()}</span>
-        {:else if saveStatus === "waiting" || (uploading && saveStatus === "saving")}
-          <span class="save-status" role="status"><span class="spinner"></span> Waiting for the upload…</span>
+        {:else if uploading || saveStatus === "waiting"}
+          <span class="save-status" role="status">Uploading — you can edit when it's done</span>
         {:else if saveStatus === "saving"}
           <span class="save-status" role="status"><span class="spinner"></span> Saving…</span>
         {:else if saveStatus === "saved"}
@@ -1031,7 +1035,7 @@
         <button
           class="btn btn-sm split-btn"
           onclick={splitHere}
-          disabled={mediaError}
+          disabled={mediaError || uploading}
           title="Split at the playhead (S), then switch the parts you don't want off"
         >
           <Icon name="scissors" size={15} /> Split
@@ -1051,13 +1055,14 @@
         {onhandlemove}
         {onscrubstart}
         {onscrubend}
+        locked={uploading}
       />
     </div>
 
     <div class="panel">
       <div class="mixer">
         <label class="blur-toggle" title="For clips where only the sound matters: uploads and exports blur the picture">
-          <input type="checkbox" bind:checked={blurVideo} />
+          <input type="checkbox" bind:checked={blurVideo} disabled={uploading} />
           <span class="switch" aria-hidden="true"></span>
           Blur video
         </label>
@@ -1070,6 +1075,7 @@
             max="100"
             step="1"
             bind:value={masterVolume}
+            disabled={uploading}
             style:--fill="{masterVolume}%"
             aria-label="Master volume"
           />
@@ -1085,6 +1091,7 @@
             max="100"
             step="1"
             bind:value={gameVolume}
+            disabled={uploading}
             style:--fill="{gameVolume}%"
             aria-label={data.extraTracks.length > 0 ? "Track 1 volume" : "Game volume"}
           />
@@ -1100,6 +1107,7 @@
               max="100"
               step="1"
               bind:value={micVolume}
+              disabled={uploading}
               style:--fill="{micVolume}%"
               aria-label="Mic volume"
             />
@@ -1116,6 +1124,7 @@
               max="100"
               step="1"
               bind:value={voiceVolume}
+              disabled={uploading}
               style:--fill="{voiceVolume}%"
               aria-label="Voice chat volume"
             />
@@ -1132,6 +1141,7 @@
               max="100"
               step="1"
               bind:value={extraVolumes[t.index]}
+              disabled={uploading}
               style:--fill="{extraVolumes[t.index]}%"
               aria-label="Track {t.index + 1} volume"
             />
@@ -1464,6 +1474,13 @@
     font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
+  }
+
+  /* While the clip uploads, the edit can't change. */
+  .blur-toggle:has(input:disabled),
+  .volume:has(input:disabled) {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
 
   .blur-toggle input {

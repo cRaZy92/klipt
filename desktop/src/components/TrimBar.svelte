@@ -20,6 +20,7 @@
     onhandlemove,
     onscrubstart,
     onscrubend,
+    locked = false,
   }: {
     /** The clip's length in ms. */
     duration: number;
@@ -45,6 +46,8 @@
     onscrubstart?: () => void;
     /** That pointer was released, or the browser took it away (pointercancel). */
     onscrubend?: () => void;
+    /** The edit can't change now (the clip is uploading): only the playhead moves. */
+    locked?: boolean;
   } = $props();
 
   let track = $state<HTMLElement>();
@@ -80,6 +83,7 @@
   );
 
   function moveSplitTo(i: number, ms: number) {
+    if (locked) return;
     const next = moveSplit(pieces, i, ms);
     if (next === pieces) return;
     pieces = next;
@@ -87,7 +91,8 @@
   }
 
   function grabSplit(e: PointerEvent, i: number) {
-    if (e.button !== 0) return;
+    // Locked: the pointer goes on to the bar, which moves the playhead.
+    if (e.button !== 0 || locked) return;
     e.stopPropagation();
     e.preventDefault();
     (e.currentTarget as HTMLElement).focus();
@@ -99,6 +104,7 @@
   function onsplitkey(e: KeyboardEvent, i: number) {
     const step = e.shiftKey ? 1000 : 100;
     const at = pieces[i].end;
+    if (locked) return;
     if (e.key === "Delete" || e.key === "Backspace") pieces = deleteSplit(pieces, i);
     else if (e.key === "ArrowLeft" || e.key === "ArrowDown") moveSplitTo(i, at - step);
     else if (e.key === "ArrowRight" || e.key === "ArrowUp") moveSplitTo(i, at + step);
@@ -117,6 +123,7 @@
 
   /** Moves one handle, keeping the other in place and the cut at least MIN_TRIM_MS long. */
   function moveHandle(handle: Handle, ms: number) {
+    if (locked) return;
     if (handle === "thumb") {
       const at = clampThumb(ms, { start, end });
       if (at === thumbAt && thumb !== null) return;
@@ -137,7 +144,8 @@
   }
 
   function grabHandle(e: PointerEvent, handle: Handle) {
-    if (e.button !== 0) return;
+    // Locked: the pointer goes on to the bar, which moves the playhead.
+    if (e.button !== 0 || locked) return;
     e.stopPropagation();
     e.preventDefault();
     (e.currentTarget as HTMLElement).focus();
@@ -204,7 +212,7 @@
   }
 </script>
 
-<div class="trimbar">
+<div class="trimbar" class:locked>
   <!-- The bar itself is a pointer target for seeking; keyboard users seek with the handles and
        the player controls, so it has no role of its own. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -247,7 +255,7 @@
           class="piece-toggle"
           class:removed={p.removed}
           style:left="{(pct(p.from) + pct(p.to)) / 2}%"
-          disabled={!allowed}
+          disabled={!allowed || locked}
           aria-label={p.removed ? "Keep this part" : "Remove this part"}
           title={!allowed ? "Keep at least part of the clip" : p.removed ? "Keep this part" : "Remove this part"}
           onpointerdown={stop}
@@ -263,6 +271,7 @@
         style:left="{pct(s.at)}%"
         role="slider"
         tabindex="0"
+        aria-disabled={locked}
         aria-label="Split"
         aria-orientation="horizontal"
         aria-valuemin={0}
@@ -282,6 +291,7 @@
           aria-label="Remove split"
           title="Remove split"
           tabindex="-1"
+          disabled={locked}
           onpointerdown={stop}
           onclick={() => (pieces = deleteSplit(pieces, s.i))}
         >
@@ -297,6 +307,7 @@
         style:left="{pct(value)}%"
         role="slider"
         tabindex="0"
+        aria-disabled={locked}
         aria-label={handle === "start" ? "Trim start" : "Trim end"}
         aria-orientation="horizontal"
         aria-valuemin={handle === "start" ? 0 : Math.min(start + MIN_TRIM_MS, duration)}
@@ -320,6 +331,7 @@
       style:left="{pct(thumbAt)}%"
       role="slider"
       tabindex="0"
+      aria-disabled={locked}
       aria-label="Thumbnail frame"
       title="Thumbnail: drag to the frame you want"
       aria-orientation="horizontal"
@@ -346,6 +358,13 @@
 </div>
 
 <style>
+  /* Locked: the handles, splits and thumbnail marker can't be grabbed (the bar still seeks). */
+  .locked .handle,
+  .locked .split,
+  .locked .thumb-mark {
+    cursor: not-allowed;
+  }
+
   .trimbar {
     display: flex;
     flex-direction: column;

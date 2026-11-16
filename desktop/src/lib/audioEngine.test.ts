@@ -18,7 +18,11 @@ function fakeContext() {
     decodeAudioData: async (data: ArrayBuffer) => {
       const url = new TextDecoder().decode(data);
       if (url === "bad") throw new Error("decode");
-      return { url };
+      return {
+        url,
+        numberOfChannels: 1,
+        getChannelData: () => new Float32Array([0, 0.5, -1, 0.25]),
+      };
     },
     createGain() {
       const g = { gain: { value: 1 }, connected: null as unknown, connect(n: unknown) { g.connected = n; } };
@@ -122,5 +126,23 @@ describe("AudioEngine", () => {
     expect(engine.nextSegment()).toEqual({ at: 0.5, from: 3000, to: 5000 });
     ctx.currentTime = 10.05 + 0.75;
     expect(engine.nextSegment()).toBeNull();
+  });
+});
+
+describe("peaks", () => {
+  it("computes peaks from the decoded track", async () => {
+    const { engine } = await loaded();
+    expect(Array.from(engine.peaks("game", 2)!)).toEqual([0.5, 1]);
+  });
+
+  it("caches per key and bucket count", async () => {
+    const { engine } = await loaded();
+    expect(engine.peaks("game", 2)).toBe(engine.peaks("game", 2));
+    expect(engine.peaks("game", 4)).not.toBe(engine.peaks("game", 2));
+  });
+
+  it("is null for a key that is not loaded", async () => {
+    const { engine } = await loaded();
+    expect(engine.peaks("nope", 2)).toBeNull();
   });
 });

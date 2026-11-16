@@ -3,6 +3,7 @@
 
 import { clipMsAt, schedule, segmentAt, type Segment } from "./playSchedule";
 import type { TrimRange } from "./trim";
+import { peaks } from "./waveform";
 
 const LEAD_S = 0.05;
 
@@ -10,6 +11,7 @@ export class AudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private tracks = new Map<string, { buffer: AudioBuffer; gain: GainNode }>();
+  private peakCache = new Map<string, Float32Array>();
   private sources: AudioBufferSourceNode[] = [];
   private segments: Segment[] = [];
   private startedAt = 0;
@@ -37,6 +39,9 @@ export class AudioEngine {
           const gain = ctx.createGain();
           gain.connect(this.master!);
           this.tracks.set(key, { buffer, gain });
+          for (const id of [...this.peakCache.keys()]) {
+            if (id.startsWith(`${key}:`)) this.peakCache.delete(id);
+          }
           return null;
         } catch {
           return key;
@@ -44,6 +49,22 @@ export class AudioEngine {
       }),
     );
     return results.filter((k): k is string => k !== null);
+  }
+
+  /** Waveform peaks of a loaded track, cached per key and bucket count; null if not loaded. */
+  peaks(key: string, buckets: number): Float32Array | null {
+    const track = this.tracks.get(key);
+    if (!track) return null;
+    const id = `${key}:${buckets}`;
+    let cached = this.peakCache.get(id);
+    if (!cached) {
+      const channels = Array.from({ length: track.buffer.numberOfChannels }, (_, i) =>
+        track.buffer.getChannelData(i),
+      );
+      cached = peaks(channels, buckets);
+      this.peakCache.set(id, cached);
+    }
+    return cached;
   }
 
   setGain(key: string, gain: number) {
@@ -111,5 +132,6 @@ export class AudioEngine {
     this.ctx = null;
     this.master = null;
     this.tracks.clear();
+    this.peakCache.clear();
   }
 }

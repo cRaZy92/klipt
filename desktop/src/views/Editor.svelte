@@ -263,10 +263,16 @@
     onstatus: (status, error) => {
       saveStatus = status;
       if (status !== "failed") return;
-      if (closed) console.error("Couldn't save the edit", error);
+      if (closed) leaveSaveFailed(error);
       else toast(`Couldn't save: ${errorMessage(error)}`, "error");
     },
   });
+
+  /** A save failed after the editor closed: toasts are app-wide, so the library shows it. */
+  function leaveSaveFailed(error: unknown) {
+    console.error("Couldn't save the edit on leaving", error);
+    toast(`Couldn't save your changes to ${data?.clip.title ?? clip.title}`, "error");
+  }
 
   // The upload or export ended: save what is still waiting.
   $effect(() => {
@@ -427,7 +433,7 @@
       closed = true;
       // Leaving with a change not saved yet (or whose save failed): save it now.
       if (autosave.pending && latest?.saveable && !deleted) {
-        api.saveEdit(clip.id, latest.edit, latest.thumb).catch((e) => console.error("Couldn't save the edit on leaving", e));
+        api.saveEdit(clip.id, latest.edit, latest.thumb).catch(leaveSaveFailed);
       }
       autosave.stop();
       cancelAnimationFrame(frame);

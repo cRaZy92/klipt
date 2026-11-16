@@ -19,7 +19,7 @@ export interface AutosaveOptions {
 
 /**
  * Saves an edit a moment after the last change, one save at a time: a change made while saving
- * is saved after that save. A failed save stays pending until the next change or `flush`.
+ * is saved after that save, and so is an edit that still differs from what that save wrote. A failed save stays pending until the next change or `flush`.
  */
 export class Autosave {
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -34,9 +34,9 @@ export class Autosave {
 
   constructor(private readonly options: AutosaveOptions) {}
 
-  /** A change is waiting to be saved, or the last save failed. */
+  /** A change is waiting to be saved or being saved, or the last save failed. */
   get pending(): boolean {
-    return this.timer !== undefined || this.again || this.failed || this.waiting;
+    return this.timer !== undefined || this.running || this.again || this.failed || this.waiting;
   }
 
   /** The edit changed: saves it once changes rest for the delay. */
@@ -97,6 +97,9 @@ export class Autosave {
         try {
           await this.options.save();
           this.failed = false;
+          // The edit changed during the save without a change waiting for its timer (e.g. it went
+          // back to the edit stored before this save): it differs from what was just written.
+          if (this.timer === undefined && this.options.dirty()) this.again = true;
         } catch (e) {
           this.failed = true;
           this.again = false;

@@ -150,6 +150,27 @@ describe("Autosave", () => {
     expect(statuses.at(-1)).toBe("saved");
   });
 
+  it("a change back to the saved edit while saving is saved after that save", async () => {
+    const { autosave, saves, statuses, setDirty } = setup();
+    setDirty(true);
+    autosave.changed();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(saves).toHaveLength(1);
+    // A running save counts as pending (leaving now must save the edit as it is).
+    expect(autosave.pending).toBe(true);
+    // The edit went back to what was stored before this save: no change is reported (the editor
+    // sees nothing to save), but once this save lands the edit differs from it.
+    saves[0].resolve();
+    await settle();
+    expect(saves).toHaveLength(2);
+    expect(statuses.at(-1)).toBe("saving");
+    setDirty(false);
+    saves[1].resolve();
+    await settle();
+    expect(statuses.at(-1)).toBe("saved");
+    expect(autosave.pending).toBe(false);
+  });
+
   it("flush during a save waits for it, then saves what changed meanwhile", async () => {
     const { autosave, saves, setDirty } = setup();
     setDirty(true);

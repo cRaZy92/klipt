@@ -1000,16 +1000,74 @@ pub fn save_edit(
     // The library's thumbnail follows; ffmpeg runs off the UI thread.
     let (thumb, tools) = (lock(&state.library).thumb_path(&id), state.tools.clone());
     if let Some(tools) = tools {
+        // Saves can follow each other faster than ffmpeg: only the newest redraw is kept.
+        let redraw = THUMBNAIL_REDRAWS.begin(&id);
         std::thread::spawn(move || {
             let at = clip.thumbnail_ms.unwrap_or_else(|| crate::recorder::thumbnail_at_ms(clip.duration_ms));
-            if let Err(e) = crate::ffmpeg::thumbnail(&tools, &clip.path, &thumb, at) {
-                eprintln!("klipt: can't redo the thumbnail of {}: {e}", clip.path.display());
+            match crate::ffmpeg::thumbnail_if(&tools, &clip.path, &thumb, at, || THUMBNAIL_REDRAWS.latest(&clip.id, redraw)) {
+                // A newer redraw replaces it.
+                Ok(false) => return,
+                Ok(true) => {}
+                Err(e) => eprintln!("klipt: can't redo the thumbnail of {}: {e}", clip.path.display()),
             }
             emit(&app, events::THUMBNAIL_CHANGED, serde_json::json!({ "id": clip.id }));
         });
     }
     Ok(())
 }
+
+/// The latest thumbnail redraw asked for, per clip: a redraw that finishes after a newer one was
+/// asked for doesn't replace the thumbnail. Redraws are numbered across all clips, so a number
+/// is never reused.
+struct ThumbnailRedraws(Mutex<Redraws>);
+
+#[derive(Default)]
+struct Redraws {
+    next: u64,
+    /// The newest redraw asked for, by clip id (removed once it has replaced the thumbnail).
+    latest: BTreeMap<String, u64>,
+}
+
+impl ThumbnailRedraws {
+    const fn new() -> Self {
+        Self(Mutex::new(Redraws { next: 0, latest: BTreeMap::new() }))
+    }
+
+    /// A redraw of `id`'s thumbnail starts: from now on, the newest one.
+    fn begin(&self, id: &str) -> u64 {
+        let mut redraws = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        redraws.next += 1;
+        let redraw = redraws.next;
+        redraws.latest.insert(id.to_string(), redraw);
+        redraw
+    }
+
+    /// While `redraw` is still the newest asked for `id`: a guard to hold while it replaces the
+    /// thumbnail (no newer redraw can start meanwhile). Dropping it ends the redraw.
+    fn latest<'a>(&'a self, id: &'a str, redraw: u64) -> Option<LatestRedraw<'a>> {
+        let redraws = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        // Not `then_some`: a guard made and dropped would end the newest redraw.
+        if redraws.latest.get(id) == Some(&redraw) {
+            Some(LatestRedraw { redraws, id })
+        } else {
+            None
+        }
+    }
+}
+
+/// The newest redraw of a clip's thumbnail, replacing it; older redraws are dropped from now on.
+struct LatestRedraw<'a> {
+    redraws: MutexGuard<'a, Redraws>,
+    id: &'a str,
+}
+
+impl Drop for LatestRedraw<'_> {
+    fn drop(&mut self) {
+        self.redraws.latest.remove(self.id);
+    }
+}
+
+static THUMBNAIL_REDRAWS: ThumbnailRedraws = ThumbnailRedraws::new();
 
 #[derive(Clone, Serialize)]
 struct ExportProgressEvent<'a> {
@@ -1178,6 +1236,23 @@ mod tests {
             blur_video: false,
             removed_ranges: Vec::new(),
         }
+    }
+
+    #[test]
+    fn only_the_newest_thumbnail_redraw_replaces_the_thumbnail() {
+        let redraws = ThumbnailRedraws::new();
+        let older = redraws.begin("a");
+        let newer = redraws.begin("a");
+        let other = redraws.begin("b");
+        assert!(redraws.latest("a", older).is_none(), "an older redraw finishing last is dropped");
+        assert!(redraws.latest("a", newer).is_some());
+        assert!(redraws.latest("b", other).is_some(), "each clip on its own");
+        // Once the newest has replaced the thumbnail, the older still can't, and a redraw asked
+        // for later is the newest again.
+        assert!(redraws.latest("a", older).is_none());
+        let later = redraws.begin("a");
+        assert!(redraws.latest("a", older).is_none());
+        assert!(redraws.latest("a", later).is_some());
     }
 
     #[test]

@@ -5,6 +5,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -265,17 +266,24 @@ pub fn can_encode(tools: &Tools, encoder_args: &[&str]) -> bool {
 /// run leaves nothing behind. Used for import conversions.
 pub fn write_mp4(tools: &Tools, args: &[String], out: &Path) -> Result<()> {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
-    write_via_temp(tools, args, out, "tmp.mp4", "ffmpeg wrote nothing")
+    write_via_temp(tools, args, out, "tmp.mp4", "ffmpeg wrote nothing", || Some(())).map(|_| ())
 }
 
 /// Writes a JPEG frame from `at_ms` into `out` (480 px wide), replacing it atomically.
 pub fn thumbnail(tools: &Tools, input: &Path, out: &Path, at_ms: u64) -> Result<()> {
+    thumbnail_if(tools, input, out, at_ms, || Some(())).map(|_| ())
+}
+
+/// Like [`thumbnail`], but once the frame is written, `out` is replaced only if `wanted` gives a
+/// guard (held while it is replaced); otherwise the frame is thrown away. Returns whether `out`
+/// was replaced.
+pub fn thumbnail_if<G>(tools: &Tools, input: &Path, out: &Path, at_ms: u64, wanted: impl FnOnce() -> Option<G>) -> Result<bool> {
     let mut args = os_args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-ss"]);
     args.push(format!("{:.3}", at_ms as f64 / 1000.0).into());
     args.push("-i".into());
     args.push(input.into());
     args.extend(os_args(["-frames:v", "1", "-vf", &format!("scale={THUMB_WIDTH}:-2"), "-q:v", "4", "-update", "1"]));
-    write_via_temp(tools, args, out, "tmp.jpg", &format!("no video frame at {at_ms} ms"))
+    write_via_temp(tools, args, out, "tmp.jpg", &format!("no video frame at {at_ms} ms"), wanted)
 }
 
 /// Copies audio track `track_index` (0 = game, 1 = mic) into an `.m4a` without re-encoding.
@@ -283,34 +291,50 @@ pub fn demux_audio(tools: &Tools, input: &Path, track_index: u32, out: &Path) ->
     let mut args = os_args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i"]);
     args.push(input.into());
     args.extend(os_args(["-map", &format!("0:a:{track_index}"), "-vn", "-c", "copy", "-f", "ipod"]));
-    write_via_temp(tools, args, out, "tmp.m4a", &format!("no audio track {track_index}"))
+    write_via_temp(tools, args, out, "tmp.m4a", &format!("no audio track {track_index}"), || Some(())).map(|_| ())
 }
 
 /// Runs ffmpeg with `args` plus a temp output path next to `out`, then renames the temp file over
-/// `out`, so a failed or interrupted run never leaves a half-written file behind.
-fn write_via_temp(
+/// `out`, so a failed or interrupted run never leaves a half-written file behind. The rename
+/// happens only if `wanted` gives a guard, held during it; returns whether it happened.
+fn write_via_temp<G>(
     tools: &Tools,
     mut args: Vec<OsString>,
     out: &Path,
     temp_ext: &str,
     empty_detail: &str,
-) -> Result<()> {
+    wanted: impl FnOnce() -> Option<G>,
+) -> Result<bool> {
     if let Some(dir) = out.parent() {
         fs::create_dir_all(dir)?;
     }
-    let temp = out.with_extension(temp_ext);
+    let temp = temp_path(out, temp_ext);
     args.push(temp.clone().into());
     let result = run("ffmpeg", &tools.ffmpeg, &args).and_then(|_| {
         // ffmpeg exits 0 when it had nothing to write (e.g. a seek past the end).
         match fs::metadata(&temp) {
-            Ok(meta) if meta.len() > 0 => Ok(fs::rename(&temp, out)?),
+            Ok(meta) if meta.len() > 0 => match wanted() {
+                Some(_guard) => {
+                    fs::rename(&temp, out)?;
+                    Ok(true)
+                }
+                None => Ok(false),
+            },
             _ => Err(AppError::ToolFailed { tool: "ffmpeg", detail: empty_detail.to_string() }),
         }
     });
-    if result.is_err() {
+    if !matches!(result, Ok(true)) {
         let _ = fs::remove_file(&temp);
     }
     result
+}
+
+/// The temp file a run writes before it replaces `out`: its own, so runs for the same `out` can
+/// overlap (e.g. `clip.<pid>-<n>.tmp.jpg`).
+fn temp_path(out: &Path, temp_ext: &str) -> PathBuf {
+    static RUNS: AtomicU64 = AtomicU64::new(0);
+    let run = RUNS.fetch_add(1, Ordering::Relaxed);
+    out.with_extension(format!("{}-{run}.{temp_ext}", std::process::id()))
 }
 
 fn os_args<'a>(args: impl IntoIterator<Item = &'a str>) -> Vec<OsString> {
@@ -431,6 +455,30 @@ pub(crate) mod tests {
         // Replacing an existing thumbnail works.
         thumbnail(&tools(), fixture(), &out, 0).unwrap();
         assert_eq!(fs::read_dir(out.parent().unwrap()).unwrap().count(), 1, "no temp files left");
+    }
+
+    #[test]
+    fn each_run_writes_its_own_temp_file_next_to_the_output() {
+        let out = Path::new("/thumbs/clip.jpg");
+        let (a, b) = (temp_path(out, "tmp.jpg"), temp_path(out, "tmp.jpg"));
+        assert_ne!(a, b, "overlapping runs must not share a temp file");
+        for t in [&a, &b] {
+            assert_eq!(t.parent(), out.parent());
+            assert!(t.to_string_lossy().ends_with(".tmp.jpg"), "{}", t.display());
+            assert!(t.file_name().unwrap().to_string_lossy().starts_with("clip."), "{}", t.display());
+        }
+    }
+
+    #[test]
+    fn a_thumbnail_no_longer_wanted_leaves_the_old_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("clip.jpg");
+        fs::write(&out, b"newer").unwrap();
+        assert!(!thumbnail_if(&tools(), fixture(), &out, 1_000, || None::<()>).unwrap());
+        assert_eq!(fs::read(&out).unwrap(), b"newer");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "no temp files left");
+        assert!(thumbnail_if(&tools(), fixture(), &out, 1_000, || Some(())).unwrap());
+        assert_eq!(&fs::read(&out).unwrap()[..3], &[0xFF, 0xD8, 0xFF], "JPEG magic");
     }
 
     #[test]

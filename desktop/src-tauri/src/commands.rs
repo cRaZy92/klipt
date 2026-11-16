@@ -902,7 +902,9 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
         });
     }
     let media = app.state::<crate::media_server::MediaServer>();
-    let video_url = media.url_for(&clip.path);
+    // Picture only: the editor plays the sound itself, and a video with audio would open its own
+    // (muted) system stream, which made PipeWire start Klipt muted.
+    let video_url = media.url_for_video_only(&clip.path);
     let game_audio_url = media.url_for(&game);
     let mic_audio_url = mic.as_deref().map(|m| media.url_for(m));
     let voice_audio_url = voice.as_deref().map(|v| media.url_for(v));

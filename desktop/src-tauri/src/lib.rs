@@ -16,6 +16,7 @@ pub mod import;
 mod autostart_linux;
 pub mod library;
 pub mod media_server;
+pub mod mp4_mute;
 pub mod update;
 pub mod recorder;
 pub mod screenshot;

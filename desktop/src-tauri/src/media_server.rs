@@ -32,7 +32,15 @@ const APP_ORIGINS: &[&str] =
 #[derive(Clone)]
 pub struct MediaServer {
     port: u16,
-    files: Arc<Mutex<HashMap<String, PathBuf>>>,
+    files: Arc<Mutex<HashMap<String, Served>>>,
+}
+
+/// A registered file and how it's served.
+#[derive(Clone)]
+struct Served {
+    path: PathBuf,
+    /// Served as picture-only: the offsets of its audio tracks' handler types (see `mp4_mute`).
+    video_only: Option<Arc<[u64]>>,
 }
 
 impl MediaServer {
@@ -40,7 +48,7 @@ impl MediaServer {
     pub fn start() -> io::Result<MediaServer> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
-        let files: Arc<Mutex<HashMap<String, PathBuf>>> = Arc::default();
+        let files: Arc<Mutex<HashMap<String, Served>>> = Arc::default();
         let shared = files.clone();
         let open = Arc::new(AtomicUsize::new(0));
         std::thread::Builder::new().name("klipt-media".into()).spawn(move || {
@@ -64,21 +72,37 @@ impl MediaServer {
 
     /// Registers `path` and returns the URL it is served at. The same path keeps the same URL.
     pub fn url_for(&self, path: &Path) -> String {
+        self.register(path, false)
+    }
+
+    /// Like [`MediaServer::url_for`], but served without sound: its audio tracks show up as a
+    /// type players skip (see `mp4_mute`), so a player opens no audio stream for it. The file on
+    /// disk is untouched. If its tracks can't be read, it's served as it is.
+    pub fn url_for_video_only(&self, path: &Path) -> String {
+        self.register(path, true)
+    }
+
+    fn register(&self, path: &Path, video_only: bool) -> String {
         let mut files = self.files.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let token = files
-            .iter()
-            .find(|(_, p)| p.as_path() == path)
-            .map(|(t, _)| t.clone())
-            .unwrap_or_else(|| {
-                let t = uuid::Uuid::new_v4().simple().to_string();
-                files.insert(t.clone(), path.to_path_buf());
-                t
-            });
+        if let Some((token, _)) =
+            files.iter().find(|(_, s)| s.path.as_path() == path && s.video_only.is_some() == video_only)
+        {
+            return format!("http://127.0.0.1:{}/{}", self.port, token);
+        }
+        let video_only = video_only.then(|| {
+            let offsets = File::open(path).and_then(|mut f| crate::mp4_mute::audio_handler_offsets(&mut f));
+            Arc::from(offsets.unwrap_or_else(|e| {
+                eprintln!("klipt: can't read the tracks of {}, serving it with sound: {e}", path.display());
+                Vec::new()
+            }))
+        });
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        files.insert(token.clone(), Served { path: path.to_path_buf(), video_only });
         format!("http://127.0.0.1:{}/{}", self.port, token)
     }
 }
 
-fn handle(stream: TcpStream, files: &Mutex<HashMap<String, PathBuf>>) -> io::Result<()> {
+fn handle(stream: TcpStream, files: &Mutex<HashMap<String, Served>>) -> io::Result<()> {
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     // A head longer than the limit reads as cut short, so it never grows without bound.
@@ -108,8 +132,8 @@ fn handle(stream: TcpStream, files: &Mutex<HashMap<String, PathBuf>>) -> io::Res
         return respond_status(&mut out, "405 Method Not Allowed");
     }
     let token = target.trim_start_matches('/').split('?').next().unwrap_or("");
-    let path = files.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(token).cloned();
-    let Some(path) = path else { return respond_status(&mut out, "404 Not Found") };
+    let served = files.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(token).cloned();
+    let Some(Served { path, video_only }) = served else { return respond_status(&mut out, "404 Not Found") };
     let Ok(mut file) = File::open(&path) else { return respond_status(&mut out, "404 Not Found") };
     let size = file.metadata()?.len();
     let mime = match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
@@ -143,7 +167,26 @@ fn handle(stream: TcpStream, files: &Mutex<HashMap<String, PathBuf>>) -> io::Res
         return Ok(());
     }
     file.seek(SeekFrom::Start(start))?;
-    io::copy(&mut file.take(len), &mut out)?;
+    match video_only.filter(|offsets| !offsets.is_empty()) {
+        None => {
+            io::copy(&mut file.take(len), &mut out)?;
+        }
+        Some(offsets) => {
+            // Chunk by chunk, with the audio tracks' handler types swapped as they go by.
+            let mut file = file.take(len);
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut at = start;
+            loop {
+                let n = file.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                crate::mp4_mute::apply(&mut buf[..n], at, &offsets);
+                out.write_all(&buf[..n])?;
+                at += n as u64;
+            }
+        }
+    }
     out.flush()
 }
 
@@ -219,6 +262,40 @@ mod tests {
         assert!(app.contains("Access-Control-Allow-Origin: tauri://localhost\r\n"), "{app}");
         let web = get(&path, "Origin: https://evil.example\r\n");
         assert!(!web.contains("Access-Control-Allow-Origin"), "{web}");
+    }
+
+    #[test]
+    fn a_video_only_url_serves_the_audio_tracks_as_unknown() {
+        let fixture = crate::ffmpeg::tests::fixture();
+        let original = std::fs::read(fixture).unwrap();
+        let offsets = crate::mp4_mute::audio_handler_offsets(&mut File::open(fixture).unwrap()).unwrap();
+        assert_eq!(offsets.len(), 2);
+        let server = MediaServer::start().unwrap();
+        let plain = server.url_for(fixture);
+        let muted = server.url_for_video_only(fixture);
+        assert_ne!(plain, muted, "the same file, served two ways");
+        assert_eq!(muted, server.url_for_video_only(fixture), "same path keeps its URL");
+
+        let body = |url: &str, extra: &str| {
+            let path = url.trim_start_matches(&format!("http://127.0.0.1:{}", server.port));
+            let mut s = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+            write!(s, "GET {path} HTTP/1.1\r\nHost: x\r\n{extra}\r\n").unwrap();
+            let mut reply = Vec::new();
+            s.read_to_end(&mut reply).unwrap();
+            let split = reply.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+            reply[split..].to_vec()
+        };
+        assert_eq!(body(&plain, ""), original, "the plain URL is untouched");
+        let mut expected = original.clone();
+        crate::mp4_mute::apply(&mut expected, 0, &offsets);
+        assert_eq!(body(&muted, ""), expected);
+        for &at in &offsets {
+            assert_eq!(&expected[at as usize..at as usize + 4], b"klpt");
+        }
+        // A range that cuts through a handler type gets just its part patched.
+        let (from, to) = (offsets[0] + 2, offsets[0] + 9);
+        let part = body(&muted, &format!("Range: bytes={from}-{to}\r\n"));
+        assert_eq!(part, expected[from as usize..=to as usize]);
     }
 
     #[test]

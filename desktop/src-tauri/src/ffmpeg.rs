@@ -19,12 +19,14 @@ pub struct Tools {
     pub ffprobe: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Probe {
     pub duration_ms: u64,
     pub width: u32,
     pub height: u32,
+    /// Frames per second; 0 when the file doesn't say.
+    pub fps: f64,
     pub audio_tracks: u32,
 }
 
@@ -66,6 +68,7 @@ pub fn probe(tools: &Tools, input: &Path) -> Result<Probe> {
         width: Option<u32>,
         height: Option<u32>,
         duration: Option<String>,
+        avg_frame_rate: Option<String>,
     }
     #[derive(Deserialize)]
     struct Format {
@@ -93,6 +96,7 @@ pub fn probe(tools: &Tools, input: &Path) -> Result<Probe> {
         duration_ms,
         width: video.and_then(|v| v.width).unwrap_or(0),
         height: video.and_then(|v| v.height).unwrap_or(0),
+        fps: video.and_then(|v| v.avg_frame_rate.as_deref()).map_or(0.0, parse_rate),
         audio_tracks: parsed.streams.iter().filter(|s| s.codec_type.as_deref() == Some("audio")).count() as u32,
     })
 }
@@ -409,6 +413,12 @@ pub(crate) mod tests {
         assert_eq!((p.width, p.height), (320, 240));
         assert_eq!(p.audio_tracks, 2);
         assert!((5_900..=6_100).contains(&p.duration_ms), "{}", p.duration_ms);
+    }
+
+    #[test]
+    fn probe_reports_fps() {
+        let p = probe(&tools(), fixture()).unwrap();
+        assert!((p.fps - 30.0).abs() < 0.01, "{}", p.fps);
     }
 
     #[test]

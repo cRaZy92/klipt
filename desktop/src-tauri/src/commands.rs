@@ -796,6 +796,8 @@ pub struct EditorData {
     /// The clip's other audio tracks (an imported clip's): the editor shows a slider for each.
     pub extra_tracks: Vec<ExtraTrack>,
     pub duration_ms: u64,
+    /// The clip's frame rate (0 when unknown), for stepping one frame at a time.
+    pub fps: f64,
     pub filmstrip: FilmstripInfo,
 }
 
@@ -835,12 +837,12 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     let cache_dir = cache_dir(&app)?;
     let (input, tracks, stored_ms) = (clip.path.clone(), export::Tracks::of(&clip), clip.duration_ms);
     let (strip_tools, strip_cache) = (tools.clone(), cache_dir.clone());
-    let (audio, duration_ms) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
+    let (audio, duration_ms, fps) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
         // How many audio tracks the file has: an imported clip may have more than Klipt records.
         let info = crate::ffmpeg::probe(&tools, &input)?;
         let audio = editor::prepare_audio(&tools, &input, tracks, info.audio_tracks.max(1), &cache_dir, &id)?;
         let duration_ms = if stored_ms > 0 { stored_ms } else { info.duration_ms };
-        Ok((audio, duration_ms))
+        Ok((audio, duration_ms, info.fps))
     })
     .await
     .map_err(|e| AppError::Internal(format!("editor setup failed: {e}")))??;
@@ -924,6 +926,7 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
         mic_audio_path: mic,
         voice_audio_path: voice,
         duration_ms,
+        fps,
         filmstrip: FilmstripInfo { dir: strip, frames, total },
     })
 }

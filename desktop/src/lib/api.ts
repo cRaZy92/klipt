@@ -196,6 +196,8 @@ export interface EditorData {
   /** The clip's other audio tracks (an imported clip's), each with its own slider. */
   extraTracks: { index: number; audioPath: string; audioUrl: string }[];
   durationMs: number;
+  /** The clip's frame rate; 0 when unknown. */
+  fps: number;
   /** JPEG frames (`000000.jpg`, one per 100 ms) in `dir`; `frames` are readable now, the rest follow. */
   filmstrip: { dir: string; frames: number; total: number };
 }

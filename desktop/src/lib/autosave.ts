@@ -1,11 +1,16 @@
-/** What the header says about saving: a change is waiting or being written, all saved, or the last save failed. */
-export type SaveStatus = "saving" | "saved" | "failed";
+/**
+ * What the header says about saving: a change is waiting or being written, all saved, the last
+ * save failed, or a change waits until saving is possible again (e.g. while the clip uploads).
+ */
+export type SaveStatus = "saving" | "saved" | "failed" | "waiting";
 
 export interface AutosaveOptions {
   /** Writes the edit as it is now. */
   save: () => Promise<void>;
   /** Whether the edit differs from the saved one (and can be saved). */
   dirty: () => boolean;
+  /** Saving isn't possible now (a change then waits, without an error, until `flush`). */
+  blocked?: () => boolean;
   /** The status changed; `error` comes with "failed". */
   onstatus: (status: SaveStatus, error?: unknown) => void;
   /** How long after the last change the save starts. */
@@ -24,12 +29,14 @@ export class Autosave {
   /** Asked to save while a save was running: save again after it. */
   private again = false;
   private failed = false;
+  /** A change waits for saving to be possible again. */
+  private waiting = false;
 
   constructor(private readonly options: AutosaveOptions) {}
 
   /** A change is waiting to be saved, or the last save failed. */
   get pending(): boolean {
-    return this.timer !== undefined || this.again || this.failed;
+    return this.timer !== undefined || this.again || this.failed || this.waiting;
   }
 
   /** The edit changed: saves it once changes rest for the delay. */
@@ -46,7 +53,7 @@ export class Autosave {
   async flush(): Promise<boolean> {
     this.cancelTimer();
     await this.run();
-    return !this.failed;
+    return !this.failed && !this.waiting;
   }
 
   /** Drops a waiting save (the editor is closing and saves by itself). */
@@ -76,8 +83,16 @@ export class Autosave {
         this.again = false;
         if (!this.options.dirty()) {
           this.failed = false;
+          this.waiting = false;
           continue;
         }
+        if (this.options.blocked?.()) {
+          this.waiting = true;
+          this.again = false;
+          this.options.onstatus("waiting");
+          return;
+        }
+        this.waiting = false;
         this.options.onstatus("saving");
         try {
           await this.options.save();

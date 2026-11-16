@@ -14,6 +14,7 @@ function deferred() {
 
 function setup() {
   let dirty = false;
+  let blocked = false;
   const saves: ReturnType<typeof deferred>[] = [];
   const statuses: SaveStatus[] = [];
   const errors: unknown[] = [];
@@ -24,6 +25,7 @@ function setup() {
       return d.promise;
     },
     dirty: () => dirty,
+    blocked: () => blocked,
     onstatus: (s, e) => {
       statuses.push(s);
       if (e !== undefined) errors.push(e);
@@ -36,6 +38,7 @@ function setup() {
     statuses,
     errors,
     setDirty: (d: boolean) => (dirty = d),
+    setBlocked: (b: boolean) => (blocked = b),
   };
 }
 
@@ -167,6 +170,49 @@ describe("Autosave", () => {
     autosave.changed();
     autosave.stop();
     await vi.advanceTimersByTimeAsync(1000);
+    expect(saves).toHaveLength(0);
+  });
+
+  it("while blocked (e.g. uploading) a change waits instead of saving, and stays pending", async () => {
+    const { autosave, saves, statuses, errors, setDirty, setBlocked } = setup();
+    setDirty(true);
+    setBlocked(true);
+    autosave.changed();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(saves).toHaveLength(0);
+    expect(statuses.at(-1)).toBe("waiting");
+    expect(errors).toEqual([]);
+    expect(autosave.pending).toBe(true);
+
+    // Unblocked: flushing saves the waiting change.
+    setBlocked(false);
+    const flushed = autosave.flush();
+    expect(saves).toHaveLength(1);
+    setDirty(false);
+    saves[0].resolve();
+    expect(await flushed).toBe(true);
+    expect(statuses.at(-1)).toBe("saved");
+    expect(autosave.pending).toBe(false);
+  });
+
+  it("a waiting change that was undone back to the saved edit is no longer pending", async () => {
+    const { autosave, statuses, setDirty, setBlocked } = setup();
+    setDirty(true);
+    setBlocked(true);
+    autosave.changed();
+    await vi.advanceTimersByTimeAsync(600);
+    setDirty(false);
+    autosave.changed();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(statuses.at(-1)).toBe("saved");
+    expect(autosave.pending).toBe(false);
+  });
+
+  it("flush while blocked reports that nothing was saved", async () => {
+    const { autosave, saves, setDirty, setBlocked } = setup();
+    setDirty(true);
+    setBlocked(true);
+    expect(await autosave.flush()).toBe(false);
     expect(saves).toHaveLength(0);
   });
 });

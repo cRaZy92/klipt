@@ -31,6 +31,7 @@
   import { menu } from "../lib/a11y";
   import { Autosave, type SaveStatus } from "../lib/autosave";
   import { EditHistory } from "../lib/editHistory";
+  import { Gestures } from "../lib/gestures";
   import { toast } from "../lib/toasts.svelte";
   import { isBusy, uploads } from "../lib/uploads.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
@@ -208,6 +209,11 @@
 
   /** The edits made since the editor opened (created once the clip is loaded). */
   let history: EditHistory<EditState> | null = null;
+  /**
+   * A drag on the timeline or a volume slider in progress: its changes become one undo step,
+   * recorded when it ends (so a drag that rests is still one step).
+   */
+  const gestures = new Gestures<"scrub" | "slider">(() => history?.record(editState));
 
   function applyState(s: EditState) {
     trim = s.trim;
@@ -239,10 +245,23 @@
   const autosave = new Autosave({
     save: writeEdit,
     dirty: () => changed && kept.length > 0,
+    // The clip can't be saved while it uploads: the change waits for the upload to end.
+    blocked: () => uploading,
     onstatus: (status, error) => {
       saveStatus = status;
-      if (status === "failed" && !closed) toast(`Couldn't save: ${errorMessage(error)}`, "error");
+      if (status !== "failed") return;
+      if (closed) console.error("Couldn't save the edit", error);
+      else toast(`Couldn't save: ${errorMessage(error)}`, "error");
     },
+  });
+
+  // The upload ended: save what changed meanwhile.
+  $effect(() => {
+    if (!uploading) {
+      untrack(() => {
+        if (autosave.pending) void autosave.flush();
+      });
+    }
   });
 
   // Every change to the edit is an undo step (a drag is one) and is saved a moment later. An
@@ -252,7 +271,8 @@
     const state = editState;
     untrack(() => {
       if (!history) return;
-      history.record(state);
+      // Separate edits are separate steps; a drag is recorded once, when it ends.
+      if (!gestures.active) history.record(state);
       latest = { edit, thumb: savedThumb, saveable: kept.length > 0 };
       if (changed || autosave.pending) autosave.changed();
     });
@@ -282,7 +302,7 @@
       data = d;
       stored = edit;
       storedThumb = savedThumb;
-      history = new EditHistory(editState);
+      history = new EditHistory(editState, 0);
       void loadAudio(d);
     } catch (e) {
       loadError = errorMessage(e);
@@ -474,12 +494,14 @@
 
   /** The pointer went down on the timeline: pause (even if it never moves). */
   function onscrubstart() {
+    gestures.start("scrub");
     scrubbing = true;
     wasPlaying = playing;
     if (playing) pause();
   }
 
   function onscrubend() {
+    gestures.end("scrub");
     scrubbing = false;
     settleScrub();
     if (wasPlaying && !playing && !mediaError && audioReady) startPlayback(position);
@@ -811,6 +833,11 @@
     api.showInFolder(clip.id).catch((e) => toast(errorMessage(e), "error"));
   }
 
+  /** A volume slider is grabbed: its drag is one undo step. */
+  function onpointerdown(e: PointerEvent) {
+    if ((e.target as Element).closest?.(".editor input[type='range']")) gestures.start("slider");
+  }
+
   function closeMore(e: MouseEvent) {
     if (moreOpen && !(e.target as Element).closest?.(".more")) moreOpen = false;
   }
@@ -859,7 +886,13 @@
   }
 </script>
 
-<svelte:window {onkeydown} onclick={closeMore} />
+<svelte:window
+  {onkeydown}
+  onclick={closeMore}
+  {onpointerdown}
+  onpointerup={() => gestures.end("slider")}
+  onpointercancel={() => gestures.end("slider")}
+/>
 
 <section class="editor">
   <header class="bar">
@@ -879,6 +912,8 @@
       {#if data}
         {#if changed && !kept.length}
           <span class="save-status warn" role="status">Not saved: {nothingKept.toLowerCase()}</span>
+        {:else if saveStatus === "waiting" || (uploading && saveStatus === "saving")}
+          <span class="save-status" role="status"><span class="spinner"></span> Waiting for the upload…</span>
         {:else if saveStatus === "saving"}
           <span class="save-status" role="status"><span class="spinner"></span> Saving…</span>
         {:else if saveStatus === "saved"}

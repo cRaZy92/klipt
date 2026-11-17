@@ -205,12 +205,17 @@
     {:else}
       {#if uploaded}
         <button class="btn btn-sm grow" onclick={oncopy}><Icon name="link" size={15} /> Copy link</button>
+      {:else if onedit}
+        <!-- Clips are trimmed before they're shared, so editing leads; a straight upload is in the menu. -->
+        <button class="btn btn-sm btn-soft grow" onclick={onedit} disabled={busy} title="Trim and volume">
+          <Icon name="scissors" size={15} /> Edit
+        </button>
       {:else}
         <button class="btn btn-sm btn-soft grow" onclick={onupload} disabled={busy}>
           <Icon name="upload" size={15} /> Upload
         </button>
       {/if}
-      {#if onedit}
+      {#if onedit && uploaded}
         <button class="btn btn-sm btn-ghost btn-icon" onclick={onedit} disabled={busy} aria-label="Edit" title="Trim and volume">
           <Icon name="scissors" size={16} />
         </button>
@@ -241,6 +246,10 @@
             {#if uploaded}
               <button role="menuitem" onclick={() => pick(onupload)} disabled={busy}>
                 <Icon name="upload" size={16} /> Upload again
+              </button>
+            {:else if onedit}
+              <button role="menuitem" onclick={() => pick(onupload)} disabled={busy}>
+                <Icon name="upload" size={16} /> Upload full clip
               </button>
             {/if}
             <hr />

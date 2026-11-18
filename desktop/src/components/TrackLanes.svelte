@@ -113,9 +113,9 @@
   }
 
   /** A zoom being dragged on the Zoom lane: its body (moves it) or one edge (resizes it). */
-  let zoomDrag: { i: number; what: "move" | "start" | "end"; offset: number; moved: boolean } | null = null;
+  let zoomDrag: { i: number; what: "move" | "start" | "end"; offset: number; moved: boolean } | null = $state(null);
   /** How close to a zoom's edge (px) the pointer resizes it instead of moving it. */
-  const EDGE_PX = 8;
+  const EDGE_PX = 10;
 
   function zoomDown(e: PointerEvent, i: number) {
     if (e.button !== 0) return;
@@ -258,6 +258,8 @@
         <div
           class="zoom-block"
           class:selected={selectedZoom === i}
+          class:moving={zoomDrag?.i === i && zoomDrag.what === "move"}
+          class:resizing={zoomDrag?.i === i && zoomDrag.what !== "move"}
           role="button"
           tabindex="0"
           aria-label="Zoom {z.zoom.toFixed(1)}× from {(z.startMs / 1000).toFixed(1)} s"
@@ -272,6 +274,9 @@
           onlostpointercapture={zoomUp}
           onkeydown={(e) => zoomKey(e, i)}
         >
+          <!-- Where a press resizes instead of moving (as wide as EDGE_PX): shows the resize cursor. -->
+          <span class="zoom-edge start" aria-hidden="true"></span>
+          <span class="zoom-edge end" aria-hidden="true"></span>
           <span class="ramp in" style:width="{(rampMs(z) / (z.endMs - z.startMs)) * 100}%"></span>
           <span class="zoom-text"><Icon name="zoom" size={12} /> {z.zoom.toFixed(1)}×</span>
           <span class="ramp out" style:width="{(rampMs(z) / (z.endMs - z.startMs)) * 100}%"></span>
@@ -565,8 +570,32 @@
       inset -3px 0 0 var(--accent);
   }
 
-  .zoom-block:active {
+  /* While dragging, the block holds the pointer, so its own cursor is the one that shows. */
+  .zoom-block.moving {
     cursor: grabbing;
+  }
+
+  .zoom-block.resizing {
+    cursor: ew-resize;
+  }
+
+  .zoom-edge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    width: 10px;
+    cursor: ew-resize;
+  }
+  .zoom-edge.start {
+    left: 0;
+  }
+  .zoom-edge.end {
+    right: 0;
+  }
+
+  .locked .zoom-edge {
+    cursor: not-allowed;
   }
 
   .zoom-block.selected {

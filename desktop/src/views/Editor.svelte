@@ -1260,6 +1260,15 @@
     gap: 1rem;
     height: 100%;
     padding: 1.1rem 2rem 1.5rem;
+    /* The editor is a tool, not a page: dragging across it must not
+       highlight labels and rows. Text fields keep their selection. */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .editor :global(:is(input, textarea)) {
+    -webkit-user-select: text;
+    user-select: text;
   }
 
   .bar {

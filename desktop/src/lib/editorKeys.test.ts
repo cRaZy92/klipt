@@ -35,6 +35,13 @@ describe("editorKeyAction", () => {
     expect(editorKeyAction(key("z"), "text", false)).toBeNull();
   });
 
+  it("Delete and Backspace remove, but not in a text field", () => {
+    expect(editorKeyAction(key("Delete"), "none", false)).toEqual({ kind: "delete" });
+    expect(editorKeyAction(key("Backspace"), "control", false)).toEqual({ kind: "delete" });
+    expect(editorKeyAction(key("Backspace"), "text", false)).toBeNull();
+    expect(editorKeyAction(key("Delete", { ctrlKey: true }), "none", false)).toBeNull();
+  });
+
   it("the arrows step a frame, or a second with Shift", () => {
     expect(editorKeyAction(key("ArrowLeft"), "none", false)).toEqual({ kind: "step", direction: -1, second: false });
     expect(editorKeyAction(key("ArrowRight", { shiftKey: true }), "none", false)).toEqual({

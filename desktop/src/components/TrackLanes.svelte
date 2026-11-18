@@ -4,6 +4,8 @@
   import { laneShading, rulerTicks } from "../lib/lanes";
   import { msToX, xToMs, type TrimRange } from "../lib/trim";
   import { peaks as bucketPeaks } from "../lib/waveform";
+  import type { ZoomRange } from "../lib/api";
+  import { moveZoom, rampMs, resizeZoom } from "../lib/zoom";
   import Icon from "./Icon.svelte";
 
   interface LaneTrack {
@@ -31,6 +33,12 @@
     onseek,
     onscrubstart,
     onscrubend,
+    zooms,
+    selectedZoom,
+    onzoomselect,
+    onzoomchange,
+    onzoomgesture,
+    onzoomremove,
     video,
   }: {
     /** The clip's length in ms. */
@@ -55,14 +63,23 @@
     onscrubstart?: () => void;
     /** That pointer was released, or the browser took it away. */
     onscrubend?: () => void;
+    /** The zooms, sorted, in ms into the file. */
+    zooms: ZoomRange[];
+    /** The picked zoom's index, or null. */
+    selectedZoom: number | null;
+    onzoomselect: (i: number | null) => void;
+    onzoomchange: (zooms: ZoomRange[]) => void;
+    /** A drag of a zoom started (true) or ended (false): one drag is one undo step. */
+    onzoomgesture: (active: boolean) => void;
+    onzoomremove: (i: number) => void;
     /** The video lane: the TrimBar. */
     video: Snippet;
   } = $props();
 
   const ticks = $derived(rulerTicks(duration));
   const shading = $derived(laneShading(duration, trim, pieces));
-  /** Ruler, video, one row per track: the playhead spans the audio rows. */
-  const rows = $derived(["auto", "auto", ...tracks.map(() => "auto")].join(" "));
+  /** Ruler, video, zoom, one row per track: the playhead spans the zoom and audio rows. */
+  const rows = $derived(["auto", "auto", "auto", ...tracks.map(() => "auto")].join(" "));
 
   const level = (v: number) => (v === 0 ? "Off" : `${v}%`);
 
@@ -93,6 +110,61 @@
     if (scrubbing === null) return;
     scrubbing = null;
     onscrubend?.();
+  }
+
+  /** A zoom being dragged on the Zoom lane: its body (moves it) or one edge (resizes it). */
+  let zoomDrag: { i: number; what: "move" | "start" | "end"; offset: number; moved: boolean } | null = null;
+  /** How close to a zoom's edge (px) the pointer resizes it instead of moving it. */
+  const EDGE_PX = 8;
+
+  function zoomDown(e: PointerEvent, i: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const block = e.currentTarget as HTMLElement;
+    const area = block.parentElement as HTMLElement;
+    const z = zooms[i];
+    onzoomselect(i);
+    if (locked) {
+      onseek(z.startMs + rampMs(z));
+      return;
+    }
+    const r = block.getBoundingClientRect();
+    const what = e.clientX - r.left <= EDGE_PX ? "start" : r.right - e.clientX <= EDGE_PX ? "end" : "move";
+    block.setPointerCapture(e.pointerId);
+    zoomDrag = { i, what, offset: msAt(e, area) - z.startMs, moved: false };
+    onzoomgesture(true);
+  }
+
+  function zoomMove(e: PointerEvent) {
+    if (!zoomDrag) return;
+    const area = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
+    const ms = msAt(e, area);
+    const { i, what } = zoomDrag;
+    const next = what === "move" ? moveZoom(zooms, i, ms - zoomDrag.offset, trim) : resizeZoom(zooms, i, what, ms, trim);
+    if (next !== zooms) {
+      zoomDrag.moved = true;
+      onzoomchange(next);
+    }
+  }
+
+  function zoomUp() {
+    if (!zoomDrag) return;
+    const { i, what } = zoomDrag;
+    zoomDrag = null;
+    onzoomgesture(false);
+    // Show the zoom where it is fully in, so its box can be placed (a resized end shows the end).
+    const z = zooms[i];
+    if (z) onseek(what === "end" ? z.endMs - rampMs(z) : z.startMs + rampMs(z));
+  }
+
+  function zoomKey(e: KeyboardEvent, i: number) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      onzoomselect(i);
+      onseek(zooms[i].startMs + rampMs(zooms[i]));
+    }
   }
 
   /** Draws `peaks` across the canvas in device pixels, again whenever the canvas is resized. */
@@ -159,6 +231,69 @@
   </div>
   <div class="lane video">{@render video()}</div>
 
+  <div class="label zoom-label">
+    <span class="name">Zoom</span>
+  </div>
+  <div class="lane zoom">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="area"
+      onpointerdown={(e) => {
+        onzoomselect(null);
+        grab(e);
+      }}
+      onpointermove={move}
+      onpointerup={release}
+      onpointercancel={release}
+      onlostpointercapture={release}
+    >
+      {#each shading.dims as d, i (i)}
+        <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
+      {/each}
+      {#if zooms.length === 0}
+        <span class="zoom-hint">Press <kbd>Z</kbd> to zoom in at the playhead</span>
+      {/if}
+      {#each zooms as z, i (i)}
+        <!-- A pointer target for placing the zoom in time; Enter picks it from the keyboard. -->
+        <div
+          class="zoom-block"
+          class:selected={selectedZoom === i}
+          role="button"
+          tabindex="0"
+          aria-label="Zoom {z.zoom.toFixed(1)}× from {(z.startMs / 1000).toFixed(1)} s"
+          aria-pressed={selectedZoom === i}
+          title="Drag to move, drag an edge to make it longer or shorter, Delete to remove"
+          style:left="{msToX(z.startMs, duration, 100)}%"
+          style:width="{msToX(z.endMs, duration, 100) - msToX(z.startMs, duration, 100)}%"
+          onpointerdown={(e) => zoomDown(e, i)}
+          onpointermove={zoomMove}
+          onpointerup={zoomUp}
+          onpointercancel={zoomUp}
+          onlostpointercapture={zoomUp}
+          onkeydown={(e) => zoomKey(e, i)}
+        >
+          <span class="ramp in" style:width="{(rampMs(z) / (z.endMs - z.startMs)) * 100}%"></span>
+          <span class="zoom-text"><Icon name="zoom" size={12} /> {z.zoom.toFixed(1)}×</span>
+          <span class="ramp out" style:width="{(rampMs(z) / (z.endMs - z.startMs)) * 100}%"></span>
+          {#if selectedZoom === i && !locked}
+            <button
+              class="zoom-remove"
+              aria-label="Remove this zoom"
+              title="Remove this zoom (Delete)"
+              onpointerdown={(e) => e.stopPropagation()}
+              onclick={(e) => {
+                e.stopPropagation();
+                onzoomremove(i);
+              }}
+            >
+              <Icon name="close" size={11} />
+            </button>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  </div>
+
   {#each tracks as t, i (t.key)}
     <div class="label" class:last={i === tracks.length - 1}>
       <div class="line">
@@ -216,7 +351,7 @@
 
 
   {#if tracks.length}
-    <div class="playhead-span" style:grid-row="3 / span {tracks.length}" aria-hidden="true">
+    <div class="playhead-span" style:grid-row="3 / span {tracks.length + 1}" aria-hidden="true">
       <div class="playhead" style:left="{msToX(position, duration, 100)}%"></div>
     </div>
   {/if}
@@ -376,6 +511,122 @@
   .lane.audio {
     height: 3.4rem;
     background: var(--bg);
+  }
+
+  .lane.zoom {
+    height: 2.3rem;
+    background: var(--bg);
+  }
+
+  .lane.zoom .area {
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  .zoom-hint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    pointer-events: none;
+  }
+
+  .zoom-hint kbd {
+    margin: 0 0.3rem;
+    padding: 0 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font: inherit;
+  }
+
+  .zoom-block {
+    position: absolute;
+    top: 0.35rem;
+    bottom: 0.35rem;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    box-sizing: border-box;
+    min-width: 6px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    cursor: grab;
+    touch-action: none;
+    /* The edges resize. */
+    box-shadow:
+      inset 3px 0 0 var(--accent),
+      inset -3px 0 0 var(--accent);
+  }
+
+  .zoom-block:active {
+    cursor: grabbing;
+  }
+
+  .zoom-block.selected {
+    border-color: #fff;
+    box-shadow:
+      inset 3px 0 0 #fff,
+      inset -3px 0 0 #fff,
+      0 0 0 1px var(--accent);
+  }
+
+  .zoom-block:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* The ease in and out: lighter where the zoom is still on its way. */
+  .ramp {
+    flex: none;
+    align-self: stretch;
+    pointer-events: none;
+  }
+  .ramp.in {
+    background: linear-gradient(to right, transparent, var(--accent-soft));
+  }
+  .ramp.out {
+    background: linear-gradient(to left, transparent, var(--accent-soft));
+  }
+
+  .zoom-text {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 0.2rem;
+    min-width: 0;
+    overflow: hidden;
+    padding-left: 0.3rem;
+    font-size: 0.72rem;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .zoom-remove {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 1.1rem;
+    height: 1.1rem;
+    margin-right: 0.35rem;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: rgba(5, 4, 10, 0.55);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .locked .zoom-block {
+    cursor: not-allowed;
   }
 
   /* The lanes' rounded border closes the last row. */

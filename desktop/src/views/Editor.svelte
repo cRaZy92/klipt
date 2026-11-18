@@ -31,7 +31,7 @@
     type Piece,
   } from "../lib/cuts";
   import { formatTenths, stepMs } from "../lib/timecode";
-  import { addZoomAt, sameZooms, zoomAt, zoomIndexAt } from "../lib/zoom";
+  import { addZoomAt, removeZoom, sameZooms, setZoomBox, zoomAt, zoomIndexAt } from "../lib/zoom";
   import type { ZoomRange } from "../lib/api";
   import { toggleMute } from "../lib/lanes";
   import { menu } from "../lib/a11y";
@@ -47,6 +47,7 @@
   import TrackLanes from "../components/TrackLanes.svelte";
   import TrimBar from "../components/TrimBar.svelte";
   import UploadDialog from "../components/UploadDialog.svelte";
+  import ZoomBox from "../components/ZoomBox.svelte";
 
   let {
     clip,
@@ -855,6 +856,24 @@
     selectedZoom = zoomIndexAt(next, Math.round(position));
   }
 
+  function removeZoomAt(i: number) {
+    if (editLocked) return;
+    zooms = removeZoom(zooms, i);
+    selectedZoom = null;
+  }
+
+  /** The picked zoom's box was moved or resized on the video. */
+  function onzoombox(box: { zoom: number; x: number; y: number }) {
+    if (editLocked || selectedZoom === null) return;
+    zooms = setZoomBox(zooms, selectedZoom, box);
+  }
+
+  /** A zoom's drag (on the lane or the video) is one undo step. */
+  function onzoomgesture(active: boolean) {
+    if (active) gestures.start("zoom");
+    else gestures.end("zoom");
+  }
+
   /** One frame, in ms. */
   const frameMs = $derived(stepMs(data?.fps ?? 0));
 
@@ -876,6 +895,9 @@
     else if (action.kind === "step") stepBy(action.direction * (action.second ? 1000 : frameMs));
     else if (action.kind === "split") splitHere();
     else if (action.kind === "zoom") zoomHere();
+    else if (action.kind === "delete") {
+      if (selectedZoom !== null) removeZoomAt(selectedZoom);
+    }
     else togglePlay();
   }
 
@@ -1167,6 +1189,9 @@
           <img class="scrub" src={scrubFrame} alt="" aria-hidden="true" style:filter={previewBlur} onerror={onscruberror} />
         {/if}
       </div>
+      {#if placingZoom && selectedZoom !== null && zooms[selectedZoom] && !editLocked && !mediaError}
+        <ZoomBox zoom={zooms[selectedZoom]} rect={videoRect} onchange={onzoombox} ongesture={onzoomgesture} />
+      {/if}
       {#if mediaError}
         <div class="media-error">
           <Icon name="alert" size={28} />
@@ -1258,6 +1283,14 @@
         onseek={seek}
         {onscrubstart}
         {onscrubend}
+        {zooms}
+        {selectedZoom}
+        onzoomselect={(i) => (selectedZoom = i)}
+        onzoomchange={(next) => {
+          if (!editLocked) zooms = next;
+        }}
+        {onzoomgesture}
+        onzoomremove={removeZoomAt}
       >
         {#snippet video()}
           <TrimBar

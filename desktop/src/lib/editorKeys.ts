@@ -19,6 +19,8 @@ export interface EditorKey {
 export type EditorKeyAction =
   | { kind: "play" }
   | { kind: "split" }
+  /** Adds a zoom at the playhead. */
+  | { kind: "zoom" }
   | { kind: "undo" }
   | { kind: "redo" }
   /** Moves the playhead one frame, or one second. */
@@ -41,6 +43,7 @@ export function editorKeyAction(e: EditorKey, target: KeyTarget, dialogOpen: boo
   }
   if (e.key === " ") return { kind: "play" };
   if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "split" };
+  if (key === "z" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "zoom" };
   return null;
 }
 

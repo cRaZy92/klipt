@@ -26,6 +26,15 @@ describe("editorKeyAction", () => {
     expect(editorKeyAction(key("s"), "text", false)).toBeNull();
   });
 
+  it("Z zooms; Ctrl+Z still undoes", () => {
+    expect(editorKeyAction(key("z"), "none", false)).toEqual({ kind: "zoom" });
+    expect(editorKeyAction(key("Z", { shiftKey: true }), "control", false)).toEqual({ kind: "zoom" });
+    expect(editorKeyAction(key("z", { ctrlKey: true }), "none", false)).toEqual({ kind: "undo" });
+    expect(editorKeyAction(key("z", { altKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("z", { metaKey: true, altKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("z"), "text", false)).toBeNull();
+  });
+
   it("the arrows step a frame, or a second with Shift", () => {
     expect(editorKeyAction(key("ArrowLeft"), "none", false)).toEqual({ kind: "step", direction: -1, second: false });
     expect(editorKeyAction(key("ArrowRight", { shiftKey: true }), "none", false)).toEqual({

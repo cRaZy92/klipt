@@ -31,6 +31,8 @@
     type Piece,
   } from "../lib/cuts";
   import { formatTenths, stepMs } from "../lib/timecode";
+  import { addZoomAt, sameZooms, zoomAt, zoomIndexAt } from "../lib/zoom";
+  import type { ZoomRange } from "../lib/api";
   import { toggleMute } from "../lib/lanes";
   import { menu } from "../lib/a11y";
   import { Autosave, type SaveStatus } from "../lib/autosave";
@@ -89,6 +91,10 @@
   let unmuteLevels = $state<Record<string, number>>({});
   /** "Blur video": uploads and exports blur the picture (a clip where only the sound matters). */
   let blurVideo = $state(false);
+  /** The zooms (sorted, never overlapping), in ms into the file. */
+  let zooms = $state<ZoomRange[]>([]);
+  /** The zoom picked on the Zoom lane: its box can be placed on the video. */
+  let selectedZoom = $state<number | null>(null);
   /** The thumbnail's frame; null = automatic. */
   let thumb = $state<number | null>(null);
   /** The edit as last loaded or saved; `changed` compares against it. */
@@ -108,8 +114,27 @@
     const shown = Math.min(stageHeight, (stageWidth * videoSize.height) / videoSize.width);
     return `blur(${((BLUR_SIGMA * shown) / Math.min(720, videoSize.height)).toFixed(1)}px)`;
   });
+  /** Where the picture shows on the stage (inside the letterbox), in stage pixels. */
+  const videoRect = $derived.by(() => {
+    if (!videoSize || !videoSize.width || !videoSize.height || !stageWidth || !stageHeight) {
+      return { left: 0, top: 0, width: stageWidth, height: stageHeight };
+    }
+    const fit = Math.min(stageWidth / videoSize.width, stageHeight / videoSize.height);
+    const width = videoSize.width * fit;
+    const height = videoSize.height * fit;
+    return { left: (stageWidth - width) / 2, top: (stageHeight - height) / 2, width, height };
+  });
   let playing = $state(false);
   let position = $state(0);
+  /**
+   * The picked zoom's box is up on the video: paused inside that zoom. The picture then shows
+   * unzoomed, so the box can go anywhere on it.
+   */
+  const placingZoom = $derived(
+    !playing && selectedZoom !== null && zoomIndexAt(zooms, position) === selectedZoom,
+  );
+  /** How the preview is zoomed at the playhead (the same easing as the export). */
+  const view = $derived(placingZoom ? { scale: 1, x: 0.5, y: 0.5 } : zoomAt(zooms, position));
 
   /** How many filmstrip pictures of this clip are on disk (0 once a picture fails to load). */
   let stripFrames = $state(0);
@@ -170,6 +195,7 @@
       extraVolumes: Object.fromEntries(Object.entries(extraVolumes).map(([track, v]) => [track, v / 100])),
       blurVideo,
       removedRanges: removedRanges(pieces, trim),
+      zoomRanges: zooms.map((z) => ({ startMs: z.startMs, endMs: z.endMs, zoom: z.zoom, x: z.x, y: z.y })),
     };
   });
 
@@ -192,6 +218,7 @@
         !sameVolumes(edit.extraVolumes, stored.extraVolumes) ||
         edit.blurVideo !== stored.blurVideo ||
         !sameRanges(edit.removedRanges, stored.removedRanges) ||
+        !sameZooms(edit.zoomRanges, stored.zoomRanges) ||
         savedThumb !== storedThumb),
   );
 
@@ -205,6 +232,7 @@
     masterVolume: number;
     extraVolumes: Record<number, number>;
     blurVideo: boolean;
+    zooms: ZoomRange[];
     thumb: number | null;
   }
 
@@ -217,6 +245,7 @@
     masterVolume,
     extraVolumes: { ...extraVolumes },
     blurVideo,
+    zooms: zooms.map((z) => ({ ...z })),
     thumb,
   });
 
@@ -226,7 +255,7 @@
    * A drag on the timeline or a volume slider in progress: its changes become one undo step,
    * recorded when it ends (so a drag that rests is still one step).
    */
-  const gestures = new Gestures<"scrub" | "slider">(() => history?.record(editState));
+  const gestures = new Gestures<"scrub" | "slider" | "zoom">(() => history?.record(editState));
 
   function applyState(s: EditState) {
     trim = s.trim;
@@ -237,6 +266,8 @@
     masterVolume = s.masterVolume;
     extraVolumes = s.extraVolumes;
     blurVideo = s.blurVideo;
+    zooms = s.zooms;
+    if (selectedZoom !== null && selectedZoom >= zooms.length) selectedZoom = null;
     thumb = s.thumb;
   }
 
@@ -317,6 +348,7 @@
       masterVolume = percent(d.clip.masterVolume ?? 1);
       extraVolumes = Object.fromEntries(d.extraTracks.map((t) => [t.index, percent(d.clip.extraVolumes?.[t.index] ?? 1)]));
       blurVideo = d.clip.blurVideo ?? false;
+      zooms = d.clip.zoomRanges ?? [];
       thumb = d.clip.thumbnailMs;
       position = trim.start;
       stripFrames = d.filmstrip.frames;
@@ -811,6 +843,18 @@
     else toast("Can't split here: too close to a split or the trim, or outside the trim", "error");
   }
 
+  /** Adds a zoom at the playhead and picks it, so its box can be placed on the video. */
+  function zoomHere() {
+    if (editLocked) return;
+    const next = addZoomAt(zooms, position, trim);
+    if (!next) {
+      toast("Can't zoom here: inside another zoom, too close to the next one, or outside the trim", "error");
+      return;
+    }
+    zooms = next;
+    selectedZoom = zoomIndexAt(next, Math.round(position));
+  }
+
   /** One frame, in ms. */
   const frameMs = $derived(stepMs(data?.fps ?? 0));
 
@@ -831,6 +875,7 @@
     else if (action.kind === "redo") redo();
     else if (action.kind === "step") stepBy(action.direction * (action.second ? 1000 : frameMs));
     else if (action.kind === "split") splitHere();
+    else if (action.kind === "zoom") zoomHere();
     else togglePlay();
   }
 
@@ -864,6 +909,7 @@
         extraVolumes: next.extraVolumes,
         blurVideo: next.blurVideo,
         removedRanges: next.removedRanges,
+        zoomRanges: next.zoomRanges,
         uploadId: null,
         uploadOffset: null,
       };
@@ -1091,24 +1137,36 @@
     </div>
   {:else}
     <div class="stage" bind:clientWidth={stageWidth} bind:clientHeight={stageHeight}>
-      <!-- svelte-ignore a11y_media_has_caption -->
-      <video
-        bind:this={video}
-        src={data.videoUrl}
-        crossorigin="anonymous"
-        muted
-        playsinline
-        preload="auto"
-        onseeked={onseeked}
-        onerror={onmediaerror}
-        onclick={togglePlay}
-        {onloadedmetadata}
-        style:filter={previewBlur}
-      ></video>
-      <canvas bind:this={freeze} class="freeze" class:show={frozen} aria-hidden="true" style:filter={previewBlur}></canvas>
-      {#if scrubFrame}
-        <img class="scrub" src={scrubFrame} alt="" aria-hidden="true" style:filter={previewBlur} onerror={onscruberror} />
-      {/if}
+      <!-- The picture's own area (no letterbox), so a zoom scales around a point of the picture
+           and never spills into the black bars, as in the export. -->
+      <div
+        class="frame"
+        style:left="{videoRect.left}px"
+        style:top="{videoRect.top}px"
+        style:width="{videoRect.width}px"
+        style:height="{videoRect.height}px"
+        style:--zoom={view.scale}
+        style:--zoom-origin="{view.x * 100}% {view.y * 100}%"
+      >
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video
+          bind:this={video}
+          src={data.videoUrl}
+          crossorigin="anonymous"
+          muted
+          playsinline
+          preload="auto"
+          onseeked={onseeked}
+          onerror={onmediaerror}
+          onclick={togglePlay}
+          {onloadedmetadata}
+          style:filter={previewBlur}
+        ></video>
+        <canvas bind:this={freeze} class="freeze" class:show={frozen} aria-hidden="true" style:filter={previewBlur}></canvas>
+        {#if scrubFrame}
+          <img class="scrub" src={scrubFrame} alt="" aria-hidden="true" style:filter={previewBlur} onerror={onscruberror} />
+        {/if}
+      </div>
       {#if mediaError}
         <div class="media-error">
           <Icon name="alert" size={28} />
@@ -1155,6 +1213,14 @@
           title="Split at the playhead (S), then switch the parts you don't want off"
         >
           <Icon name="scissors" size={15} /> Split
+        </button>
+        <button
+          class="btn btn-sm"
+          onclick={zoomHere}
+          disabled={mediaError || editLocked}
+          title="Zoom in at the playhead (Z), then drag the box on the video"
+        >
+          <Icon name="zoom" size={15} /> Zoom
         </button>
         </div>
         <label class="master" title="The whole clip: every track together">
@@ -1213,6 +1279,7 @@
       <p class="hints">
         <span><kbd>Space</kbd> play</span>
         <span><kbd>S</kbd> split</span>
+        <span><kbd>Z</kbd> zoom</span>
         <span><kbd>←</kbd><kbd>→</kbd> one frame</span>
         <span><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> one second</span>
         <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
@@ -1445,6 +1512,14 @@
     box-shadow: 0 24px 60px -30px rgba(124, 92, 255, 0.35);
   }
 
+  .frame {
+    position: absolute;
+    overflow: hidden;
+  }
+  .frame > :is(video, .freeze, .scrub) {
+    transform: scale(var(--zoom, 1));
+    transform-origin: var(--zoom-origin, 50% 50%);
+  }
   .freeze,
   .scrub {
     position: absolute;

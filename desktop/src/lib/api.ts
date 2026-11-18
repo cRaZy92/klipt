@@ -13,6 +13,18 @@ export interface CutRange {
   endMs: number;
 }
 
+/**
+ * A zoom set in the editor: during startMs..endMs (ms into the video file) the picture eases into
+ * `zoom`× and back out. `x` and `y` (0–1) place the zoomed area within the slack.
+ */
+export interface ZoomRange {
+  startMs: number;
+  endMs: number;
+  zoom: number;
+  x: number;
+  y: number;
+}
+
 export interface ClipView {
   id: string;
   path: string;
@@ -29,6 +41,8 @@ export interface ClipView {
   trimEndMs: number | null;
   /** Parts removed in the editor, sorted, inside the trim. */
   removedRanges: CutRange[];
+  /** Zooms set in the editor, sorted, never overlapping. Missing = none. */
+  zoomRanges?: ZoomRange[];
   gameVolume: number;
   micVolume: number;
   serverClipId: string | null;
@@ -220,6 +234,8 @@ export interface EditInput {
   blurVideo: boolean;
   /** Parts removed inside the trim: uploads and exports join the rest. */
   removedRanges: CutRange[];
+  /** Zooms: uploads and exports ease into each and back out. */
+  zoomRanges: ZoomRange[];
 }
 
 export interface ExportProgress {

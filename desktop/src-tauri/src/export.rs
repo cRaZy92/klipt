@@ -28,6 +28,8 @@ pub struct Edit {
     pub blur_video: bool,
     /// Parts removed inside the trim (sorted): the kept parts are joined, re-encoded exactly.
     pub removed: Vec<crate::library::CutRange>,
+    /// Zooms (sorted, never overlapping), in the file's time: the picture eases in and out.
+    pub zooms: Vec<crate::library::ZoomRange>,
 }
 
 /// How strong "Blur video" is: a Gaussian sigma at 720p. Shapes and colours stay, details don't.
@@ -381,7 +383,7 @@ mod tests {
     }
 
     fn edit(start: Option<u64>, end: Option<u64>) -> Edit {
-        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new() }
+        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new() }
     }
 
     #[test]
@@ -408,7 +410,7 @@ mod tests {
 
     #[test]
     fn volumes_are_clamped_and_bad_ranges_rejected() {
-        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new() };
+        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new() };
         let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, &[]).unwrap().join(" ");
         assert!(joined.contains("volume=2[a0]") && joined.contains("volume=0[a1]") && joined.contains("-to 1.500"));
         for (s, e) in [(Some(4000), Some(2000)), (Some(2000), Some(2000)), (None, Some(0))] {

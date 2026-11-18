@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::{Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange};
+use super::{Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, ZoomRange};
+use super::{MAX_ZOOM, MIN_ZOOM, MIN_ZOOM_MS};
 use crate::errors::{AppError, Result};
 
 /// Per-track volume range the editor offers (0–200 %).
@@ -72,12 +73,15 @@ const MIGRATIONS: &[&str] = &["
 ", "
     -- Parts removed in the editor: JSON list of {\"startMs\", \"endMs\"} (ms into the file).
     ALTER TABLE clips ADD COLUMN removed_ranges TEXT NOT NULL DEFAULT '[]';
+", "
+    -- Zooms set in the editor: JSON list of {\"startMs\", \"endMs\", \"zoom\", \"x\", \"y\"} (ms into the file).
+    ALTER TABLE clips ADD COLUMN zoom_ranges TEXT NOT NULL DEFAULT '[]';
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
                        visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind, \
-                       extra_volumes, blur_video, removed_ranges";
+                       extra_volumes, blur_video, removed_ranges, zoom_ranges";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -111,6 +115,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         extra_volumes: serde_json::from_str(&row.get::<_, String>(26)?).unwrap_or_default(),
         blur_video: row.get(27)?,
         removed_ranges: serde_json::from_str(&row.get::<_, String>(28)?).unwrap_or_default(),
+        zoom_ranges: serde_json::from_str(&row.get::<_, String>(29)?).unwrap_or_default(),
     })
 }
 
@@ -228,13 +233,19 @@ impl Library {
         )
     }
 
-    /// The editor's "Blur video" for clip `id`.
     /// Stores the parts removed in the editor (checked with `validate_cuts` by the caller).
     pub fn set_removed_ranges(&self, id: &str, removed: &[CutRange]) -> Result<()> {
         let json = serde_json::to_string(removed).map_err(|e| AppError::Internal(e.to_string()))?;
         self.update(id, "UPDATE clips SET removed_ranges = ?2 WHERE id = ?1", params![id, json])
     }
 
+    /// Stores the zooms set in the editor (checked with `validate_zooms` by the caller).
+    pub fn set_zoom_ranges(&self, id: &str, zooms: &[ZoomRange]) -> Result<()> {
+        let json = serde_json::to_string(zooms).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.update(id, "UPDATE clips SET zoom_ranges = ?2 WHERE id = ?1", params![id, json])
+    }
+
+    /// The editor's "Blur video" for clip `id`.
     pub fn set_blur_video(&self, id: &str, blur: bool) -> Result<()> {
         self.update(id, "UPDATE clips SET blur_video = ?2 WHERE id = ?1", params![id, blur])
     }
@@ -359,7 +370,7 @@ impl Library {
             "SELECT {COLUMNS}, sync_pending FROM clips WHERE sync_pending != '' AND server_clip_id IS NOT NULL"
         ))?;
         let rows = stmt
-            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(29)?))))?
+            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(30)?))))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -521,6 +532,34 @@ pub fn validate_cuts(trim: Trim, removed: &[CutRange], duration_ms: u64) -> Resu
     }
     if !removed.is_empty() && removed_ms >= end.saturating_sub(start) {
         return bad("nothing of the clip is kept");
+    }
+    Ok(())
+}
+
+/// Checks the zooms of a clip `duration_ms` long: each at least `MIN_ZOOM_MS` long, sorted, not
+/// overlapping (touching is fine), inside the file, and with its zoom and area in range. Zooms
+/// outside the trim or in removed parts are allowed: they just don't show.
+pub fn validate_zooms(zooms: &[ZoomRange], duration_ms: u64) -> Result<()> {
+    let bad = |why: &str| Err(AppError::InvalidInput(format!("zooms: {why}")));
+    let mut at = 0;
+    for z in zooms {
+        if z.end_ms < z.start_ms.saturating_add(MIN_ZOOM_MS) {
+            return bad("a zoom is too short");
+        }
+        if z.start_ms < at {
+            return bad("zooms overlap or are out of order");
+        }
+        if z.end_ms > duration_ms {
+            return bad("a zoom ends after the clip");
+        }
+        // `contains` is false for NaN, so NaN is refused too.
+        if !(MIN_ZOOM..=MAX_ZOOM).contains(&z.zoom) {
+            return bad("a zoom is out of range");
+        }
+        if !(0.0..=1.0).contains(&z.x) || !(0.0..=1.0).contains(&z.y) {
+            return bad("a zoom's area is outside the picture");
+        }
+        at = z.end_ms;
     }
     Ok(())
 }
@@ -781,6 +820,38 @@ mod tests {
         f.lib.set_removed_ranges(&c.id, &[r(2000, 3000), r(5000, 6000)]).unwrap();
         assert_eq!(f.lib.get(&c.id).unwrap().removed_ranges, vec![r(2000, 3000), r(5000, 6000)]);
         assert!(matches!(f.lib.set_removed_ranges("nope", &[]), Err(AppError::ClipNotFound(_))));
+    }
+
+    fn z(start_ms: u64, end_ms: u64, zoom: f32, x: f32, y: f32) -> ZoomRange {
+        ZoomRange { start_ms, end_ms, zoom, x, y }
+    }
+
+    #[test]
+    fn zoom_ranges_round_trip() {
+        let f = Fixture::new();
+        let c = f.add("a.mp4", 1000, None);
+        assert!(f.lib.get(&c.id).unwrap().zoom_ranges.is_empty(), "new clips have no zooms");
+        f.lib.set_zoom_ranges(&c.id, &[z(1000, 3000, 2.0, 0.5, 0.5)]).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().zoom_ranges, vec![z(1000, 3000, 2.0, 0.5, 0.5)]);
+        assert!(matches!(f.lib.set_zoom_ranges("nope", &[]), Err(AppError::ClipNotFound(_))));
+    }
+
+    #[test]
+    fn invalid_zooms_are_refused() {
+        let bad = |zooms: &[ZoomRange]| matches!(validate_zooms(zooms, 10_000), Err(AppError::InvalidInput(_)));
+        assert!(bad(&[z(3000, 3000, 2.0, 0.5, 0.5)]), "empty");
+        assert!(bad(&[z(3000, 2000, 2.0, 0.5, 0.5)]), "backwards");
+        assert!(bad(&[z(1000, 1499, 2.0, 0.5, 0.5)]), "499 ms");
+        assert!(bad(&[z(1000, 3000, 2.0, 0.5, 0.5), z(2500, 4000, 2.0, 0.5, 0.5)]), "overlap");
+        assert!(bad(&[z(5000, 6000, 2.0, 0.5, 0.5), z(1000, 2000, 2.0, 0.5, 0.5)]), "out of order");
+        assert!(bad(&[z(9000, 10_001, 2.0, 0.5, 0.5)]), "past the end");
+        assert!(bad(&[z(1000, 3000, 1.2, 0.5, 0.5)]));
+        assert!(bad(&[z(1000, 3000, 4.1, 0.5, 0.5)]));
+        assert!(bad(&[z(1000, 3000, 2.0, -0.1, 0.5)]));
+        assert!(bad(&[z(1000, 3000, 2.0, 0.5, 1.1)]));
+        assert!(bad(&[z(1000, 3000, f32::NAN, 0.5, 0.5)]));
+        assert!(validate_zooms(&[], 10_000).is_ok());
+        assert!(validate_zooms(&[z(0, 500, 1.25, 0.5, 0.5), z(500, 10_000, 4.0, 1.0, 0.0)], 10_000).is_ok(), "touching");
     }
 
     #[test]

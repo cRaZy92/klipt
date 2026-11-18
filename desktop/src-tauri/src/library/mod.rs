@@ -1,7 +1,7 @@
 //! The local clip library: one SQLite row per saved clip, plus generated thumbnails.
 
 mod db;
-pub use db::{validate_cuts, validate_edit};
+pub use db::{validate_cuts, validate_edit, validate_zooms};
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -87,6 +87,8 @@ pub struct Clip {
     pub blur_video: bool,
     /// Parts removed in the editor (ms into the video file), sorted, inside the trim.
     pub removed_ranges: Vec<CutRange>,
+    /// Zooms set in the editor (ms into the video file), sorted, never overlapping.
+    pub zoom_ranges: Vec<ZoomRange>,
 }
 
 /// A part of a clip removed in the editor, `start_ms..end_ms` into the video file.
@@ -95,6 +97,26 @@ pub struct Clip {
 pub struct CutRange {
     pub start_ms: u64,
     pub end_ms: u64,
+}
+
+/// The least a zoom magnifies.
+pub const MIN_ZOOM: f32 = 1.25;
+/// The most a zoom magnifies: past this, 1080p footage turns to mush.
+pub const MAX_ZOOM: f32 = 4.0;
+/// The shortest a zoom can be.
+pub const MIN_ZOOM_MS: u64 = 500;
+
+/// A zoom set in the editor: during `start_ms..end_ms` (into the video file) the picture eases
+/// into `zoom`× and back out. `x` and `y` (0–1) place the zoomed area within the slack: its left
+/// edge is at `x · (1 − 1/zoom)` of the frame's width, and the same for `y` and the height.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoomRange {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub zoom: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 impl Clip {

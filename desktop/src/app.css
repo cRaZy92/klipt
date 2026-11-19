@@ -383,8 +383,12 @@ select.input option {
 }
 
 .spinner {
-  width: 1rem;
-  height: 1rem;
+  /* A fixed, even-pixel square that flex layouts can't squeeze, so it turns
+     around its true centre instead of wobbling. */
+  display: inline-block;
+  flex: none;
+  width: 16px;
+  height: 16px;
   border: 2px solid currentColor;
   border-right-color: transparent;
   border-radius: 50%;
@@ -562,8 +566,17 @@ select.input option {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     animation-delay: 0ms !important;
     transition: none !important;
+  }
+
+  /* Loading indicators still have to show something is happening, just calmly. */
+  .spinner,
+  .spinning,
+  .progress.indeterminate > div {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
   }
 }
 

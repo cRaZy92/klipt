@@ -1445,8 +1445,8 @@
   }
 
   .save-status .spinner {
-    width: 0.85rem;
-    height: 0.85rem;
+    width: 14px;
+    height: 14px;
   }
 
   .save-status.warn {

@@ -1,6 +1,6 @@
 # Klipt roadmap
 
-As of 2026-11-13. Update this file when an item is done or a plan changes.
+As of 2026-11-20. Update this file when an item is done or a plan changes.
 
 All of v1 is built for Windows and Linux, and every desktop change pushed to `main` ships itself as a
 signed Windows release. What's missing is mostly proof on real machines and with real friends, not code.
@@ -9,6 +9,15 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 2026-11-20 | Replace an online clip   | Re-uploading an uploaded clip can swap its video at the same link (`85ebbfa`). Untested in the app; server needs redeploy |
+| 2026-11-20 | Editor subtitles         | Typed subtitles (T key, own lane), burned into exports and uploads with libass. Untested in the app and on Windows |
+| 2026-11-20 | Website redesign         | The website matches the desktop app; admin charts (uploads per week, top games, compression, storage per user). Needs redeploy |
+| 2026-11-20 | Upload progress          | Size, speed and time left while uploading; cards show the edited length                               |
+| 2026-11-18 | Editor zoom              | Drag a box on the video to zoom part of a clip (Z key, eased, 1.25–4×), kept in exports and uploads    |
+| 2026-11-16 | Editor layout rework     | Saves by itself with undo; a lane per audio track with its waveform; centred transport with frame steps |
+| 2026-11-15 | Editor cuts and player   | Remove parts from the middle of a clip (S key); filmstrip timeline; all audio on one Web Audio clock    |
+| 2026-11-15 | Discord embeds fixed     | A small embed copy (≤720p, 30 fps, ~8 MB) so Discord's crawler doesn't give up on big clips            |
+| 2026-11-11 | Compression and import   | Server H.264 compression queue, favorites kept on the server, desktop folder import                    |
 | 2026-11-11 | Review bugs fixed        | All 13 bugs deferred by reviews and the final review's 9 minors fixed (see "Next")                    |
 | 2026-11-11 | Linux update notice      | The Linux package checks GitHub and shows the command that installs a newer release; autostart follows the installed copy |
 | 2026-11-11 | v0.1.10                  | In-app logo matches the app icon; login hint removed                                                   |
@@ -23,23 +32,22 @@ signed Windows release. What's missing is mostly proof on real machines and with
 v1 is done when a friend on Windows installs Klipt, saves a clip in a game, uploads it and shares the
 link, with no help.
 
-- [ ] **Update path.** Install v0.1.8 on Windows, start it, and check that it offers v0.1.10 and that
+- [x] **Update path.** Checked by the owner on Windows: the installed copy offers the new version and
       "Restart to install" works.
-- [ ] **C9 in a real game (owner's PC).** FPS cost under 5% (60 s off vs 60 s on, FPS uncapped), the
-      hotkey works in a fullscreen game, recorder CPU noted. Results go in the C9 row of
-      `docs/superpowers/specs/2026-11-09-klipt-capture-decision.md`.
-- [ ] **Game detection on Windows.** A clip saved in a Steam game gets the right game name and shows
-      under that game in the Feed.
-- [ ] **Linux manual checks.** gsr save, hotkey and tray, upload to a local server. The 2026-11-10
-      ledger lists these as pending, and nothing since records them as done.
-- [ ] **Server live for friends.** The Docker Compose stack runs on Dokploy, with real accounts and
-      invite links.
+- [x] **Game detection on Windows.** A clip saved in WARDOGS got the right game.
+- [x] **Linux manual checks.** The owner uses the Linux app every day (gsr save, hotkey, tray, upload).
 - [x] **Install instructions for friends.** `/get-app` (2026-11-16): new accounts land there, and
       it's in the top bar. Download button (newest installer via the release's `latest.json`), the
       SmartScreen step ("More info → Run anyway"), the server address to log in with, the save
       shortcut, and the Arch command. Still missing: a screenshot of the SmartScreen window.
-- [ ] **First friend test.** One friend with an RTX 40xx and one with an AMD card (the AMF encoder
-      is still unverified). Note anything they get stuck on.
+- [ ] **C9 in a real game (owner's PC), later.** FPS cost under 5% (60 s off vs 60 s on, FPS uncapped);
+      the owner expects it is. Results go in the C9 row of
+      `docs/superpowers/specs/2026-11-09-klipt-capture-decision.md`.
+- [ ] **Windows checks, later.** Screenshots (exclusive-fullscreen games may come out black; DPI
+      scaling), subtitles with a non-ASCII profile path, folder import.
+- [ ] **Friends join on their own.** The server deploys itself; nobody is pushed to install. When a
+      friend with an RTX 40xx or an AMD card (the AMF encoder is still unverified) starts using it,
+      note anything they get stuck on.
 
 ## Next: fixes found in review
 
@@ -84,27 +92,27 @@ evening, links to a moment, per-game recording settings, recording the game's mo
 
 ## Planned: My clips and Feed polish (chosen 2026-11-13)
 
-Picked by the owner after the sticky page header and the "+N more" game chips (`d057028`). None has
-a spec yet. 1 and 7 are bugs you hit in normal use, so they go first.
+Picked by the owner after the sticky page header and the "+N more" game chips (`d057028`). All but
+slow motion built on 2026-11-20, one commit each; item 10 was dropped.
 
 | # | Item                               | What it means                                                                                      |
 | - | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 1 | Keep filters and scroll position   | **Done for My clips.** Filters, sort, search, the clips shown and the scroll position are kept for the session (forgotten without a login). Feed still starts over |
-| 2 | Sticky day headings                | "Today", "Yesterday"… stay pinned under the sticky header while their clips scroll, so you know which day you're in |
-| 3 | Feed loads older clips by itself   | Replace "Load older clips" with loading the next page as you near the end of the list            |
-| 4 | Compact header when scrolled       | The pinned block is ~200 px; once scrolled, drop the subtitle and shrink the title so small windows keep room for clips |
-| 5 | "Clear filters" on empty results   | Empty states like "No clips match …" get one button that resets every filter                       |
-| 6 | Same filter style on both pages    | My clips uses segmented groups; Feed uses loose toggle chips ("I'm in it", "Favorites", "Clips", "Screenshots"). Make them match |
-| 7 | Game counts follow every filter    | My clips' game chip counts only follow the place filter: with Screenshots picked, "WARDOGS 5" can count 5 clips and then show nothing. Counts should follow media and search too |
-| 8 | `/` focuses search                 | Press `/` anywhere in My clips or Feed to jump to the search field                                 |
+| 1 | Keep filters and scroll position   | **Done.** My clips and the Feed stay alive while hidden, so filters, scroll and loaded clips are kept for the session |
+| 2 | Sticky day headings                | **Done.** "Today", "Yesterday"… stay pinned under the page header while their clips scroll |
+| 3 | Feed loads older clips by itself   | **Done.** The next page loads as you near the end; "Load older clips" only comes back after a failed page |
+| 4 | Compact header when scrolled       | **Done.** Once scrolled, the subtitle goes and the title shrinks |
+| 5 | "Clear filters" on empty results   | **Done.** In My clips and the Feed |
+| 6 | Same filter style on both pages    | **Done.** The Feed uses segmented groups too: All / I'm in it / Favorites, and Everything / Clips / Screenshots |
+| 7 | Game counts follow every filter    | **Done.** My clips' game chips count what the place, media and search filters let through; a picked game keeps its chip at 0 |
+| 8 | `/` focuses search                 | **Done.** In My clips and the Feed; the field shows the key while empty |
 | 9 | Select several clips               | **Done.** A check box on each card (or Ctrl+click; Shift+click selects a run, Ctrl+A all, Esc clears); a bar to star, set game, upload (one after another) or delete them together |
-| 10 | Undo instead of "Are you sure?"   | "Remove from library" happens at once, with Undo in its toast. Deleting the file itself keeps its confirmation |
-| 11 | Right-click a clip card            | Opens the same menu as ⋯ (Rename, Set game, Show in folder, Remove)                                |
-| 12 | Hover preview                      | Hovering a thumbnail in My clips or Feed plays the clip muted, to find "the one where…" without opening it |
-| 13 | "New" dot on Feed cards            | Cards shared since you last opened the Feed are marked; the app already keeps that time for the new-clips count |
-| 14 | Slow motion in the editor          | Pick parts of a clip and set their speed (e.g. 0.25×/0.5×); the saved and uploaded clip plays them slowed. The editor's preview gets speed and frame-by-frame stepping to find the moment |
+| 11 | Right-click a clip card           | **Done.** Opens the ⋯ menu, in My clips |
+| 12 | Hover preview                      | **Done for clips on this PC.** Resting on the picture plays the kept part muted, served with no audio track (a muted stream once made PipeWire start Klipt muted). Feed and online-only cards wait for a sound-free copy on the server |
+| 13 | "New" dot on Feed cards            | **Done.** Friends' clips shared since you last opened the Feed get a dot by the title |
+| 14 | Slow motion in the editor          | **Not now.** Frame-by-frame stepping is done (2026-11-16); setting parts of a clip to 0.25×/0.5× waits |
 
-Not now: sorting by size, length or views; moving between cards with the arrow keys.
+Not now: sorting by size, length or views; moving between cards with the arrow keys. Dropped: undo
+instead of "Are you sure?" (item 10).
 
 ## Later: after v1
 
@@ -118,9 +126,11 @@ Ideas the spec left out of v1 on purpose, or that came up while building. Nothin
 | Steam Deck / SteamOS Gaming Mode      | Needs gamescope capture; nobody in the group has asked                       |
 | GNOME and X11 on Linux                | v1 targets KDE Plasma on Wayland only                                        |
 | Code signing                          | Costs money; it would remove the SmartScreen warning and make a Program Files install practical |
-| Editor beyond trim, volume and speed  | Cuts in the middle, text, merging clips: a non-goal for v1 (slow motion is planned, item 14 above) |
+| Slow motion in the editor             | Picked on 2026-11-13, then put off by the owner                              |
+| Merging clips in the editor           | Cuts, zoom and typed subtitles are built; joining several clips into one is still out |
+| Speech-to-text subtitles              | Subtitles are typed by hand for now; the owner deferred automatic ones          |
 | Likes, comments, notifications        | A non-goal for v1; the Feed is enough for a small group                      |
-| Several qualities per clip on the server | Server-side transcoding: a non-goal for v1                                |
+| Several qualities per clip on the server | The server compresses every clip to H.264 and makes a small Discord copy; picking a quality in the player is still out |
 
 ## Open questions
 

@@ -457,6 +457,28 @@ select.input option {
     var(--bg);
 }
 
+/* Scrolled (stickyTop.ts): a smaller title and no subtitle, so small windows keep room for clips. */
+.page-top {
+  transition: padding-top 0.18s var(--ease-out), gap 0.18s var(--ease-out);
+}
+
+.page-top.compact {
+  gap: 0.75rem;
+  padding-top: 0.9rem;
+}
+
+.page-head h1 {
+  transition: font-size 0.18s var(--ease-out);
+}
+
+.page-top.compact .page-head h1 {
+  font-size: 1.3rem;
+}
+
+.page-top.compact .page-head .subtitle {
+  display: none;
+}
+
 /* Soft edge so scrolled cards fade out under it instead of being cut by a hard line. */
 .page-top::after {
   content: "";

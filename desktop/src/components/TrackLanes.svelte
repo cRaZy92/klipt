@@ -802,7 +802,8 @@
     place-items: center;
     width: 1.1rem;
     height: 1.1rem;
-    margin-right: 0.35rem;
+    /* Clear of the end edge, which resizes (EDGE_PX wide): a press there must never remove. */
+    margin-right: calc(10px + 0.3rem);
     padding: 0;
     border: none;
     border-radius: 4px;

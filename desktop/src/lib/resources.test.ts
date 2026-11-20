@@ -4,8 +4,8 @@ import { formatPercent, pushSample, scaleTop, sparkArea, sparkPath, totals } fro
 
 const usage = (gpu: boolean): ResourceUsage => ({
   parts: [
-    { part: "app", processes: 1, ramBytes: 100, cpuPercent: 1, gpuPercent: gpu ? 0 : null, vramBytes: gpu ? 0 : null },
-    { part: "recorder", processes: 1, ramBytes: 300, cpuPercent: 2.5, gpuPercent: gpu ? 7 : null, vramBytes: gpu ? 50 : null },
+    { part: "app", processes: 1, ramBytes: 100, cpuPercent: 1, gpuPercent: gpu ? 0 : null, gpuEngine: null, vramBytes: gpu ? 0 : null },
+    { part: "recorder", processes: 1, ramBytes: 300, cpuPercent: 2.5, gpuPercent: gpu ? 7 : null, gpuEngine: gpu ? "encoder" : null, vramBytes: gpu ? 50 : null },
   ],
   totalRamBytes: 1000,
   cpuThreads: 16,

@@ -420,6 +420,8 @@ export interface PartUsage {
   cpuPercent: number;
   /** Null when GPU numbers can't be read (see `gpuNote`). */
   gpuPercent: number | null;
+  /** Which part of the GPU `gpuPercent` is of (its busiest process's); null when unknown or idle. */
+  gpuEngine: "graphics" | "encoder" | "decoder" | null;
   vramBytes: number | null;
 }
 

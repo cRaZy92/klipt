@@ -155,14 +155,18 @@
             </th>
             <td>{idle ? "—" : formatSize(p.ramBytes)}</td>
             <td>{idle ? "—" : formatPercent(p.cpuPercent)}</td>
-            <td>{idle || p.gpuPercent == null ? "—" : formatPercent(p.gpuPercent)}</td>
+            <td>
+              {idle || p.gpuPercent == null ? "—" : formatPercent(p.gpuPercent)}
+              {#if !idle && p.gpuPercent != null && p.gpuEngine}<br /><small class="muted">{p.gpuEngine}</small>{/if}
+            </td>
             <td>{idle || p.vramBytes == null ? "—" : formatSize(p.vramBytes)}</td>
           </tr>
         {/each}
       </tbody>
     </table>
     <p class="note muted">
-      CPU is a share of the whole processor. GPU is the busiest of drawing, encoding and decoding. Memory shared
+      CPU is a share of the whole processor. GPU is the busiest part of the graphics card: graphics (what games draw
+      with), or the encoder or decoder, separate chips for video that leave a game's drawing alone. Memory shared
       with other programs, like system libraries, counts as Klipt's fair share.
     </p>
   {/if}

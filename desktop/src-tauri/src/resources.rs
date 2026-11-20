@@ -78,12 +78,38 @@ pub fn assign_parts(root: u32, procs: &[Proc]) -> HashMap<u32, Part> {
     parts
 }
 
+/// The part of the GPU a process keeps busiest. The encoder and decoder are their own chips
+/// beside the graphics cores a game draws with, so their load doesn't take from the game's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GpuEngine {
+    Graphics,
+    Encoder,
+    Decoder,
+}
+
+/// The busiest of the graphics cores, encoder and decoder (any load measure); None when all idle.
+/// A tie goes to graphics, then the encoder.
+pub fn busiest_engine(graphics: u32, encoder: u32, decoder: u32) -> Option<GpuEngine> {
+    if graphics == 0 && encoder == 0 && decoder == 0 {
+        None
+    } else if graphics >= encoder && graphics >= decoder {
+        Some(GpuEngine::Graphics)
+    } else if encoder >= decoder {
+        Some(GpuEngine::Encoder)
+    } else {
+        Some(GpuEngine::Decoder)
+    }
+}
+
 /// What one process uses. `cpu_percent` is of the whole CPU (all threads), 0–100.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ProcStat {
     pub ram_bytes: u64,
     pub cpu_percent: f32,
     pub gpu_percent: Option<f32>,
+    /// Which part of the GPU `gpu_percent` is of; None where that isn't known (Windows) or idle.
+    pub gpu_engine: Option<GpuEngine>,
     pub vram_bytes: Option<u64>,
 }
 
@@ -97,6 +123,8 @@ pub struct PartUsage {
     pub cpu_percent: f32,
     /// None when no GPU numbers could be read.
     pub gpu_percent: Option<f32>,
+    /// The engine of this part's busiest process, when known.
+    pub gpu_engine: Option<GpuEngine>,
     pub vram_bytes: Option<u64>,
 }
 
@@ -112,15 +140,22 @@ pub fn sum_parts(parts: &HashMap<u32, Part>, stats: &HashMap<u32, ProcStat>, gpu
                 ram_bytes: 0,
                 cpu_percent: 0.0,
                 gpu_percent: gpu.then_some(0.0),
+                gpu_engine: None,
                 vram_bytes: gpu.then_some(0),
             };
+            let mut busiest = 0.0f32;
             for (pid, _) in parts.iter().filter(|(_, p)| **p == part) {
                 let Some(s) = stats.get(pid) else { continue };
                 usage.processes += 1;
                 usage.ram_bytes += s.ram_bytes;
                 usage.cpu_percent += s.cpu_percent;
                 if gpu {
-                    usage.gpu_percent = Some(usage.gpu_percent.unwrap_or(0.0) + s.gpu_percent.unwrap_or(0.0));
+                    let percent = s.gpu_percent.unwrap_or(0.0);
+                    if s.gpu_engine.is_some() && percent > busiest {
+                        busiest = percent;
+                        usage.gpu_engine = s.gpu_engine;
+                    }
+                    usage.gpu_percent = Some(usage.gpu_percent.unwrap_or(0.0) + percent);
                     usage.vram_bytes = Some(usage.vram_bytes.unwrap_or(0) + s.vram_bytes.unwrap_or(0));
                 }
             }
@@ -211,11 +246,12 @@ impl Sampler {
         let Some(reading) = gpu.read() else {
             return GpuSummary::none("The NVIDIA driver didn't answer, so GPU and VRAM can't be shown.");
         };
-        for (pid, (percent, vram)) in reading.per_pid {
+        for (pid, g) in reading.per_pid {
             if parts.contains_key(&pid) {
                 if let Some(s) = stats.get_mut(&pid) {
-                    s.gpu_percent = Some(percent);
-                    s.vram_bytes = Some(vram);
+                    s.gpu_percent = Some(g.percent);
+                    s.gpu_engine = g.engine;
+                    s.vram_bytes = Some(g.vram_bytes);
                 }
             }
         }
@@ -301,9 +337,16 @@ mod nvidia {
     pub struct Reading {
         pub name: Option<String>,
         pub total_vram_bytes: Option<u64>,
-        /// Per process: load in % of the GPU (its busiest engine: 3D, encoder or decoder) and
-        /// VRAM in bytes.
-        pub per_pid: HashMap<u32, (f32, u64)>,
+        pub per_pid: HashMap<u32, ProcGpu>,
+    }
+
+    /// One process: load in % of its busiest engine (3D, encoder or decoder), which engine that
+    /// is, and VRAM in bytes.
+    #[derive(Default)]
+    pub struct ProcGpu {
+        pub percent: f32,
+        pub engine: Option<super::GpuEngine>,
+        pub vram_bytes: u64,
     }
 
     impl Gpu {
@@ -335,20 +378,26 @@ mod nvidia {
                     }
                 }
                 for (pid, bytes) in vram {
-                    reading.per_pid.entry(pid).or_default().1 += bytes;
+                    reading.per_pid.entry(pid).or_default().vram_bytes += bytes;
                 }
                 // Load: average of the samples since the last reading. NVML errors with
                 // "not found" when there are none, which just means idle.
                 let samples = device.process_utilization_stats(self.last_seen).unwrap_or_default();
-                let mut loads: HashMap<u32, (u32, u32)> = HashMap::new();
+                // Per process: sum of the busiest engine's load, samples, and each engine's sum.
+                let mut loads: HashMap<u32, (u32, u32, [u32; 3])> = HashMap::new();
                 for s in samples {
                     newest = Some(newest.map_or(s.timestamp, |n| n.max(s.timestamp)));
                     let e = loads.entry(s.pid).or_default();
                     e.0 += s.sm_util.max(s.enc_util).max(s.dec_util);
                     e.1 += 1;
+                    e.2[0] += s.sm_util;
+                    e.2[1] += s.enc_util;
+                    e.2[2] += s.dec_util;
                 }
-                for (pid, (sum, n)) in loads {
-                    reading.per_pid.entry(pid).or_default().0 += sum as f32 / n as f32;
+                for (pid, (sum, n, [sm, enc, dec])) in loads {
+                    let g = reading.per_pid.entry(pid).or_default();
+                    g.percent += sum as f32 / n as f32;
+                    g.engine = super::busiest_engine(sm, enc, dec);
                 }
             }
             self.last_seen = newest;
@@ -436,20 +485,31 @@ mod tests {
     fn sums_by_part_and_lists_every_part() {
         let parts = HashMap::from([(10, Part::App), (11, Part::Window), (12, Part::Window)]);
         let stats = HashMap::from([
-            (10, ProcStat { ram_bytes: 100, cpu_percent: 1.0, gpu_percent: None, vram_bytes: None }),
-            (11, ProcStat { ram_bytes: 200, cpu_percent: 2.0, gpu_percent: Some(70.0), vram_bytes: Some(5) }),
-            (12, ProcStat { ram_bytes: 300, cpu_percent: 3.0, gpu_percent: Some(60.0), vram_bytes: Some(7) }),
+            (10, ProcStat { ram_bytes: 100, cpu_percent: 1.0, ..Default::default() }),
+            (11, ProcStat { ram_bytes: 200, cpu_percent: 2.0, gpu_percent: Some(70.0), gpu_engine: Some(GpuEngine::Graphics), vram_bytes: Some(5) }),
+            (12, ProcStat { ram_bytes: 300, cpu_percent: 3.0, gpu_percent: Some(60.0), gpu_engine: Some(GpuEngine::Encoder), vram_bytes: Some(7) }),
         ]);
         let usage = sum_parts(&parts, &stats, true);
         assert_eq!(usage.iter().map(|u| u.part).collect::<Vec<_>>(), PARTS);
-        assert_eq!(usage[0], PartUsage { part: Part::App, processes: 1, ram_bytes: 100, cpu_percent: 1.0, gpu_percent: Some(0.0), vram_bytes: Some(0) });
+        assert_eq!(usage[0], PartUsage { part: Part::App, processes: 1, ram_bytes: 100, cpu_percent: 1.0, gpu_percent: Some(0.0), gpu_engine: None, vram_bytes: Some(0) });
         assert_eq!(usage[1].processes, 2);
         assert_eq!(usage[1].ram_bytes, 500);
         assert_eq!(usage[1].gpu_percent, Some(100.0)); // capped
+        assert_eq!(usage[1].gpu_engine, Some(GpuEngine::Graphics)); // its busiest process's
         assert_eq!(usage[1].vram_bytes, Some(12));
         assert_eq!(usage[2].processes, 0);
 
         let no_gpu = sum_parts(&parts, &stats, false);
         assert!(no_gpu.iter().all(|u| u.gpu_percent.is_none() && u.vram_bytes.is_none()));
+    }
+
+    #[test]
+    fn names_the_busiest_engine() {
+        assert_eq!(busiest_engine(0, 0, 0), None);
+        assert_eq!(busiest_engine(0, 14, 0), Some(GpuEngine::Encoder));
+        assert_eq!(busiest_engine(3, 14, 0), Some(GpuEngine::Encoder));
+        assert_eq!(busiest_engine(20, 14, 0), Some(GpuEngine::Graphics));
+        assert_eq!(busiest_engine(0, 0, 9), Some(GpuEngine::Decoder));
+        assert_eq!(busiest_engine(5, 5, 5), Some(GpuEngine::Graphics));
     }
 }

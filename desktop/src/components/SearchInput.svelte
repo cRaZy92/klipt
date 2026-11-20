@@ -8,6 +8,8 @@
     label,
     delay = 0,
     onsearch,
+    input = $bindable(),
+    shortcut,
   }: {
     value?: string;
     placeholder: string;
@@ -15,6 +17,10 @@
     /** Milliseconds to wait after the last key before `onsearch`; 0 reports at once. */
     delay?: number;
     onsearch?: (value: string) => void;
+    /** The text field, e.g. to focus it from a shortcut. */
+    input?: HTMLInputElement;
+    /** The key that jumps here, shown in the empty field (the page handles the key). */
+    shortcut?: string;
   } = $props();
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -41,7 +47,8 @@
 
 <label class="search">
   <Icon name="search" size={16} />
-  <input type="search" bind:value oninput={report} {onkeydown} {placeholder} aria-label={label} maxlength="100" />
+  <input type="search" bind:this={input} bind:value oninput={report} {onkeydown} {placeholder} aria-label={label} aria-keyshortcuts={shortcut} maxlength="100" />
+  {#if shortcut && !value}<kbd aria-hidden="true">{shortcut}</kbd>{/if}
 </label>
 
 <style>
@@ -65,6 +72,20 @@
   .search:focus-within {
     border-color: var(--accent);
     color: var(--text);
+  }
+
+  kbd {
+    padding: 0 0.4rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 5px;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+
+  .search:focus-within kbd {
+    display: none;
   }
 
   input {

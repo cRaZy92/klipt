@@ -145,6 +145,17 @@
     if (active) untrack(() => feedNeedsRefresh(shown, Date.now()) && refresh());
   });
 
+  let searchInput = $state<HTMLInputElement>();
+
+  /** `/` jumps to the search field (not while typing or while a clip plays over the list). */
+  function onkeydown(e: KeyboardEvent) {
+    if (!active || playing || e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]")) return;
+    e.preventDefault();
+    searchInput?.focus();
+    searchInput?.select();
+  }
+
   // Hidden: stop anything playing.
   $effect(() => {
     if (!active) playing = null;
@@ -171,6 +182,8 @@
     <div class="filters">
       <SearchInput
         bind:value={search}
+        bind:input={searchInput}
+        shortcut="/"
         placeholder="Search by title, game or friend"
         label="Search the feed"
         delay={300}
@@ -323,6 +336,8 @@
     {/if}
   {/if}
 </section>
+
+<svelte:window {onkeydown} />
 
 {#if playing}
   <ClipPlayer

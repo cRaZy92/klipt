@@ -132,10 +132,16 @@
     !!(uploading || playing || viewing || renaming || tagging || removing || deletingOnline || bulkUpload),
   );
 
+  let searchInput = $state<HTMLInputElement>();
+
   function onkeydown(e: KeyboardEvent) {
     if (!active || dialogOpen) return;
     const typing = (e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]");
-    if (e.key === "Escape" && selected.size > 0) {
+    if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      searchInput?.focus();
+      searchInput?.select();
+    } else if (e.key === "Escape" && selected.size > 0) {
       clearSelection();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && !typing) {
       e.preventDefault();
@@ -489,7 +495,7 @@
           </button>
         {/each}
       </div>
-      <SearchInput bind:value={search} placeholder="Search by title or game" label="Search my clips" />
+      <SearchInput bind:value={search} bind:input={searchInput} shortcut="/" placeholder="Search by title or game" label="Search my clips" />
       {#if uploadsError}
         <p class="uploads-error">
           <Icon name="alert" size={15} /> Couldn't load your uploads.

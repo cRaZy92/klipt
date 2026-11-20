@@ -98,6 +98,18 @@
     void load();
   }
 
+  const filtered = $derived(!!(game || search.trim() || withMe || kind || favoritesOnly));
+
+  /** Puts every filter back to showing the whole feed. */
+  function clearFilters() {
+    game = null;
+    search = "";
+    withMe = false;
+    kind = null;
+    favoritesOnly = false;
+    void load();
+  }
+
   function selectGame(g: string | null) {
     game = g;
     void load();
@@ -240,9 +252,14 @@
         <p>Nobody has tagged you in a clip yet.</p>
       {:else if game}
         <p>No clips for this game yet.</p>
+      {:else if kind}
+        <p>No {kind === "screenshot" ? "screenshots" : "clips"} shared yet.</p>
       {:else}
         <h2>Nothing shared yet</h2>
         <p>Upload a clip from My clips and it shows up here for everyone.</p>
+      {/if}
+      {#if filtered}
+        <button class="btn" onclick={clearFilters}><Icon name="close" size={16} /> Clear filters</button>
       {/if}
     </div>
   {:else}

@@ -120,6 +120,14 @@
     anchor = null;
   }
 
+  /** Puts every filter back to showing everything (sort stays). */
+  function clearFilters() {
+    place = "all";
+    game = null;
+    search = "";
+    media = "all";
+  }
+
   const dialogOpen = $derived(
     !!(uploading || playing || viewing || renaming || tagging || removing || deletingOnline || bulkUpload),
   );
@@ -525,6 +533,7 @@
       {:else}
         <p>No clips on this PC.</p>
       {/if}
+      <button class="btn" onclick={clearFilters}><Icon name="close" size={16} /> Clear filters</button>
     </div>
   {:else if loaded && visible.length === 0}
     {#if game}

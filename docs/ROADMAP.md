@@ -116,11 +116,11 @@ instead of "Are you sure?" (item 10).
 
 ## Planned: recording and multi-clip editing (chosen 2026-11-20)
 
-Asked for by the owner. None has a spec yet.
+Asked for by the owner. Item 1 is built (plan: `docs/superpowers/plans/2026-11-20-full-recording.md`); items 2 and 3 have no spec yet.
 
 | # | Feature                          | What it means                                                                                      |
 | - | -------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 1 | Full recording (start/stop)      | Besides the replay buffer, a shortcut (and a button) starts and stops a normal recording of any length, saved into the library like a clip. The replay buffer keeps running while it records. Open: whether gsr can record and keep its replay buffer in one process on Linux, and the same for the libobs sidecar on Windows; how long recordings sit in the library and in storage cleanup |
+| 1 | Full recording (start/stop) — **built 2026-11-20** (branch `feat/full-recording`) | Besides the replay buffer, a shortcut (default Ctrl+Alt+Backquote), a Record button in My clips and a tray item start and stop a normal recording of any length, saved to `<clips>/Recordings/` and into the library with a recording marker. Linux: gsr `-ro` + SIGRTMIN in the same process (one encoder). Windows: a libobs `ffmpeg_muxer` output sharing the replay buffer's encoders. Recordings follow the normal cleanup rule. Settings, pause, game exit and quit never cut a running recording |
 | 2 | Several clips from one recording | In the editor, mark several parts of one clip or recording and export each as its own clip (own title, game kept, own thumbnail), without touching the source |
 | 3 | Combine clips into one upload    | Pick several clips (e.g. from the multi-select bar in My clips) and join them in order into one video that uploads as a single clip; each part keeps its own trim. Moved here from "Merging clips in the editor" under Later |
 

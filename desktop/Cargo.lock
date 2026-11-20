@@ -2457,6 +2457,7 @@ dependencies = [
  "gethostname",
  "libc",
  "nix",
+ "notify-rust",
  "nvml-wrapper",
  "reqwest",
  "rodio",

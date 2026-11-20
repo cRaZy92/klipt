@@ -25,8 +25,59 @@ pub fn is_recording_problem(code: &str) -> bool {
     matches!(code, "full_recording_lost" | "full_recording_failed")
 }
 
+/// The app icon, for notifications on Linux.
+#[cfg(target_os = "linux")]
+pub const APP_ICON: &[u8] = include_bytes!("../icons/128x128.png");
+
+/// The desktop file the AUR package installs (packaging/aur); KDE takes its name and icon.
+#[cfg(target_os = "linux")]
+const DESKTOP_ENTRY: &str = "app.klipt.Klipt";
+
+/// The app icon as a file in `data_dir`, written when missing or different. A file path works in
+/// development too, where no icon is installed in the icon theme.
+#[cfg(target_os = "linux")]
+pub fn notification_icon(data_dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let path = data_dir.join("notification-icon.png");
+    if std::fs::read(&path).ok().as_deref() != Some(APP_ICON) {
+        std::fs::create_dir_all(data_dir)?;
+        std::fs::write(&path, APP_ICON)?;
+    }
+    Ok(path)
+}
+
+/// A Linux notification from "Klipt" with its icon. The notification plugin names the app after
+/// the program file (klipt-desktop) and asks for an icon of that name, which doesn't exist.
+#[cfg(target_os = "linux")]
+pub fn linux_notification(title: &str, body: Option<&str>, icon: &std::path::Path) -> notify_rust::Notification {
+    let mut n = notify_rust::Notification::new();
+    n.appname("Klipt").summary(title).icon(&icon.to_string_lossy()).hint(notify_rust::Hint::DesktopEntry(DESKTOP_ENTRY.into()));
+    if let Some(body) = body {
+        n.body(body);
+    }
+    n
+}
+
 /// Shows a system notification; failures are only logged.
 pub fn notify(app: &AppHandle, title: &str, body: Option<&str>) {
+    #[cfg(target_os = "linux")]
+    {
+        let icon = app.path().app_data_dir().map_err(|e| e.to_string()).and_then(|dir| {
+            notification_icon(&dir).map_err(|e| e.to_string())
+        });
+        match icon {
+            Ok(icon) => {
+                let n = linux_notification(title, body, &icon);
+                // Sending talks to D-Bus; don't hold up the caller (often the recorder thread).
+                std::thread::spawn(move || {
+                    if let Err(e) = n.show() {
+                        eprintln!("klipt: can't show a notification: {e}");
+                    }
+                });
+                return;
+            }
+            Err(e) => eprintln!("klipt: no icon for notifications ({e}); using the default"),
+        }
+    }
     let mut builder = app.notification().builder().title(title);
     if let Some(body) = body {
         builder = builder.body(body);
@@ -81,6 +132,29 @@ pub fn is_failed_save(code: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_notifications_name_klipt_and_show_its_icon() {
+        let n = linux_notification("Recording started", None, std::path::Path::new("/data/notification-icon.png"));
+        assert_eq!(n.appname, "Klipt");
+        assert_eq!(n.summary, "Recording started");
+        assert_eq!(n.icon, "/data/notification-icon.png");
+        assert!(n.hints.contains(&notify_rust::Hint::DesktopEntry("app.klipt.Klipt".into())));
+        let n = linux_notification("Klipt", Some("The recording stopped."), std::path::Path::new("/i.png"));
+        assert_eq!(n.body, "The recording stopped.");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_notification_icon_file_matches_the_app_icon() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = notification_icon(dir.path()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), APP_ICON);
+        std::fs::write(&path, b"an older icon").unwrap();
+        assert_eq!(notification_icon(dir.path()).unwrap(), path);
+        assert_eq!(std::fs::read(&path).unwrap(), APP_ICON, "a changed icon is written again");
+    }
 
     #[test]
     fn saved_text_names_the_game_or_says_unknown() {

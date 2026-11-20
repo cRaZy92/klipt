@@ -67,3 +67,5 @@ nvml-wrapper = "0.13.0"
 webkit2gtk = "=2.0.2"
 ashpd = { version = "0.12.3", features = ["tokio"] }
 nix = { version = "0.31.3", features = ["process", "signal"] }
+# The same version tauri-plugin-notification uses: to name the app and give it its icon (feedback::notify).
+notify-rust = "4.19.0"

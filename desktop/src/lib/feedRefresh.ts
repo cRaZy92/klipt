@@ -7,7 +7,7 @@ export const FEED_STALE_MS = 30_000;
 export interface FeedLoaded {
   /** When the first page was last loaded (ms); 0 = never. */
   loadedAt: number;
-  /** Pages shown: 1 = just the first, more after "Load older clips". */
+  /** Pages shown: 1 = just the first, more once older clips were loaded. */
   pages: number;
 }
 

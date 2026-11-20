@@ -53,6 +53,31 @@
     untrack(() => void load(true));
   });
 
+  // Nearing the end of the list loads the next page by itself. `nearEnd` stays true while the
+  // marker is in view, so a short page that leaves it in view loads another. A failed page waits
+  // for the button instead of retrying in a loop.
+  let nearEnd = $state(false);
+  let moreFailed = $state(false);
+  $effect(() => {
+    if (!active || !nearEnd || !cursor || loading || moreFailed || playing) return;
+    untrack(() => void load(true));
+  });
+
+  /** `use:watchEnd`: reports whether the list's end is within ~1.5 screens of being scrolled to. */
+  function watchEnd(node: HTMLElement) {
+    const observer = new IntersectionObserver(([entry]) => (nearEnd = entry.isIntersecting), {
+      root: node.closest(".screen"),
+      rootMargin: "0px 0px 150% 0px",
+    });
+    observer.observe(node);
+    return {
+      destroy() {
+        observer.disconnect();
+        nearEnd = false;
+      },
+    };
+  }
+
   // Bumped so answers to older requests are dropped when the filter changes quickly.
   let request = 0;
 
@@ -65,6 +90,7 @@
     const id = ++request;
     loading = true;
     if (!more) loadError = null;
+    moreFailed = false;
     try {
       const page = await api.feedClips(game, more ? cursor : null, search.trim() || null, withMe, kind, favoritesOnly);
       if (id !== request) return;
@@ -78,7 +104,10 @@
     } catch (e) {
       if (id !== request) return;
       const message = failed(e);
-      if (more) toast(message, "error");
+      if (more) {
+        moreFailed = true;
+        toast(message, "error");
+      }
       else loadError = message;
     } finally {
       if (id === request) loading = false;
@@ -328,10 +357,14 @@
       {/each}
     </div>
     {#if cursor}
-      <div class="more">
-        <button class="btn" onclick={() => load(true)} disabled={loading}>
-          {#if loading}<span class="spinner"></span>{/if} Load older clips
-        </button>
+      <div class="more" use:watchEnd>
+        {#if moreFailed}
+          <button class="btn" onclick={() => load(true)} disabled={loading}>
+            <Icon name="retry" size={16} /> Load older clips
+          </button>
+        {:else}
+          <span class="spinner" role="status" aria-label="Loading older clips"></span>
+        {/if}
       </div>
     {/if}
   {/if}
@@ -607,5 +640,8 @@
   .more {
     display: flex;
     justify-content: center;
+    min-height: 2.5rem;
+    padding-top: 1.5rem;
+    color: var(--text-muted);
   }
 </style>

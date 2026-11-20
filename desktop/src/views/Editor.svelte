@@ -711,7 +711,7 @@
   /** Playback was asked for and the video is getting going; the sound hasn't started yet. */
   let starting = false;
   let startTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Where the video was asked to play from; once its position moves past it, the sound starts. */
+  /** Where the video was last seen while starting; once it plays on from there, the sound starts. */
   let startVideoMs = 0;
   /** The sound starts anyway if the video hasn't moved by then (a stuck video). */
   const START_TIMEOUT_MS = 700;
@@ -785,8 +785,11 @@
     }
     // Waiting for the video to get going: the playhead shows the picture's time meanwhile.
     if (starting) {
-      if (!video.seeking) position = video.currentTime * 1000;
-      if (videoStarted(startVideoMs, video.currentTime * 1000, video.seeking)) beginAudio();
+      const at = video.currentTime * 1000;
+      if (!video.seeking) position = at;
+      if (videoStarted(startVideoMs, at, video.seeking)) beginAudio();
+      // Not playing yet (or it jumped): the next look compares with where it is now.
+      else if (!video.seeking) startVideoMs = at;
       return;
     }
     const seg = engine.segment();
@@ -819,7 +822,7 @@
     }
     // One drift seek at a time: the next is decided once this one landed.
     if (video.seeking || pendingSeek !== null) return;
-    const correction = videoCorrection(video.currentTime * 1000, ms, seekAverageMs, seg.to);
+    const correction = videoCorrection(video.currentTime * 1000, ms, seekAverageMs, seg.to, video.playbackRate);
     if (!correction) {
       if (video.playbackRate !== 1) video.playbackRate = 1;
     } else if ("rate" in correction) {

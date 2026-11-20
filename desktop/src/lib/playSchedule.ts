@@ -51,20 +51,29 @@ export function seekLatency(averageMs: number, sampleMs: number): number {
   return clamp(averageMs + (clamp(sampleMs) - averageMs) * SEEK_LATENCY_WEIGHT);
 }
 
+/** Drift a running rate nudge keeps going until (ms): well below where a nudge starts (80 ms). */
+const NUDGE_DONE_MS = 25;
+
 /**
  * How to pull the video back to the audio: nothing, a rate change (stronger the further off), or
  * a seek. A seek aims where the audio will be once it lands (`seekMs` ahead), within the part
- * playing (it ends at `segmentEndMs`).
+ * playing (it ends at `segmentEndMs`). A nudge already running (`rate`) goes on until the drift is
+ * small: each rate change stalls WebKitGTK's video for a moment, which flashes black, so flipping
+ * at the threshold flickered.
  */
 export function videoCorrection(
   videoMs: number,
   audioMs: number,
   seekMs: number,
   segmentEndMs: number,
+  rate = 1,
 ): { rate: number } | { seekMs: number } | null {
   const drift = audioMs - videoMs;
   const abs = Math.abs(drift);
-  if (abs <= 80) return null;
+  if (abs <= 80) {
+    const sameWay = (rate > 1 && drift > 0) || (rate < 1 && drift < 0);
+    return sameWay && abs > NUDGE_DONE_MS ? { rate } : null;
+  }
   if (abs <= 250) return { rate: drift > 0 ? 1.03 : 0.97 };
   if (abs <= 500) return { rate: drift > 0 ? 1.1 : 0.9 };
   return { seekMs: Math.min(audioMs + seekMs, segmentEndMs) };
@@ -96,13 +105,18 @@ export function videoLedJump(ms: number, ranges: TrimRange[]): number | null {
 /** The audio engine starts what it's asked to play this long after it's asked (ms). */
 export const AUDIO_LEAD_MS = 50;
 
+/** The most a playing video's position moves between two looks (ms); more is a jump, not play. */
+const PLAY_STEP_MAX_MS = 100;
+
 /**
- * Whether the video, asked to play from `startMs`, is really playing now (at `videoMs`): its
- * position has moved on and it isn't seeking. WebKitGTK sometimes never sends `playing` (e.g.
- * pressed right after a scrub), so the editor watches the position instead of waiting for it.
+ * Whether the video, last seen at `lastMs`, is really playing now (at `videoMs`): its position
+ * moved on by a playing step and it isn't seeking. WebKitGTK sometimes never sends `playing` (e.g.
+ * pressed right after a scrub), so the editor watches the position instead of waiting for it. A
+ * jump isn't play: after a seek to 0 the position of a clip whose first frame comes later jumps
+ * to that frame while the picture still waits.
  */
-export function videoStarted(startMs: number, videoMs: number, seeking: boolean): boolean {
-  return !seeking && videoMs > startMs + 1;
+export function videoStarted(lastMs: number, videoMs: number, seeking: boolean): boolean {
+  return !seeking && videoMs > lastMs + 1 && videoMs - lastMs <= PLAY_STEP_MAX_MS;
 }
 
 /** Where the sound starts so it lines up with a video now at `videoMs` (see AUDIO_LEAD_MS). */

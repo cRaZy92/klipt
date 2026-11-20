@@ -54,6 +54,14 @@ describe("videoCorrection", () => {
   it("seeks ahead of the audio by the seek time on large drift", () =>
     expect(videoCorrection(0, 1000, 300, end)).toEqual({ seekMs: 1300 }));
   it("doesn't seek past the part's end", () => expect(videoCorrection(0, 1000, 300, 1200)).toEqual({ seekMs: 1200 }));
+  // Each rate change stalls WebKitGTK's video for a moment (a black flash): a nudge runs on until
+  // the drift is small, instead of flipping back and forth at the threshold.
+  it("keeps nudging until the drift is small", () =>
+    expect(videoCorrection(1000, 1070, 150, end, 1.03)).toEqual({ rate: 1.03 }));
+  it("stops nudging once the drift is small", () => expect(videoCorrection(1000, 1020, 150, end, 1.03)).toBeNull());
+  it("stops a nudge that overshot", () => expect(videoCorrection(1070, 1000, 150, end, 1.03)).toBeNull());
+  it("keeps holding back until the drift is small", () =>
+    expect(videoCorrection(1070, 1000, 150, end, 0.97)).toEqual({ rate: 0.97 }));
 });
 
 describe("seekLatency", () => {
@@ -109,6 +117,12 @@ describe("videoStarted", () => {
 
   it("is true once the video's position moves on", () => {
     expect(videoStarted(5000, 5017, false)).toBe(true);
+  });
+
+  // A clip whose first frame is at 117 ms: after a seek to 0 the position jumps there while the
+  // picture still waits; starting the sound then put it ~90 ms ahead.
+  it("is false when the position jumps rather than plays", () => {
+    expect(videoStarted(0, 117, false)).toBe(false);
   });
 });
 

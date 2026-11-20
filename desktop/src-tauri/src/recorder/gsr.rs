@@ -77,7 +77,7 @@ pub fn build_args(cfg: &RecordConfig, target: &Target, portal_token: &Path) -> V
     }
     args.extend(["-c", "mp4", "-r"].map(String::from));
     args.push(cfg.buffer_seconds.to_string());
-    args.extend(["-replay-storage", "ram", "-o"].map(String::from));
+    args.extend(["-replay-storage", "ram", "-v", "no", "-o"].map(String::from));
     args.push(cfg.output_dir.to_string_lossy().into_owned());
     args
 }
@@ -298,10 +298,7 @@ fn spawn_child(
                 if is_encoder_failure(&line) {
                     encoder_failed.store(true, Ordering::SeqCst);
                 }
-                // gsr reports its capture rate every second; that's noise, not news.
-                if !line.contains("gsr info: update fps") {
-                    eprintln!("gsr: {line}");
-                }
+                eprintln!("gsr: {line}");
             }
         });
     }
@@ -520,7 +517,7 @@ mod tests {
             args,
             strings(
                 "-w DP-1 -f 60 -k h264 -bm cbr -q 20000 -ac aac -a default_output -a default_input \
-                 -c mp4 -r 30 -replay-storage ram -o /home/u/Videos/Klipt"
+                 -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt"
             )
         );
     }
@@ -534,7 +531,7 @@ mod tests {
             strings(
                 "-w portal -restore-portal-session yes -portal-session-token-filepath /data/portal-token \
                  -f 30 -s 1280x720 -k h264 -bm cbr -q 20000 -ac aac -a default_output \
-                 -c mp4 -r 120 -replay-storage ram -o /home/u/Videos/Klipt"
+                 -c mp4 -r 120 -replay-storage ram -v no -o /home/u/Videos/Klipt"
             )
         );
     }
@@ -547,7 +544,7 @@ mod tests {
             args,
             strings(
                 "-w HDMI-A-1 -f 60 -k h264 -bm cbr -q 35000 -ac aac -a default_output -a alsa_input.usb-mic \
-                 -c mp4 -r 30 -replay-storage ram -o /home/u/Videos/Klipt"
+                 -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt"
             )
         );
     }
@@ -560,7 +557,7 @@ mod tests {
             args,
             strings(
                 "-w DP-1 -f 60 -k h264 -bm cbr -q 20000 -ac aac -a app-inverse:discord|app-inverse:vesktop \
-                 -a default_input -a app:discord|app:vesktop -c mp4 -r 30 -replay-storage ram -o /home/u/Videos/Klipt"
+                 -a default_input -a app:discord|app:vesktop -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt"
             )
         );
     }

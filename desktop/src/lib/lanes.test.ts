@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { laneShading, rulerStep, rulerTicks, toggleMute } from "./lanes";
+import { blockLayout, laneShading, rulerStep, rulerTicks, toggleMute } from "./lanes";
 
 describe("rulerStep", () => {
   it("labels every 5 s under 30 s", () => {
@@ -87,5 +87,19 @@ describe("laneShading", () => {
 
   it("shades nothing without a length", () => {
     expect(laneShading(0, { start: 0, end: 0 }, [{ start: 0, end: 0, removed: true }]).cuts).toEqual([]);
+  });
+});
+
+describe("blockLayout", () => {
+  it("a wide block has 10 px resize edges, its text and its remove button", () => {
+    expect(blockLayout(200)).toEqual({ edgePx: 10, showText: true, showRemove: true });
+  });
+  it("a short block keeps its middle for moving: each edge is a quarter of it", () => {
+    expect(blockLayout(24).edgePx).toBe(6);
+    expect(blockLayout(8).edgePx).toBe(2);
+  });
+  it("drops the remove button, then the text, when there's no room", () => {
+    expect(blockLayout(50)).toEqual({ edgePx: 10, showText: true, showRemove: false });
+    expect(blockLayout(20)).toEqual({ edgePx: 5, showText: false, showRemove: false });
   });
 });

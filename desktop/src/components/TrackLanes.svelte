@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { Piece } from "../lib/cuts";
-  import { laneShading, rulerTicks } from "../lib/lanes";
+  import { blockLayout, laneShading, rulerTicks } from "../lib/lanes";
   import { msToX, xToMs, type TrimRange } from "../lib/trim";
   import { peaks as bucketPeaks } from "../lib/waveform";
   import type { SubtitleRange, ZoomRange } from "../lib/api";
@@ -141,8 +141,16 @@
 
   /** A zoom being dragged on the Zoom lane: its body (moves it) or one edge (resizes it). */
   let zoomDrag: { i: number; what: "move" | "start" | "end"; offset: number; moved: boolean } | null = $state(null);
-  /** How close to a zoom's edge (px) the pointer resizes it instead of moving it. */
-  const EDGE_PX = 10;
+  /** The lanes' width in px (the ruler's), to lay out short blocks. */
+  let laneWidth = $state(0);
+  /** How a block from `startMs` to `endMs` is laid out on the lane. */
+  const layoutOf = (startMs: number, endMs: number) => blockLayout(((endMs - startMs) / Math.max(1, duration)) * laneWidth);
+  /** Whether a press at `x` on `block` grabs an edge (resizes) or the middle (moves). */
+  function grabbed(block: HTMLElement, x: number): "move" | "start" | "end" {
+    const r = block.getBoundingClientRect();
+    const edge = blockLayout(r.width).edgePx;
+    return x - r.left <= edge ? "start" : r.right - x <= edge ? "end" : "move";
+  }
 
   function zoomDown(e: PointerEvent, i: number) {
     if (e.button !== 0) return;
@@ -157,8 +165,7 @@
       onseek(z.startMs + rampMs(z));
       return;
     }
-    const r = block.getBoundingClientRect();
-    const what = e.clientX - r.left <= EDGE_PX ? "start" : r.right - e.clientX <= EDGE_PX ? "end" : "move";
+    const what = grabbed(block, e.clientX);
     block.setPointerCapture(e.pointerId);
     zoomDrag = { i, what, offset: msAt(e, area) - z.startMs, moved: false };
     onzoomgesture(true);
@@ -213,8 +220,7 @@
     onsubtitleselect(i);
     onseek(s.startMs);
     if (locked) return;
-    const r = block.getBoundingClientRect();
-    const what = e.clientX - r.left <= EDGE_PX ? "start" : r.right - e.clientX <= EDGE_PX ? "end" : "move";
+    const what = grabbed(block, e.clientX);
     block.setPointerCapture(e.pointerId);
     subDrag = { i, what, offset: msAt(e, area) - s.startMs };
     onsubtitlegesture(true);
@@ -291,7 +297,7 @@
 <div class="lanes" class:locked style:grid-template-rows={rows}>
   <div class="label ruler-label"></div>
   <div class="ruler" aria-hidden="true">
-    <div class="area">
+    <div class="area" bind:clientWidth={laneWidth}>
       {#each ticks as t (t.ms)}
         <span style:left="{t.pct}%">{t.label}</span>
       {/each}
@@ -335,9 +341,11 @@
         <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
       {/each}
       {#each zooms as z, i (i)}
+        {@const fit = layoutOf(z.startMs, z.endMs)}
         <!-- A pointer target for placing the zoom in time; Enter picks it from the keyboard. -->
         <div
           class="zoom-block"
+          class:compact={!fit.showText}
           class:selected={selectedZoom === i}
           class:moving={zoomDrag?.i === i && zoomDrag.what === "move"}
           class:resizing={zoomDrag?.i === i && zoomDrag.what !== "move"}
@@ -355,13 +363,15 @@
           onlostpointercapture={zoomUp}
           onkeydown={(e) => zoomKey(e, i)}
         >
-          <!-- Where a press resizes instead of moving (as wide as EDGE_PX): shows the resize cursor. -->
-          <span class="zoom-edge start" aria-hidden="true"></span>
-          <span class="zoom-edge end" aria-hidden="true"></span>
+          <!-- Where a press resizes instead of moving (`blockLayout`'s edge): shows the resize cursor. -->
+          <span class="zoom-edge start" aria-hidden="true" style:width="{fit.edgePx}px"></span>
+          <span class="zoom-edge end" aria-hidden="true" style:width="{fit.edgePx}px"></span>
           <span class="ramp in" style:width="{(rampMs(z) / (z.endMs - z.startMs)) * 100}%"></span>
-          <span class="zoom-text"><Icon name="zoom" size={12} /> {z.zoom.toFixed(1)}×</span>
+          {#if fit.showText}
+            <span class="zoom-text"><Icon name="zoom" size={12} /> {z.zoom.toFixed(1)}×</span>
+          {/if}
           <span class="ramp out" style:width="{(rampMs(z) / (z.endMs - z.startMs)) * 100}%"></span>
-          {#if selectedZoom === i && !locked}
+          {#if selectedZoom === i && !locked && fit.showRemove}
             <button
               class="zoom-remove"
               aria-label="Remove this zoom"
@@ -404,9 +414,11 @@
         <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
       {/each}
       {#each subtitles as s, i (i)}
+        {@const fit = layoutOf(s.startMs, s.endMs)}
         <!-- A pointer target for placing the subtitle in time; Enter edits its text. -->
         <div
           class="zoom-block sub-block"
+          class:compact={!fit.showText}
           class:selected={selectedSubtitle === i}
           class:moving={subDrag?.i === i && subDrag.what === "move"}
           class:resizing={subDrag?.i === i && subDrag.what !== "move"}
@@ -427,10 +439,12 @@
           }}
           onkeydown={(e) => subKey(e, i)}
         >
-          <span class="zoom-edge start" aria-hidden="true"></span>
-          <span class="zoom-edge end" aria-hidden="true"></span>
-          <span class="zoom-text sub-text">{s.text || "…"}</span>
-          {#if selectedSubtitle === i && !locked}
+          <span class="zoom-edge start" aria-hidden="true" style:width="{fit.edgePx}px"></span>
+          <span class="zoom-edge end" aria-hidden="true" style:width="{fit.edgePx}px"></span>
+          {#if fit.showText}
+            <span class="zoom-text sub-text">{s.text || "…"}</span>
+          {/if}
+          {#if selectedSubtitle === i && !locked && fit.showRemove}
             <button
               class="zoom-remove"
               aria-label="Remove this subtitle"
@@ -784,7 +798,7 @@
     place-items: center;
     width: 1.1rem;
     height: 1.1rem;
-    /* Clear of the end edge, which resizes (EDGE_PX wide): a press there must never remove. */
+    /* Clear of the end edge, which resizes (10 px on a block wide enough for this button). */
     margin-right: calc(10px + 0.3rem);
     padding: 0;
     border: none;
@@ -792,6 +806,20 @@
     background: rgba(5, 4, 10, 0.55);
     color: #fff;
     cursor: pointer;
+  }
+
+  /* Too short for its text: a slim marker that is still easy to grab. */
+  .zoom-block.compact {
+    border-radius: 3px;
+    box-shadow:
+      inset 2px 0 0 var(--accent),
+      inset -2px 0 0 var(--accent);
+  }
+  .zoom-block.compact.selected {
+    box-shadow:
+      inset 2px 0 0 #fff,
+      inset -2px 0 0 #fff,
+      0 0 0 1px var(--accent);
   }
 
   .locked .zoom-block {

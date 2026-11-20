@@ -52,3 +52,12 @@ export function laneShading(duration: number, trim: TrimRange, pieces: Piece[]):
   });
   return { dims, cuts };
 }
+
+/**
+ * How a block on the Zoom or Subtitles lane is laid out at `widthPx` wide: how wide its resize
+ * edges are (at most 10 px, and never more than a quarter of it, so its middle still moves it and
+ * takes a double-click), and whether its text and its remove button fit.
+ */
+export function blockLayout(widthPx: number): { edgePx: number; showText: boolean; showRemove: boolean } {
+  return { edgePx: Math.min(10, widthPx / 4), showText: widthPx >= 28, showRemove: widthPx >= 72 };
+}

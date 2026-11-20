@@ -532,6 +532,7 @@ pub fn import_planned(
             title: title_from(source),
             has_voice: false,
             kind,
+            is_recording: false,
         };
         let clip = match library.insert(new) {
             Ok(clip) => clip,

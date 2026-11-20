@@ -79,12 +79,16 @@ const MIGRATIONS: &[&str] = &["
 ", "
     -- Subtitles typed in the editor: JSON list of {\"startMs\", \"endMs\", \"text\"} (ms into the file).
     ALTER TABLE clips ADD COLUMN subtitles TEXT NOT NULL DEFAULT '[]';
+", "
+    -- A full recording (started and stopped by the user), not a replay-buffer clip. Local only.
+    ALTER TABLE clips ADD COLUMN is_recording INTEGER NOT NULL DEFAULT 0;
 "];
 
+/// Queries that select more after these read them from index 32 on.
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
                        visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind, \
-                       extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles";
+                       extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles, is_recording";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -120,6 +124,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         removed_ranges: serde_json::from_str(&row.get::<_, String>(28)?).unwrap_or_default(),
         zoom_ranges: serde_json::from_str(&row.get::<_, String>(29)?).unwrap_or_default(),
         subtitles: serde_json::from_str(&row.get::<_, String>(30)?).unwrap_or_default(),
+        is_recording: row.get(31)?,
     })
 }
 
@@ -168,8 +173,8 @@ impl Library {
     pub fn insert(&self, clip: NewClip) -> Result<Clip> {
         let id = uuid::Uuid::new_v4().simple().to_string();
         self.conn.execute(
-            "INSERT INTO clips (id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, title, has_voice, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT INTO clips (id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, title, has_voice, kind, is_recording)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 id,
                 clip.path.to_string_lossy(),
@@ -184,6 +189,7 @@ impl Library {
                 clip.title,
                 clip.has_voice,
                 clip.kind.as_str(),
+                clip.is_recording,
             ],
         )?;
         self.get(&id)
@@ -380,7 +386,7 @@ impl Library {
             "SELECT {COLUMNS}, sync_pending FROM clips WHERE sync_pending != '' AND server_clip_id IS NOT NULL"
         ))?;
         let rows = stmt
-            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(31)?))))?
+            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(32)?))))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -622,6 +628,7 @@ mod tests {
             has_mic: false,
             has_voice: false,
             kind: crate::library::ClipKind::Clip,
+            is_recording: false,
             game_name: game.map(|g| g.0.to_string()),
             steam_app_id: game.map(|g| g.1),
             exe: Some("game.exe".into()),
@@ -651,6 +658,19 @@ mod tests {
 
     const AM: (&str, u32) = ("Active Matter", 2_887_580);
     const CS: (&str, u32) = ("Counter-Strike 2", 730);
+
+    #[test]
+    fn inserts_and_reads_back_is_recording() {
+        let f = Fixture::new();
+        let plain = f.add("a.mp4", 1_000, None);
+        assert!(!plain.is_recording);
+        let path = f.dir.path().join("Video_1.mp4");
+        fs::write(&path, b"video").unwrap();
+        let rec = f.lib.insert(NewClip { is_recording: true, ..new_clip(&path, 2_000, Some(AM)) }).unwrap();
+        assert!(rec.is_recording);
+        assert!(f.lib.get(&rec.id).unwrap().is_recording);
+        assert!(!f.lib.get(&plain.id).unwrap().is_recording);
+    }
 
     #[test]
     fn insert_fills_in_id_and_edit_defaults() {

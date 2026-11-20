@@ -312,6 +312,7 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
         has_mic: false,
         has_voice: false,
         kind: if info.screenshot { crate::library::ClipKind::Screenshot } else { crate::library::ClipKind::Clip },
+        is_recording: false,
         game_name: info.game_name,
         steam_app_id: info.steam_app_id,
         exe: None,

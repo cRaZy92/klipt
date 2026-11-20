@@ -45,6 +45,8 @@ pub struct NewClip {
     /// Voice chat apps (Discord…) were recorded on their own track (Linux).
     pub has_voice: bool,
     pub kind: ClipKind,
+    /// A full recording (started and stopped by the user), not a replay-buffer clip.
+    pub is_recording: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -81,6 +83,8 @@ pub struct Clip {
     /// The whole clip's volume, applied after the tracks are mixed.
     pub master_volume: f32,
     pub kind: ClipKind,
+    /// A full recording (started and stopped by the user), not a replay-buffer clip.
+    pub is_recording: bool,
     /// Volumes of the other audio tracks (imported clips with more tracks), by track index.
     pub extra_volumes: BTreeMap<u32, f32>,
     /// Uploads and exports blur the picture: a clip where only the sound matters.

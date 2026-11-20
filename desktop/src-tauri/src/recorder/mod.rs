@@ -188,6 +188,7 @@ pub fn process_saved_clip(library: &Mutex<Library>, tools: Option<&Tools>, saved
         has_mic,
         has_voice,
         kind: crate::library::ClipKind::Clip,
+        is_recording: false,
         game_name: saved.game.game_name,
         steam_app_id: saved.game.steam_app_id,
         exe: saved.game.exe,

@@ -1286,6 +1286,7 @@ mod tests {
             voice_volume: 1.0,
             master_volume: 1.0,
             kind: crate::library::ClipKind::Clip,
+            is_recording: false,
             extra_volumes: Default::default(),
             blur_video: false,
             removed_ranges: Vec::new(),

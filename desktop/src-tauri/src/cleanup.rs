@@ -135,6 +135,7 @@ mod tests {
             has_mic: false,
             has_voice: false,
             kind: crate::library::ClipKind::Clip,
+            is_recording: false,
             game_name: None,
             steam_app_id: None,
             exe: None,

@@ -61,6 +61,8 @@ export interface ClipView {
   uploadOffset: number | null;
   /** A video clip or a screenshot (PNG). */
   kind: "clip" | "screenshot";
+  /** A full recording (started and stopped by the user), not a replay-buffer clip. */
+  isRecording: boolean;
   /** Starred; the automatic cleanup never deletes it. */
   favorite: boolean;
   /** Voice chat (Discord…) has its own track. */

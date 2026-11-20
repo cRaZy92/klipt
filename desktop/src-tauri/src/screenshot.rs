@@ -91,6 +91,7 @@ pub fn take(app: &AppHandle) -> Result<ClipView> {
         exe: game.exe,
         has_voice: false,
         kind: ClipKind::Screenshot,
+        is_recording: false,
     };
     let (clip, thumb) = {
         let library = crate::commands::lock(&state.library);

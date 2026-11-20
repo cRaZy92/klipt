@@ -34,7 +34,15 @@
   import { formatTenths, stepMs } from "../lib/timecode";
   import { addZoomAt, removeZoom, sameZooms, setZoomBox, zoomAt, zoomIndexAt } from "../lib/zoom";
   import type { SubtitleRange, ZoomRange } from "../lib/api";
-  import { addSubtitleAt, removeSubtitle, sameSubtitles, savedSubtitles, subtitleIndexAt } from "../lib/subtitles";
+  import {
+    MAX_SUBTITLE_CHARS,
+    addSubtitleAt,
+    removeSubtitle,
+    sameSubtitles,
+    savedSubtitles,
+    setSubtitleText,
+    subtitleIndexAt,
+  } from "../lib/subtitles";
   import { toggleMute } from "../lib/lanes";
   import { menu } from "../lib/a11y";
   import { Autosave, type SaveStatus } from "../lib/autosave";
@@ -299,12 +307,14 @@
 
   function undo() {
     if (editLocked) return;
+    closeSubtitleText();
     const s = history?.undo();
     if (s) applyState(s);
   }
 
   function redo() {
     if (editLocked) return;
+    closeSubtitleText();
     const s = history?.redo();
     if (s) applyState(s);
   }
@@ -900,7 +910,9 @@
       return;
     }
     if (playing) pause();
-    history?.record(editState);
+    closeSubtitleText();
+    // Adding it and typing its text is one undo step.
+    gestures.start("subtitle");
     subtitles = next;
     const i = subtitleIndexAt(next, Math.round(position));
     selectedSubtitle = i;
@@ -908,11 +920,57 @@
     editingSubtitle = i;
   }
 
+  /** Opens subtitle `i`'s text box (one undo step until it closes). */
+  function editSubtitle(i: number) {
+    if (editLocked || !subtitles[i]) return;
+    if (playing) pause();
+    closeSubtitleText();
+    gestures.start("subtitle");
+    selectedSubtitle = i;
+    selectedZoom = null;
+    editingSubtitle = i;
+    seek(subtitles[i].startMs);
+  }
+
+  /** Closes the text box: `text` is stored (blank removes the subtitle), or null leaves it as it was. */
+  function closeSubtitleText(text: string | null = null) {
+    const i = editingSubtitle;
+    if (i === null) return;
+    editingSubtitle = null;
+    if (subtitles[i]) {
+      // Blank text removes the subtitle, so a new one that never got text goes away.
+      const before = subtitles.length;
+      subtitles = setSubtitleText(subtitles, i, text ?? subtitles[i].text);
+      if (subtitles.length < before) selectedSubtitle = null;
+    }
+    gestures.end("subtitle");
+  }
+
+  /** The text box gets focus when it opens, with its text selected. */
+  function focusText(el: HTMLInputElement) {
+    el.focus();
+    el.select();
+  }
+
+  function ontextkey(e: KeyboardEvent) {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      closeSubtitleText(e.currentTarget instanceof HTMLInputElement ? e.currentTarget.value : null);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeSubtitleText();
+    }
+  }
+
   function removeSubtitleAt(i: number) {
     if (editLocked) return;
+    if (editingSubtitle !== null) {
+      editingSubtitle = null;
+      gestures.end("subtitle");
+    }
     subtitles = removeSubtitle(subtitles, i);
     selectedSubtitle = null;
-    editingSubtitle = null;
   }
 
   function removeZoomAt(i: number) {
@@ -1275,6 +1333,21 @@
         {#if shownSubtitle}
           <p class="subtitle" style:--h="{videoRect.height}px" style:--w="{videoRect.width}px">{shownSubtitle.text}</p>
         {/if}
+        {#if editingSubtitle !== null && subtitles[editingSubtitle]}
+          <input
+            class="subtitle subtitle-input"
+            style:--h="{videoRect.height}px"
+            style:--w="{videoRect.width}px"
+            value={subtitles[editingSubtitle].text}
+            maxlength={MAX_SUBTITLE_CHARS * 2}
+            placeholder="Type the subtitle, then Enter"
+            aria-label="Subtitle text"
+            spellcheck="false"
+            use:focusText
+            onkeydown={ontextkey}
+            onblur={(e) => closeSubtitleText(e.currentTarget.value)}
+          />
+        {/if}
       </div>
       {#if placingZoom && selectedZoom !== null && zooms[selectedZoom] && !editLocked && !mediaError}
         <ZoomBox zoom={zooms[selectedZoom]} rect={videoRect} onchange={onzoombox} ongesture={onzoomgesture} />
@@ -1380,12 +1453,27 @@
         {onscrubend}
         {zooms}
         {selectedZoom}
-        onzoomselect={(i) => (selectedZoom = i)}
+        onzoomselect={(i) => {
+          selectedZoom = i;
+          if (i !== null) selectedSubtitle = null;
+        }}
         onzoomchange={(next) => {
           if (!editLocked) zooms = next;
         }}
         {onzoomgesture}
         onzoomremove={removeZoomAt}
+        {subtitles}
+        {selectedSubtitle}
+        onsubtitleselect={(i) => {
+          selectedSubtitle = i;
+          if (i !== null) selectedZoom = null;
+        }}
+        onsubtitlechange={(next) => {
+          if (!editLocked) subtitles = next;
+        }}
+        onsubtitlegesture={(active) => (active ? gestures.start("subtitle") : gestures.end("subtitle"))}
+        onsubtitleremove={removeSubtitleAt}
+        onsubtitleedit={editSubtitle}
       >
         {#snippet video()}
           <TrimBar
@@ -1700,6 +1788,20 @@
     -webkit-text-stroke: calc(max(2px, var(--h) * 0.0035) * 2) #000;
     paint-order: stroke fill;
     pointer-events: none;
+  }
+  .subtitle-input {
+    width: calc(var(--w) * 0.9);
+    box-sizing: border-box;
+    padding: 0.1em 0.3em;
+    border: 1px dashed rgba(255, 255, 255, 0.7);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.35);
+    outline: none;
+    pointer-events: auto;
+  }
+  .subtitle-input::placeholder {
+    color: rgba(255, 255, 255, 0.55);
+    -webkit-text-stroke: 0;
   }
   .freeze.show {
     visibility: visible;

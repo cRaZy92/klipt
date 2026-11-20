@@ -4,8 +4,9 @@
   import { laneShading, rulerTicks } from "../lib/lanes";
   import { msToX, xToMs, type TrimRange } from "../lib/trim";
   import { peaks as bucketPeaks } from "../lib/waveform";
-  import type { ZoomRange } from "../lib/api";
+  import type { SubtitleRange, ZoomRange } from "../lib/api";
   import { moveZoom, rampMs, resizeZoom } from "../lib/zoom";
+  import { moveSubtitle, resizeSubtitle } from "../lib/subtitles";
   import Icon from "./Icon.svelte";
 
   interface LaneTrack {
@@ -39,6 +40,13 @@
     onzoomchange,
     onzoomgesture,
     onzoomremove,
+    subtitles,
+    selectedSubtitle,
+    onsubtitleselect,
+    onsubtitlechange,
+    onsubtitlegesture,
+    onsubtitleremove,
+    onsubtitleedit,
     video,
   }: {
     /** The clip's length in ms. */
@@ -72,14 +80,25 @@
     /** A drag of a zoom started (true) or ended (false): one drag is one undo step. */
     onzoomgesture: (active: boolean) => void;
     onzoomremove: (i: number) => void;
+    /** The subtitles, sorted, in ms into the file. */
+    subtitles: SubtitleRange[];
+    /** The picked subtitle's index, or null. */
+    selectedSubtitle: number | null;
+    onsubtitleselect: (i: number | null) => void;
+    onsubtitlechange: (subtitles: SubtitleRange[]) => void;
+    /** A drag of a subtitle started (true) or ended (false): one drag is one undo step. */
+    onsubtitlegesture: (active: boolean) => void;
+    onsubtitleremove: (i: number) => void;
+    /** Opens subtitle `i`'s text box. */
+    onsubtitleedit: (i: number) => void;
     /** The video lane: the TrimBar. */
     video: Snippet;
   } = $props();
 
   const ticks = $derived(rulerTicks(duration));
   const shading = $derived(laneShading(duration, trim, pieces));
-  /** Ruler, video, zoom, one row per track: the playhead spans the zoom and audio rows. */
-  const rows = $derived(["auto", "auto", "auto", ...tracks.map(() => "auto")].join(" "));
+  /** Ruler, video, zoom, subtitles, one row per track: the playhead spans all but the first two. */
+  const rows = $derived(["auto", "auto", "auto", "auto", ...tracks.map(() => "auto")].join(" "));
 
   const level = (v: number) => (v === 0 ? "Off" : `${v}%`);
 
@@ -164,6 +183,55 @@
       e.stopPropagation();
       onzoomselect(i);
       onseek(zooms[i].startMs + rampMs(zooms[i]));
+    }
+  }
+
+  /** A subtitle being dragged on the Subtitles lane: its body (moves it) or one edge (resizes it). */
+  let subDrag: { i: number; what: "move" | "start" | "end"; offset: number } | null = $state(null);
+
+  function subDown(e: PointerEvent, i: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const block = e.currentTarget as HTMLElement;
+    const area = block.parentElement as HTMLElement;
+    const s = subtitles[i];
+    onsubtitleselect(i);
+    onseek(s.startMs);
+    if (locked) return;
+    const r = block.getBoundingClientRect();
+    const what = e.clientX - r.left <= EDGE_PX ? "start" : r.right - e.clientX <= EDGE_PX ? "end" : "move";
+    block.setPointerCapture(e.pointerId);
+    subDrag = { i, what, offset: msAt(e, area) - s.startMs };
+    onsubtitlegesture(true);
+  }
+
+  function subMove(e: PointerEvent) {
+    if (!subDrag) return;
+    const area = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
+    const ms = msAt(e, area);
+    const { i, what } = subDrag;
+    const next =
+      what === "move" ? moveSubtitle(subtitles, i, ms - subDrag.offset, trim) : resizeSubtitle(subtitles, i, what, ms, trim);
+    if (next !== subtitles) onsubtitlechange(next);
+  }
+
+  function subUp() {
+    if (!subDrag) return;
+    const { i, what } = subDrag;
+    subDrag = null;
+    onsubtitlegesture(false);
+    const s = subtitles[i];
+    if (s) onseek(what === "end" ? Math.max(s.startMs, s.endMs - 1) : s.startMs);
+  }
+
+  function subKey(e: KeyboardEvent, i: number) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      onsubtitleselect(i);
+      onseek(subtitles[i].startMs);
+      if (!locked) onsubtitleedit(i);
     }
   }
 
@@ -299,6 +367,74 @@
     </div>
   </div>
 
+  <div class="label zoom-label">
+    <span class="name">Subtitles</span>
+  </div>
+  <div class="lane zoom">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="area"
+      onpointerdown={(e) => {
+        onsubtitleselect(null);
+        grab(e);
+      }}
+      onpointermove={move}
+      onpointerup={release}
+      onpointercancel={release}
+      onlostpointercapture={release}
+    >
+      {#each shading.dims as d, i (i)}
+        <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
+      {/each}
+      {#if subtitles.length === 0}
+        <span class="zoom-hint">Press <kbd>T</kbd> to add a subtitle at the playhead</span>
+      {/if}
+      {#each subtitles as s, i (i)}
+        <!-- A pointer target for placing the subtitle in time; Enter edits its text. -->
+        <div
+          class="zoom-block sub-block"
+          class:selected={selectedSubtitle === i}
+          class:moving={subDrag?.i === i && subDrag.what === "move"}
+          class:resizing={subDrag?.i === i && subDrag.what !== "move"}
+          role="button"
+          tabindex="0"
+          aria-label="Subtitle “{s.text}” from {(s.startMs / 1000).toFixed(1)} s"
+          aria-pressed={selectedSubtitle === i}
+          title="Double-click to edit the text, drag to move, drag an edge to make it longer or shorter, Delete to remove"
+          style:left="{msToX(s.startMs, duration, 100)}%"
+          style:width="{msToX(s.endMs, duration, 100) - msToX(s.startMs, duration, 100)}%"
+          onpointerdown={(e) => subDown(e, i)}
+          onpointermove={subMove}
+          onpointerup={subUp}
+          onpointercancel={subUp}
+          onlostpointercapture={subUp}
+          ondblclick={() => {
+            if (!locked) onsubtitleedit(i);
+          }}
+          onkeydown={(e) => subKey(e, i)}
+        >
+          <span class="zoom-edge start" aria-hidden="true"></span>
+          <span class="zoom-edge end" aria-hidden="true"></span>
+          <span class="zoom-text sub-text">{s.text || "…"}</span>
+          {#if selectedSubtitle === i && !locked}
+            <button
+              class="zoom-remove"
+              aria-label="Remove this subtitle"
+              title="Remove this subtitle (Delete)"
+              onpointerdown={(e) => e.stopPropagation()}
+              onclick={(e) => {
+                e.stopPropagation();
+                onsubtitleremove(i);
+              }}
+            >
+              <Icon name="close" size={11} />
+            </button>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  </div>
+
   {#each tracks as t, i (t.key)}
     <div class="label" class:last={i === tracks.length - 1}>
       <div class="line">
@@ -356,7 +492,7 @@
 
 
   {#if tracks.length}
-    <div class="playhead-span" style:grid-row="3 / span {tracks.length + 1}" aria-hidden="true">
+    <div class="playhead-span" style:grid-row="3 / span {tracks.length + 2}" aria-hidden="true">
       <div class="playhead" style:left="{msToX(position, duration, 100)}%"></div>
     </div>
   {/if}
@@ -637,6 +773,13 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     pointer-events: none;
+  }
+
+  .sub-text {
+    display: block;
+    padding-right: 0.3rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
   }
 
   .zoom-remove {

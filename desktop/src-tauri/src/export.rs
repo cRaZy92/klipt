@@ -124,7 +124,16 @@ fn visible_zooms(edit: &Edit) -> Vec<crate::library::ZoomRange> {
 
 /// Whether an export has to encode the picture (instead of copying it).
 fn reencodes(edit: &Edit) -> bool {
-    edit.blur_video || !edit.removed.is_empty() || !visible_zooms(edit).is_empty()
+    edit.blur_video || !edit.removed.is_empty() || !visible_zooms(edit).is_empty() || !subtitle_events(edit).is_empty()
+}
+
+/// The subtitles as they show in the export, in the export's time.
+fn subtitle_events(edit: &Edit) -> Vec<(u64, u64, String)> {
+    if edit.subtitles.is_empty() {
+        return Vec::new();
+    }
+    // `-ss` makes the trim start `t = 0`, which is also where the first kept part starts.
+    crate::subtitles::events(&edit.subtitles, &kept_ranges(edit, u64::MAX))
 }
 
 /// The parts of the file an export keeps, in order: the trim minus the removed parts. A trim
@@ -162,13 +171,15 @@ pub fn joined_time(ms: u64, kept: &[(u64, u64)]) -> u64 {
 /// The ffmpeg arguments (without the program name) for exporting `input` to `output`.
 /// A trim start before `-i` snaps to the keyframe at or before it; `-to` is then relative to it.
 /// The video is copied as it is, or (zoomed, blurred) encoded with `encoder`. `size` is the
-/// picture's size, which zooms need.
+/// picture's size, which zooms need. `subtitles` (the `subtitles` filter, in the export's time)
+/// draws last, so the text is never zoomed or blurred.
 pub fn export_args(
     input: &Path,
     output: &Path,
     edit: &Edit,
     tracks: &Tracks,
     size: (u32, u32),
+    subtitles: Option<&str>,
     encoder: &[&str],
 ) -> Result<Vec<String>> {
     let start = edit.trim_start_ms;
@@ -196,7 +207,7 @@ pub fn export_args(
     let zooms = visible_zooms(edit);
     if !edit.removed.is_empty() {
         let zoom = zoom_filter(&zooms, size, 0);
-        return Ok(cut_args(input, output, edit, &graph, zoom.as_deref(), encoder));
+        return Ok(cut_args(input, output, edit, &graph, zoom.as_deref(), subtitles, encoder));
     }
     // `-ss` before `-i` makes the trim start `t = 0`, so the zooms are shifted by it.
     let zoom = zoom_filter(&zooms, size, start.unwrap_or(0));
@@ -209,9 +220,10 @@ pub fn export_args(
     if let Some(end) = edit.trim_end_ms {
         args.extend(["-to".into(), seconds(end - start.unwrap_or(0))]);
     }
-    // The picture's filters in order: zoom, then blur (so the blur looks the same zoomed or not).
+    // The picture's filters in order: zoom, then blur (so the blur looks the same zoomed or not),
+    // then the subtitles.
     let blur = edit.blur_video.then(|| format!("scale=-2:'min({BLUR_MAX_HEIGHT},ih)',gblur=sigma={BLUR_SIGMA}"));
-    let video: Vec<String> = zoom.into_iter().chain(blur).collect();
+    let video: Vec<String> = zoom.into_iter().chain(blur).chain(subtitles.map(String::from)).collect();
     let graph = if video.is_empty() { graph } else { format!("[0:v:0]{}[vout];{graph}", video.join(",")) };
     args.extend(["-filter_complex".into(), graph]);
     if reencode {
@@ -234,7 +246,16 @@ pub fn export_args(
 /// `atrim` on the mix), the parts are joined with `concat` and the video is encoded with
 /// `encoder`. `mix` is the audio graph ending in `[aout]`. `zoom` (in the file's time) runs
 /// before the parts are cut out, so a zoom across a removed part plays right on both sides.
-fn cut_args(input: &Path, output: &Path, edit: &Edit, mix: &str, zoom: Option<&str>, encoder: &[&str]) -> Vec<String> {
+#[allow(clippy::too_many_arguments)]
+fn cut_args(
+    input: &Path,
+    output: &Path,
+    edit: &Edit,
+    mix: &str,
+    zoom: Option<&str>,
+    subtitles: Option<&str>,
+    encoder: &[&str],
+) -> Vec<String> {
     // No end for a trim running to the file's end: `trim` then stops where the file does.
     let kept = kept_ranges(edit, u64::MAX);
     let n = kept.len();
@@ -255,11 +276,9 @@ fn cut_args(input: &Path, output: &Path, edit: &Edit, mix: &str, zoom: Option<&s
         pairs.push_str(&format!("[v{i}][a{i}]"));
     }
     graph.push(format!("{pairs}concat=n={n}:v=1:a=1[vcat][aout]"));
-    graph.push(if edit.blur_video {
-        format!("[vcat]scale=-2:'min({BLUR_MAX_HEIGHT},ih)',gblur=sigma={BLUR_SIGMA}[vout]")
-    } else {
-        "[vcat]null[vout]".to_string()
-    });
+    let blur = edit.blur_video.then(|| format!("scale=-2:'min({BLUR_MAX_HEIGHT},ih)',gblur=sigma={BLUR_SIGMA}"));
+    let video: Vec<String> = blur.into_iter().chain(subtitles.map(String::from)).collect();
+    graph.push(if video.is_empty() { "[vcat]null[vout]".to_string() } else { format!("[vcat]{}[vout]", video.join(",")) });
     let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-y", "-i"].map(String::from).into();
     args.push(input.to_string_lossy().into_owned());
     args.extend(["-filter_complex".into(), graph.join(";"), "-map".into(), "[vout]".into()]);
@@ -304,11 +323,25 @@ pub fn export(
     } else {
         Vec::new()
     };
-    let args = export_args(input, &temp, edit, &tracks, (info.width, info.height), &encoder)?;
-    let result = run(tools, &args, expected_us, &mut progress).and_then(|_| match fs::metadata(&temp) {
-        Ok(meta) if meta.len() > 0 => Ok(fs::rename(&temp, &out)?),
-        _ => Err(AppError::ToolFailed { tool: "ffmpeg", detail: "export produced no output".into() }),
+    let size = (info.width, info.height);
+    let events = subtitle_events(edit);
+    let ass = dir.join(format!("{clip_id}.ass"));
+    let subtitles = if events.is_empty() {
+        None
+    } else {
+        let fonts = crate::subtitles::write_font(cache_dir)?;
+        fs::write(&ass, crate::subtitles::ass_document(&events, size))?;
+        Some(crate::subtitles::filter(&ass, &fonts))
+    };
+    let result = export_args(input, &temp, edit, &tracks, size, subtitles.as_deref(), &encoder).and_then(|args| {
+        run(tools, &args, expected_us, &mut progress).and_then(|_| match fs::metadata(&temp) {
+            Ok(meta) if meta.len() > 0 => Ok(fs::rename(&temp, &out)?),
+            _ => Err(AppError::ToolFailed { tool: "ffmpeg", detail: "export produced no output".into() }),
+        })
     });
+    if subtitles.is_some() {
+        let _ = fs::remove_file(&ass);
+    }
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
@@ -365,21 +398,21 @@ mod tests {
     #[test]
     fn args_with_mic_and_voice_mix_three_tracks() {
         let tracks = Tracks { mic: Some(1), voice: Some(2), extra: vec![] };
-        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &tracks, SIZE, &[]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &tracks, SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains(
             "[0:a:0]volume=1[a0];[0:a:1]volume=0.5[a1];[0:a:2]volume=0.25[a2];[a0][a1][a2]amix=inputs=3:normalize=0[aout]"
         ), "{joined}");
         let voice_only = Tracks { mic: None, voice: Some(1), extra: vec![] };
-        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &voice_only, SIZE, &[]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &voice_only, SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains("[0:a:1]volume=0.25[a1];[a0][a1]amix=inputs=2"), "{joined}");
     }
 
     #[test]
     fn master_volume_scales_the_mix() {
         let e = Edit { master_volume: 0.5, ..edit(None, None) };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, &[]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains("amix=inputs=2:normalize=0,volume=0.5[aout]"), "{joined}");
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &Tracks::default(), SIZE, &[]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &Tracks::default(), SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains("[0:a:0]volume=1,volume=0.5[aout]"), "{joined}");
     }
 
@@ -405,7 +438,7 @@ mod tests {
     fn extra_tracks_are_mixed_at_their_volumes() {
         let tracks = Tracks { mic: None, voice: None, extra: vec![1, 2] };
         let e = Edit { extra_volumes: BTreeMap::from([(2, 0.3)]), ..edit(None, None) };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &tracks, SIZE, &[]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &tracks, SIZE, None, &[]).unwrap().join(" ");
         assert!(
             joined.contains("[0:a:0]volume=1[a0];[0:a:1]volume=1[a1];[0:a:2]volume=0.3[a2];[a0][a1][a2]amix=inputs=3"),
             "{joined}"
@@ -415,12 +448,12 @@ mod tests {
     #[test]
     fn blurred_exports_encode_a_blurred_picture() {
         let e = Edit { blur_video: true, ..edit(None, None) };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, &["-c:v", "libx264"]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &["-c:v", "libx264"]).unwrap().join(" ");
         assert!(joined.contains("[0:v:0]scale=-2:'min(720,ih)',gblur=sigma=8[vout];[0:a:0]volume=1[a0]"), "{joined}");
         assert!(joined.contains("-map [vout] -c:v libx264 -pix_fmt yuv420p -force_key_frames"), "{joined}");
         assert!(!joined.contains("-c:v copy"), "{joined}");
         // Not blurred: the picture is copied as it is, no encoder needed.
-        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &MIC, SIZE, &[]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &edit(None, None), &MIC, SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains("-map 0:v:0 -c:v copy") && !joined.contains("gblur"), "{joined}");
     }
 
@@ -460,7 +493,7 @@ mod tests {
 
     #[test]
     fn args_with_a_mic() {
-        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(Some(2000), Some(4000)), &MIC, SIZE, &[]).unwrap();
+        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(Some(2000), Some(4000)), &MIC, SIZE, None, &[]).unwrap();
         assert_eq!(
             args.join(" "),
             "-hide_banner -nostdin -y -ss 2.000 -i in.mp4 -to 2.000 -filter_complex \
@@ -472,7 +505,7 @@ mod tests {
     // Review Focus 5: no mic track, the mix comes from one track.
     #[test]
     fn args_without_a_mic_or_trim() {
-        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(None, None), &Tracks::default(), SIZE, &[]).unwrap();
+        let args = export_args(Path::new("in.mp4"), Path::new("out.mp4"), &edit(None, None), &Tracks::default(), SIZE, None, &[]).unwrap();
         assert_eq!(
             args.join(" "),
             "-hide_banner -nostdin -y -i in.mp4 -filter_complex [0:a:0]volume=1[aout] \
@@ -483,11 +516,11 @@ mod tests {
     #[test]
     fn volumes_are_clamped_and_bad_ranges_rejected() {
         let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new() };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, &[]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains("volume=2[a0]") && joined.contains("volume=0[a1]") && joined.contains("-to 1.500"));
         for (s, e) in [(Some(4000), Some(2000)), (Some(2000), Some(2000)), (None, Some(0))] {
             assert!(matches!(
-                export_args(Path::new("i"), Path::new("o"), &edit(s, e), &MIC, SIZE, &[]),
+                export_args(Path::new("i"), Path::new("o"), &edit(s, e), &MIC, SIZE, None, &[]),
                 Err(AppError::InvalidInput(_))
             ));
         }
@@ -531,7 +564,7 @@ mod tests {
     #[test]
     fn cut_exports_trim_and_concat() {
         let e = Edit { removed: vec![cut(2000, 3000)], ..edit(Some(1000), Some(5000)) };
-        let args = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, &["-c:v", "libx264"]).unwrap();
+        let args = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &["-c:v", "libx264"]).unwrap();
         let joined = args.join(" ");
         for part in [
             "[0:v:0]trim=start=1.000:end=2.000,setpts=PTS-STARTPTS[v0]",
@@ -549,7 +582,7 @@ mod tests {
     #[test]
     fn cut_and_blur_blurs_the_joined_video() {
         let e = Edit { removed: vec![cut(2000, 3000)], blur_video: true, ..edit(Some(1000), Some(5000)) };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, &["-c:v", "libx264"]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &["-c:v", "libx264"]).unwrap().join(" ");
         let concat = joined.find("concat=").unwrap();
         assert!(joined.find("gblur=sigma=8").is_some_and(|g| g > concat), "{joined}");
     }
@@ -596,24 +629,24 @@ mod tests {
     fn exporting_a_zoom_reencodes() {
         let enc = ["-c:v", "libx264"];
         let e = Edit { zooms: vec![zoom(1000, 3000, 2.0, 0.5, 0.5)], ..edit(None, None) };
-        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, &enc).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &enc).unwrap().join(" ");
         assert!(joined.contains("[0:v:0]scale=w=") && joined.contains("-map [vout] -c:v libx264"), "{joined}");
         assert!(!joined.contains("-c:v copy"), "{joined}");
         // With cuts: zoomed first (in the file's time), then split into the kept parts.
         let cut_e = Edit { removed: vec![cut(1500, 2000)], ..e.clone() };
-        let joined = export_args(Path::new("i"), Path::new("o"), &cut_e, &MIC, SIZE, &enc).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &cut_e, &MIC, SIZE, None, &enc).unwrap().join(" ");
         assert!(joined.contains("eval=frame") && joined.contains(",split=2[vz0][vz1]"), "{joined}");
         assert!(joined.contains("[vz0]trim=start=0.000:end=1.500") && joined.contains("[vz1]trim=start=2.000"), "{joined}");
         assert!(joined.contains("clip((t-1.000)"), "no trim offset in the cut path: {joined}");
         assert!(!joined.contains("-c:v copy"), "{joined}");
         // With blur: the zoom comes first.
         for blurred in [Edit { blur_video: true, ..e.clone() }, Edit { blur_video: true, ..cut_e }] {
-            let joined = export_args(Path::new("i"), Path::new("o"), &blurred, &MIC, SIZE, &enc).unwrap().join(" ");
+            let joined = export_args(Path::new("i"), Path::new("o"), &blurred, &MIC, SIZE, None, &enc).unwrap().join(" ");
             assert!(joined.find("eval=frame").unwrap() < joined.find("gblur").unwrap(), "{joined}");
         }
         // A zoom outside the trim doesn't show, so the picture is still copied.
         let outside = Edit { zooms: vec![zoom(5000, 6000, 2.0, 0.5, 0.5)], ..edit(Some(1000), Some(4000)) };
-        let joined = export_args(Path::new("i"), Path::new("o"), &outside, &MIC, SIZE, &[]).unwrap().join(" ");
+        let joined = export_args(Path::new("i"), Path::new("o"), &outside, &MIC, SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains("-c:v copy") && !joined.contains("eval=frame"), "{joined}");
     }
 
@@ -667,6 +700,48 @@ mod tests {
         let corner = mean_diff(&zoomed, &frame(&src, 2.8, "crop=320:180:320:0"));
         assert!(plain > 15.0, "zoomed at 2.8 s of the file: {plain}");
         assert!(corner < 8.0, "it shows the top-right quarter: {corner}");
+    }
+
+    fn sub(start_ms: u64, end_ms: u64, text: &str) -> crate::library::SubtitleRange {
+        crate::library::SubtitleRange { start_ms, end_ms, text: text.into() }
+    }
+
+    #[test]
+    fn exporting_subtitles_reencodes() {
+        let e = Edit { blur_video: true, subtitles: vec![sub(500, 1500, "a")], ..edit(None, None) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, Some("subtitles=X"), &["-c:v", "libx264"]).unwrap().join(" ");
+        assert!(joined.contains("gblur=sigma=8,subtitles=X[vout]"), "{joined}");
+        assert!(joined.contains("-map [vout] -c:v libx264") && !joined.contains("-c:v copy"), "{joined}");
+        let cut = Edit { removed: vec![cut(2000, 3000)], ..e.clone() };
+        let joined = export_args(Path::new("i"), Path::new("o"), &cut, &MIC, SIZE, Some("subtitles=X"), &["-c:v", "libx264"]).unwrap().join(" ");
+        assert!(joined.contains("[vcat]scale=-2:'min(720,ih)',gblur=sigma=8,subtitles=X[vout]"), "{joined}");
+        let plain = Edit { subtitles: vec![sub(500, 1500, "a")], ..edit(None, None) };
+        assert!(reencodes(&plain));
+        let outside = Edit { subtitles: vec![sub(500, 1500, "a")], ..edit(Some(2000), None) };
+        assert!(!reencodes(&outside), "a subtitle outside the trim doesn't show");
+    }
+
+    // Review Focus 1, 2, 3, 4: drawn at the trimmed moment, from a path full of filter syntax,
+    // with markup-like text, Slovak letters and an emoji.
+    #[test]
+    fn a_subtitled_export_draws_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("a'b: c,d[e];f");
+        std::fs::create_dir_all(&cache).unwrap();
+        let src = dir.path().join("black.mp4");
+        let status = Command::new(&tools().ffmpeg)
+            .args(["-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=black:s=640x360:r=30:d=4", "-f", "lavfi", "-i", "sine=d=4"])
+            .args(["-pix_fmt", "yuv420p", "-g", "30", "-shortest"])
+            .arg(&src)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let e = Edit { subtitles: vec![sub(2000, 3000, "{\\b0}čo to bolo ľudia 💀 a\\Nb")], ..edit(Some(1000), None) };
+        let out = export(&tools(), &src, &cache, "subs", &e, Tracks::default(), |_| {}).unwrap();
+        let bright = |f: &[u8]| f[60 * 160..].iter().filter(|p| **p > 128).count();
+        assert!(bright(&frame(&out, 1.5, "")) > 20, "the subtitle shows at 2.5 s of the file");
+        assert_eq!(bright(&frame(&out, 0.3, "")), 0, "nothing before it");
+        assert!(!cache.join("exports/subs.ass").exists(), "the ASS file is removed");
     }
 
     // Review Focus 2: a zoom across a removed part plays right on both sides of the cut.

@@ -20,6 +20,7 @@ pub mod mp4_mute;
 pub mod update;
 pub mod recorder;
 pub mod screenshot;
+pub mod subtitles;
 pub mod server_clips;
 pub mod settings;
 pub mod sound;

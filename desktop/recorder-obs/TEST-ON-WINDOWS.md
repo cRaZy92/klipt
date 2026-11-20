@@ -52,3 +52,12 @@ Open `Videos\Klipt-test`. Each Alt+F8 press should have made a file called `Klip
 - Your GPU model.
 
 If anything fails, also send the text it printed. To get the full log, run the command again with ` 2> log.txt` at the end and send `log.txt`.
+
+## Full recording (in the Klipt app)
+
+Full recording runs a second libobs output that shares the replay buffer's encoders. Check these in the app while a game runs:
+
+1. Start a recording (button, tray or shortcut), play for a minute, and stop it. It appears in My clips with a "Recording" badge and plays with game sound and mic.
+2. Save a replay clip while the recording runs. Both files work.
+3. Start a recording and quit Klipt from the tray. After restarting, the recording is in My clips and plays to the end.
+4. Watch the GPU encoder load in Task Manager (GPU → Video Encode) during a recording. It should be about the same as without one, because the encoder is shared.

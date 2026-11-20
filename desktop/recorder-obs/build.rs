@@ -74,6 +74,7 @@ fn main() {
         .allowlist_function("obs_.*")
         .allowlist_function("(calldata|proc_handler|signal_handler)_.*")
         .allowlist_function("bfree")
+        .allowlist_function("os_generate_formatted_filename")
         .allowlist_function("base_set_log_handler")
         .allowlist_var("(LOG|OBS|MODULE|MAX)_.*")
         .derive_default(true)

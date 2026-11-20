@@ -14,11 +14,16 @@ pub enum Command {
     ListAudioDevices,
     Start(StartParams),
     Save,
+    /// Starts a full recording beside the replay buffer (sharing its encoders).
+    StartRecording,
+    /// Stops the full recording; `recordingSaved` follows once the file is written.
+    StopRecording,
     Stop,
     Shutdown,
 }
 
-const KNOWN_COMMANDS: &[&str] = &["listDisplays", "listAudioDevices", "start", "save", "stop", "shutdown"];
+const KNOWN_COMMANDS: &[&str] =
+    &["listDisplays", "listAudioDevices", "start", "save", "startRecording", "stopRecording", "stop", "shutdown"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +115,10 @@ pub enum Event {
     AudioDevices { outputs: Vec<AudioDevice>, inputs: Vec<AudioDevice> },
     Started { encoder: String, width: u32, height: u32 },
     Saved { path: String, duration_ms: u64 },
+    /// A full recording is running.
+    RecordingStarted,
+    /// A full recording was stopped (by `stopRecording`, `stop` or `shutdown`) and written.
+    RecordingSaved { path: String, duration_ms: u64 },
     Stopped,
     Error { code: ErrorCode, message: String },
     Stats { cpu_seconds: f64, wall_seconds: f64, avg_cpu_percent_of_one_core: f64, max_rss_mb: u64 },
@@ -182,6 +191,12 @@ pub enum ErrorCode {
     ObsLoadFailed,
     /// The command line could not be understood.
     BadCommand,
+    /// The full recording couldn't start, or its file couldn't be finished.
+    RecordingFailed,
+    /// `startRecording` while a full recording runs.
+    AlreadyFullRecording,
+    /// `stopRecording` without a full recording.
+    NotFullRecording,
 }
 
 #[cfg(test)]
@@ -247,6 +262,8 @@ mod tests {
             Command::Start(start_params()),
             Command::Start(StartParams { display_id: Some("d1".into()), mic: false, ..start_params() }),
             Command::Save,
+            Command::StartRecording,
+            Command::StopRecording,
             Command::Stop,
             Command::Shutdown,
         ];
@@ -343,6 +360,17 @@ mod tests {
     }
 
     #[test]
+    fn full_recording_commands_and_events() {
+        assert_eq!(parse_command(r#"{"cmd":"startRecording"}"#), Ok(Command::StartRecording));
+        assert_eq!(parse_command(r#"{"cmd":"stopRecording"}"#), Ok(Command::StopRecording));
+        assert_eq!(Event::RecordingStarted.to_line(), r#"{"event":"recordingStarted"}"#);
+        assert_eq!(
+            Event::RecordingSaved { path: r"C:\clips\Recordings\a.mp4".into(), duration_ms: 61000 }.to_line(),
+            r#"{"event":"recordingSaved","path":"C:\\clips\\Recordings\\a.mp4","durationMs":61000}"#
+        );
+    }
+
+    #[test]
     fn error_event_shapes() {
         assert_eq!(
             Event::error(ErrorCode::Busy, "Already saving").to_line(),
@@ -357,6 +385,9 @@ mod tests {
             (ErrorCode::SaveFailed, "save_failed"),
             (ErrorCode::RecordingStopped, "recording_stopped"),
             (ErrorCode::ObsLoadFailed, "obs_load_failed"),
+            (ErrorCode::RecordingFailed, "recording_failed"),
+            (ErrorCode::AlreadyFullRecording, "already_full_recording"),
+            (ErrorCode::NotFullRecording, "not_full_recording"),
         ] {
             let line = Event::error(code, "x").to_line();
             assert_eq!(line, format!(r#"{{"event":"error","code":"{text}","message":"x"}}"#));

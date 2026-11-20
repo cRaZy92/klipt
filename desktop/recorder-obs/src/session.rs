@@ -200,6 +200,20 @@ const DISPLAY_WAIT: Duration = Duration::from_secs(180);
 
 /// Backstop for a save that never even starts writing. Write failures are caught much sooner by
 /// [`MuxWatch`].
+/// File names of full recordings (libobs fills in the local time).
+pub const RECORDING_FILENAME_FORMAT: &str = "Klipt Recording %CCYY-%MM-%DD %hh-%mm-%ss";
+/// The folder inside the clips folder that full recordings go to (same as the app's).
+pub const RECORDINGS_DIR: &str = "Recordings";
+
+/// What the app hears when the full recording's output has stopped with `code` (0 = written).
+pub fn recording_stopped_event(code: i64, path: String, recorded_for: Duration) -> Event {
+    if code == 0 {
+        Event::RecordingSaved { path, duration_ms: recorded_for.as_millis() as u64 }
+    } else {
+        Event::error(ErrorCode::RecordingFailed, format!("The recording could not be finished (libobs output code {code})"))
+    }
+}
+
 pub const SAVE_TIMEOUT: Duration = Duration::from_secs(60);
 
 // ---------------------------------------------------------------------------------------------
@@ -210,6 +224,8 @@ pub const SAVE_TIMEOUT: Duration = Duration::from_secs(60);
 pub enum Signal {
     Saved,
     OutputStopped { code: i64 },
+    /// The full recording's output stopped (asked to, or on its own).
+    RecordingStopped { code: i64 },
 }
 
 pub type Notify = Box<dyn Fn(Signal) + Send + Sync>;
@@ -218,6 +234,8 @@ struct SignalContext {
     notify: Notify,
     stopped: Mutex<bool>,
     stopped_cv: Condvar,
+    recording_stopped: Mutex<bool>,
+    recording_stopped_cv: Condvar,
 }
 
 unsafe extern "C" fn on_saved(data: *mut c_void, _cd: *mut obs::calldata_t) {
@@ -231,6 +249,21 @@ unsafe extern "C" fn on_stop(data: *mut c_void, cd: *mut obs::calldata_t) {
     *ctx.stopped.lock().unwrap() = true;
     ctx.stopped_cv.notify_all();
     (ctx.notify)(Signal::OutputStopped { code });
+}
+
+unsafe extern "C" fn on_recording_stop(data: *mut c_void, cd: *mut obs::calldata_t) {
+    let ctx = &*(data as *const SignalContext);
+    let code = obs::calldata_int(cd, "code");
+    *ctx.recording_stopped.lock().unwrap() = true;
+    ctx.recording_stopped_cv.notify_all();
+    (ctx.notify)(Signal::RecordingStopped { code });
+}
+
+/// A full recording: an `ffmpeg_muxer` output sharing the replay buffer's encoders.
+struct FullRecording {
+    output: *mut obs::obs_output_t,
+    path: String,
+    started_at: Instant,
 }
 
 #[derive(Debug)]
@@ -263,6 +296,8 @@ pub struct Session {
     namer: ClipNamer,
     mux_watch: Option<MuxWatch>,
     stopping: bool,
+    recording: Option<FullRecording>,
+    output_dir: String,
     pub encoder: String,
     pub width: u32,
     pub height: u32,
@@ -271,7 +306,13 @@ pub struct Session {
 impl Session {
     fn empty(params: &StartParams, notify: Notify) -> Self {
         let signals =
-            Box::into_raw(Box::new(SignalContext { notify, stopped: Mutex::new(false), stopped_cv: Condvar::new() }));
+            Box::into_raw(Box::new(SignalContext {
+            notify,
+            stopped: Mutex::new(false),
+            stopped_cv: Condvar::new(),
+            recording_stopped: Mutex::new(false),
+            recording_stopped_cv: Condvar::new(),
+        }));
         Self {
             scene: std::ptr::null_mut(),
             display: std::ptr::null_mut(),
@@ -287,6 +328,8 @@ impl Session {
             namer: ClipNamer::default(),
             mux_watch: None,
             stopping: false,
+            recording: None,
+            output_dir: String::new(),
             encoder: String::new(),
             width: 0,
             height: 0,
@@ -308,6 +351,7 @@ impl Session {
         std::fs::create_dir_all(&output_dir).map_err(|e| {
             StartError::new(ErrorCode::StartFailed, format!("Cannot create the clips folder {output_dir}: {e}"))
         })?;
+        self.output_dir = output_dir.clone();
 
         // --- canvas size and display source ---
         let (display_settings, (width, height)) = display_settings(params)?;
@@ -531,6 +575,110 @@ impl Session {
         None
     }
 
+    pub fn is_full_recording(&self) -> bool {
+        self.recording.is_some()
+    }
+
+    /// Starts a full recording: an `ffmpeg_muxer` output writing to `<clips>/Recordings/` that
+    /// shares the replay buffer's video and audio encoders, so the GPU encodes once.
+    pub fn start_recording(&mut self) -> Result<Event, Event> {
+        if self.recording.is_some() {
+            return Err(Event::error(ErrorCode::AlreadyFullRecording, "A recording is already running"));
+        }
+        let dir = std::path::Path::new(&self.output_dir).join(RECORDINGS_DIR);
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            Event::error(ErrorCode::RecordingFailed, format!("Cannot create the recordings folder {}: {e}", dir.display()))
+        })?;
+        unsafe {
+            let o = api();
+            let name = obs::formatted_filename("mp4", true, RECORDING_FILENAME_FORMAT);
+            let path = dir.join(name).to_string_lossy().into_owned();
+            let settings = Data::new().str("path", &path);
+            let output = o.obs_output_create(
+                cs("ffmpeg_muxer").as_ptr(),
+                cs("klipt recording").as_ptr(),
+                settings.0,
+                std::ptr::null_mut(),
+            );
+            if output.is_null() {
+                return Err(Event::error(ErrorCode::RecordingFailed, "Could not create the recording output"));
+            }
+            *(*self.signals).recording_stopped.lock().unwrap_or_else(|e| e.into_inner()) = false;
+            let sh = o.obs_output_get_signal_handler(output);
+            o.signal_handler_connect(sh, cs("stop").as_ptr(), Some(on_recording_stop), self.signals as *mut c_void);
+            o.obs_output_set_video_encoder(output, self.video_encoder);
+            for (i, enc) in self.audio_encoders.iter().enumerate() {
+                o.obs_output_set_audio_encoder(output, *enc, i);
+            }
+            if !o.obs_output_start(output) {
+                let error = from_c(o.obs_output_get_last_error(output));
+                Self::release_recording_output(output, self.signals);
+                return Err(Event::error(ErrorCode::RecordingFailed, format!("The recording could not start: {error}")));
+            }
+            log!("full recording started: {path}");
+            self.recording = Some(FullRecording { output, path, started_at: Instant::now() });
+        }
+        Ok(Event::RecordingStarted)
+    }
+
+    /// Asks the full recording to stop; [`Signal::RecordingStopped`] follows once it's written.
+    pub fn stop_recording(&mut self) -> Result<(), Event> {
+        let Some(rec) = &self.recording else {
+            return Err(Event::error(ErrorCode::NotFullRecording, "No recording is running"));
+        };
+        unsafe { api().obs_output_stop(rec.output) };
+        Ok(())
+    }
+
+    /// Handles [`Signal::RecordingStopped`]: releases the output and returns what to tell the app.
+    pub fn on_recording_stopped(&mut self, code: i64) -> Option<Event> {
+        let rec = self.recording.take()?;
+        unsafe { Self::wait_inactive_and_release(rec.output, self.signals) };
+        // libobs may report "C:/Users/..." on Windows; hand the app a native path.
+        let path = if cfg!(windows) { rec.path.replace('/', "\\") } else { rec.path };
+        Some(recording_stopped_event(code, path, rec.started_at.elapsed()))
+    }
+
+    /// Stops a running full recording and waits (up to 5 s) for its file, for `stop`/`shutdown`.
+    /// Returns the event for the app.
+    pub fn finish_recording(&mut self) -> Option<Event> {
+        let rec = self.recording.as_ref()?;
+        let code = unsafe {
+            let o = api();
+            o.obs_output_stop(rec.output);
+            let ctx = &*self.signals;
+            let guard = ctx.recording_stopped.lock().unwrap_or_else(|e| e.into_inner());
+            let (_guard, timeout) = ctx
+                .recording_stopped_cv
+                .wait_timeout_while(guard, Duration::from_secs(5), |stopped| !*stopped)
+                .unwrap_or_else(|e| e.into_inner());
+            if timeout.timed_out() {
+                log!("full recording didn't stop within 5 s; forcing");
+                o.obs_output_force_stop(rec.output);
+                -1
+            } else {
+                0
+            }
+        };
+        self.on_recording_stopped(code)
+    }
+
+    unsafe fn wait_inactive_and_release(output: *mut obs::obs_output_t, signals: *mut SignalContext) {
+        let o = api();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while o.obs_output_active(output) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Self::release_recording_output(output, signals);
+    }
+
+    unsafe fn release_recording_output(output: *mut obs::obs_output_t, signals: *mut SignalContext) {
+        let o = api();
+        let sh = o.obs_output_get_signal_handler(output);
+        o.signal_handler_disconnect(sh, cs("stop").as_ptr(), Some(on_recording_stop), signals as *mut c_void);
+        o.obs_output_release(output);
+    }
+
     /// True once `stop` was requested; an `OutputStopped` signal after that is expected.
     pub fn is_stopping(&self) -> bool {
         self.stopping
@@ -568,6 +716,13 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        // Normally finished by the controller first (which reports it); this only releases.
+        if let Some(rec) = self.recording.take() {
+            unsafe {
+                api().obs_output_force_stop(rec.output);
+                Self::wait_inactive_and_release(rec.output, self.signals);
+            }
+        }
         self.stop();
         unsafe {
             let o = api();
@@ -659,6 +814,18 @@ unsafe fn after_display_ready(display: *mut obs::obs_source_t) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stopped_recording_output_becomes_saved_or_failed() {
+        assert_eq!(
+            recording_stopped_event(0, r"C:\c\Recordings\a.mp4".into(), Duration::from_millis(61_234)),
+            Event::RecordingSaved { path: r"C:\c\Recordings\a.mp4".into(), duration_ms: 61_234 }
+        );
+        assert!(matches!(
+            recording_stopped_event(-4, "x".into(), Duration::from_secs(1)),
+            Event::Error { code: ErrorCode::RecordingFailed, .. }
+        ));
+    }
 
     #[test]
     fn second_save_while_saving_is_busy() {

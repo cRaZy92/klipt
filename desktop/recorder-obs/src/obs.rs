@@ -35,6 +35,17 @@ pub fn cs(s: &str) -> CString {
     CString::new(s.replace('\0', "")).unwrap()
 }
 
+/// A file name made from an OBS format such as `%CCYY-%MM-%DD` in local time, with `extension`.
+pub unsafe fn formatted_filename(extension: &str, space: bool, format: &str) -> String {
+    let o = api();
+    let p = o.os_generate_formatted_filename(cs(extension).as_ptr(), space, cs(format).as_ptr());
+    let name = from_c(p);
+    if !p.is_null() {
+        o.bfree(p as *mut c_void);
+    }
+    name
+}
+
 /// Copies a C string owned by libobs. A null pointer becomes "".
 pub unsafe fn from_c(p: *const c_char) -> String {
     if p.is_null() {

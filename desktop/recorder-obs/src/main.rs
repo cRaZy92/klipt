@@ -176,6 +176,20 @@ impl Controller {
                 }
             }
             Command::Save => self.save(),
+            Command::StartRecording => match &mut self.session {
+                None => emit(&Event::error(ErrorCode::NotRecording, "Recording hasn't started")),
+                Some(s) => match s.start_recording() {
+                    Ok(event) | Err(event) => emit(&event),
+                },
+            },
+            Command::StopRecording => match &mut self.session {
+                None => emit(&Event::error(ErrorCode::NotFullRecording, "No recording is running")),
+                Some(s) => {
+                    if let Err(e) = s.stop_recording() {
+                        emit(&e);
+                    }
+                }
+            },
             Command::Stop => {
                 self.end_session();
                 emit(&Event::Stopped);
@@ -209,8 +223,17 @@ impl Controller {
                     emit(&event);
                 }
             }
+            Signal::RecordingStopped { code } => {
+                if let Some(event) = self.session.as_mut().and_then(|s| s.on_recording_stopped(code)) {
+                    emit(&event);
+                }
+            }
             Signal::OutputStopped { code } => {
                 if self.session.as_ref().is_some_and(|s| !s.is_stopping()) {
+                    // The replay buffer died; a full recording sharing its encoders can't go on.
+                    if let Some(event) = self.session.as_mut().and_then(|s| s.finish_recording()) {
+                        emit(&event);
+                    }
                     emit(&Event::error(
                         ErrorCode::RecordingStopped,
                         format!("Recording stopped unexpectedly (libobs output code {code})"),
@@ -247,6 +270,10 @@ impl Controller {
     fn end_session(&mut self) {
         self.wait_for_pending_save();
         if let Some(s) = self.session.as_mut() {
+            // A running full recording is finished and reported, never dropped.
+            if let Some(event) = s.finish_recording() {
+                emit(&event);
+            }
             s.stop();
         }
     }

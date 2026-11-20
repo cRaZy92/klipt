@@ -65,12 +65,40 @@ pub enum HelperEvent {
         path: String,
         duration_ms: u64,
     },
+    RecordingStarted,
+    RecordingSaved {
+        path: String,
+        duration_ms: u64,
+    },
     Stopped,
     Error {
         code: String,
         message: String,
     },
     Stats {},
+}
+
+pub const START_RECORDING_COMMAND: &str = r#"{"cmd":"startRecording"}"#;
+pub const STOP_RECORDING_COMMAND: &str = r#"{"cmd":"stopRecording"}"#;
+
+/// The session event a helper event means; None for replies the backend waits for itself
+/// (`ready`, `displays`, `audioDevices`, `stopped`) and for `stats`.
+pub fn session_event(event: HelperEvent) -> Option<RecorderEvent> {
+    Some(match event {
+        HelperEvent::Started { encoder } => RecorderEvent::Started { encoder },
+        HelperEvent::Saved { path, duration_ms } => RecorderEvent::Saved { path: path.into(), duration_ms: Some(duration_ms) },
+        HelperEvent::RecordingStarted => RecorderEvent::FullRecordingStarted,
+        HelperEvent::RecordingSaved { path, duration_ms } => {
+            RecorderEvent::FullRecordingSaved { path: path.into(), duration_ms: Some(duration_ms) }
+        }
+        HelperEvent::Error { code, .. } if code == "busy" => RecorderEvent::Busy,
+        HelperEvent::Error { code, message } => RecorderEvent::Error { code, message },
+        HelperEvent::Stats {}
+        | HelperEvent::Ready { .. }
+        | HelperEvent::Displays { .. }
+        | HelperEvent::AudioDevices { .. }
+        | HelperEvent::Stopped => return None,
+    })
 }
 
 pub fn parse_event_line(line: &str) -> Option<HelperEvent> {
@@ -166,21 +194,20 @@ impl Helper {
                     continue;
                 };
                 match event {
-                    HelperEvent::Started { encoder } => send(&events, RecorderEvent::Started { encoder }),
-                    HelperEvent::Saved { path, duration_ms } => {
-                        send(&events, RecorderEvent::Saved { path: path.into(), duration_ms: Some(duration_ms) })
-                    }
-                    HelperEvent::Error { code, .. } if code == "busy" => send(&events, RecorderEvent::Busy),
-                    HelperEvent::Error { code, message } => {
-                        eprintln!("klipt: klipt-recorder error {code}: {message}");
-                        send(&events, RecorderEvent::Error { code, message })
-                    }
                     HelperEvent::Stats {} => {}
                     reply @ (HelperEvent::Ready { .. }
                     | HelperEvent::Displays { .. }
                     | HelperEvent::AudioDevices { .. }
                     | HelperEvent::Stopped) => {
                         let _ = reply_tx.send(reply);
+                    }
+                    event => {
+                        if let HelperEvent::Error { code, message } = &event {
+                            eprintln!("klipt: klipt-recorder error {code}: {message}");
+                        }
+                        if let Some(event) = session_event(event) {
+                            send(&events, event);
+                        }
                     }
                 }
             }
@@ -342,11 +369,17 @@ impl RecorderBackend for ObsBackend {
     }
 
     fn start_full_recording(&mut self) -> Result<()> {
-        Err(AppError::RecorderFailed("full recording isn't supported yet".into()))
+        match &mut self.helper {
+            Some(helper) if helper.is_alive() => helper.command(START_RECORDING_COMMAND),
+            _ => Err(AppError::NotRecording),
+        }
     }
 
     fn stop_full_recording(&mut self) -> Result<()> {
-        Err(AppError::RecorderFailed("full recording isn't supported yet".into()))
+        match &mut self.helper {
+            Some(helper) if helper.is_alive() => helper.command(STOP_RECORDING_COMMAND),
+            _ => Err(AppError::NotRecording),
+        }
     }
 
     fn events(&self) -> Receiver<RecorderEvent> {
@@ -409,6 +442,25 @@ mod tests {
                    "encoder":"auto"})
         );
         assert!(!line.contains('\n'));
+    }
+
+    #[test]
+    fn full_recording_events_become_recorder_events() {
+        let started = parse_event_line(r#"{"event":"recordingStarted"}"#).unwrap();
+        assert_eq!(session_event(started), Some(RecorderEvent::FullRecordingStarted));
+        let saved = parse_event_line(r#"{"event":"recordingSaved","path":"C:\\c\\Recordings\\a.mp4","durationMs":61000}"#).unwrap();
+        assert_eq!(
+            session_event(saved),
+            Some(RecorderEvent::FullRecordingSaved { path: "C:\\c\\Recordings\\a.mp4".into(), duration_ms: Some(61_000) })
+        );
+        let failed = parse_event_line(r#"{"event":"error","code":"recording_failed","message":"x"}"#).unwrap();
+        assert_eq!(
+            session_event(failed),
+            Some(RecorderEvent::Error { code: "recording_failed".into(), message: "x".into() })
+        );
+        assert_eq!(session_event(parse_event_line(r#"{"event":"stopped"}"#).unwrap()), None);
+        assert_eq!(START_RECORDING_COMMAND, r#"{"cmd":"startRecording"}"#);
+        assert_eq!(STOP_RECORDING_COMMAND, r#"{"cmd":"stopRecording"}"#);
     }
 
     #[test]

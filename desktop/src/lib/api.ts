@@ -517,6 +517,10 @@ export const api = {
     invoke<void>("export_copy", { id, destPath, ...edit }),
   /** What Klipt's processes use right now; made for polling about once a second. */
   resourceUsage: () => invoke<ResourceUsage>("resource_usage"),
+  /** Closes the hidden window to free its memory; answers `release-window-check`. */
+  releaseWindow: () => invoke<void>("release_window"),
+  /** The update announced last (`update-available`), for a window that opened after it. */
+  pendingUpdate: () => invoke<{ version: string; command: string | null } | null>("pending_update"),
 };
 
 export interface Events {
@@ -549,6 +553,11 @@ export interface Events {
    * what the user runs in a terminal to install it.
    */
   "update-available": { version: string; command: string | null };
+  /**
+   * The window has been hidden a while. Answer with `releaseWindow` when closing it loses
+   * nothing; it's asked again every minute while hidden.
+   */
+  "release-window-check": null;
 }
 
 /**

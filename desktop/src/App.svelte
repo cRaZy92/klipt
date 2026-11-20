@@ -4,7 +4,7 @@
   import { menu } from "./lib/a11y";
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
-  import { resumeAfterLogin, stopUploadsForLogout, watchUploads } from "./lib/uploads.svelte";
+  import { isBusy, resumeAfterLogin, stopUploadsForLogout, uploads, watchUploads } from "./lib/uploads.svelte";
   import { importing, watchImports } from "./lib/imports.svelte";
   import { forgetCache } from "./lib/cache";
   import { keepScroll } from "./lib/keepScroll";
@@ -61,6 +61,11 @@
   onMount(() => {
     void start();
     api.feedNewCount().then((n) => (feedNew = n)).catch(() => {});
+    // Announced before this window opened (it's made again after being released in the tray).
+    api
+      .pendingUpdate()
+      .then((u) => u && !update && (update = { ...u, installing: false }))
+      .catch(() => {});
     const stops = [
       on("save-busy", () => toast("Already saving a clip…")),
       on("recorder-error", (e) => toast(e.message, "error")),
@@ -76,6 +81,17 @@
       on("clip-saved", (clip) => toast(clip.kind === "screenshot" ? "Screenshot saved" : "Clip saved", "success")),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
       on("feed-new", ({ count }) => (feedNew = count)),
+      // Hidden in the tray for a while: let the core close the window to free its memory, unless
+      // that would lose something. Uploads and imports run on in the core, but their progress
+      // lives here.
+      on("release-window-check", () => {
+        const busy =
+          view.name === "editor" ||
+          viewDirty ||
+          importing.phase !== "idle" ||
+          Object.values(uploads).some((job) => isBusy(job));
+        if (!busy) api.releaseWindow().catch(() => {});
+      }),
       watchImports(),
       watchUploads({
         // The login expired mid-upload: log in again, then the upload carries on.

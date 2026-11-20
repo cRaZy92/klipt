@@ -78,8 +78,11 @@ pub fn run() {
             app.manage(recorder::spawn_for_app(app.handle(), data_dir, &settings));
             apply_autostart(app.handle(), settings.start_with_os);
             // The window starts hidden (tauri.conf.json); an autostart launch stays in the tray.
+            app.manage(tray::WindowRelease::default());
             if !dev_start_hidden && !std::env::args().any(|arg| arg == AUTOSTART_ARG) {
                 tray::show_main_window(app.handle());
+            } else {
+                tray::hide_main_window(app.handle());
             }
             app.manage(hotkey::start_for_app(app.handle(), hotkey::Keys::from_settings(&settings)));
             update::start(app.handle());
@@ -92,9 +95,7 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == tray::MAIN_WINDOW {
                     api.prevent_close();
-                    if let Err(e) = window.hide() {
-                        eprintln!("klipt: can't hide the window: {e}");
-                    }
+                    tray::hide_main_window(window.app_handle());
                 }
             }
         })
@@ -149,10 +150,17 @@ pub fn run() {
             commands::save_edit,
             commands::export_copy,
             resources::resource_usage,
+            tray::release_window,
+            update::pending_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Klipt")
         .run(|app, event| {
+            // Releasing the hidden window closes the last one; Klipt stays in the tray. Quit from
+            // the tray exits with a code, which goes through.
+            if let RunEvent::ExitRequested { code: None, api, .. } = &event {
+                api.prevent_exit();
+            }
             if let RunEvent::Exit = event {
                 // Stop the recorder helper cleanly instead of leaving it to die with us.
                 if let Some(recorder) = app.try_state::<recorder::SupervisorHandle>() {

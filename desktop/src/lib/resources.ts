@@ -12,7 +12,7 @@ export type Totals = Record<Metric, number | null>;
 
 export const PART_INFO: Record<ResourcePart, { label: string; detail: string }> = {
   app: { label: "Klipt", detail: "The app itself: library, uploads, game detection." },
-  window: { label: "Window", detail: "Draws Klipt's screens. Stays loaded while Klipt sits in the tray." },
+  window: { label: "Window", detail: "Draws Klipt's screens. Closed after 5 minutes in the tray to free its memory." },
   recorder: { label: "Recorder", detail: "Records in the background and keeps the last moments in memory." },
   videoJobs: { label: "Video jobs", detail: "Exports, imports, screenshots and editor pictures, while they run." },
 };

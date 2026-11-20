@@ -63,5 +63,7 @@ libc = "0.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 # NVIDIA GPU load and VRAM per process; loads libnvidia-ml at runtime, so other GPUs just get none.
 nvml-wrapper = "0.13.0"
+# Same version Tauri uses; only to end the web process of a released window (tray::release_window).
+webkit2gtk = "=2.0.2"
 ashpd = { version = "0.12.3", features = ["tokio"] }
 nix = { version = "0.31.3", features = ["process", "signal"] }

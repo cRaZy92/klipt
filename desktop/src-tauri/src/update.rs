@@ -22,17 +22,39 @@ const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// Payload of `update-available`.
 #[derive(Clone, serde::Serialize)]
 #[allow(dead_code)]
-struct Available {
+pub struct Available {
     version: String,
     /// Linux: the shell command that installs the update. Absent where Klipt installs it itself.
     command: Option<String>,
+}
+
+/// The newest update announced, so a window opened later (after it was released, see
+/// `tray::hide_main_window`) still shows the banner.
+#[derive(Default)]
+pub struct Announced(std::sync::Mutex<Option<Available>>);
+
+/// Tells the UI an update is out, and remembers it for [`pending_update`].
+#[allow(dead_code)] // Unused on macOS.
+fn announce(app: &AppHandle, available: Available) {
+    use tauri::{Emitter, Manager};
+    if let Some(announced) = app.try_state::<Announced>() {
+        *crate::commands::lock(&announced.0) = Some(available.clone());
+    }
+    let _ = app.emit("update-available", available);
+}
+
+/// The update announced last, if any: the window asks when it opens.
+#[tauri::command]
+pub fn pending_update(app: AppHandle) -> Option<Available> {
+    use tauri::Manager;
+    app.try_state::<Announced>().and_then(|a| crate::commands::lock(&a.0).clone())
 }
 
 #[cfg(windows)]
 mod imp {
     use std::sync::Mutex;
 
-    use tauri::{AppHandle, Emitter, Manager};
+    use tauri::{AppHandle, Manager};
     use tauri_plugin_updater::{Update, UpdaterExt};
 
     use super::{Available, CHECK_EVERY};
@@ -49,7 +71,7 @@ mod imp {
             loop {
                 match check(&app).await {
                     Ok(Some(version)) => {
-                        let _ = app.emit("update-available", Available { version, command: None });
+                        super::announce(&app, Available { version, command: None });
                     }
                     Ok(None) => {}
                     Err(e) => eprintln!("klipt: update check failed: {e}"),
@@ -98,7 +120,7 @@ pub const LINUX_UPDATE_COMMAND: &str =
 
 #[cfg(target_os = "linux")]
 mod imp {
-    use tauri::{AppHandle, Emitter};
+    use tauri::AppHandle;
 
     use super::{newer_release, Available, CHECK_EVERY, LINUX_UPDATE_COMMAND, REPO_API};
 
@@ -110,7 +132,7 @@ mod imp {
                 match newer_release(REPO_API, commit).await {
                     Ok(Some(version)) => {
                         let command = Some(LINUX_UPDATE_COMMAND.to_string());
-                        let _ = app.emit("update-available", Available { version, command });
+                        super::announce(&app, Available { version, command });
                     }
                     Ok(None) => {}
                     Err(e) => eprintln!("klipt: update check failed: {e}"),
@@ -206,10 +228,9 @@ pub enum CheckResult {
 pub async fn check_for_update(app: AppHandle) -> Result<CheckResult> {
     #[cfg(windows)]
     {
-        use tauri::Emitter;
         return match imp::check(&app).await {
             Ok(Some(version)) => {
-                let _ = app.emit("update-available", Available { version: version.clone(), command: None });
+                announce(&app, Available { version: version.clone(), command: None });
                 Ok(CheckResult::Available { version, command: None })
             }
             Ok(None) => Ok(CheckResult::UpToDate),
@@ -218,7 +239,6 @@ pub async fn check_for_update(app: AppHandle) -> Result<CheckResult> {
     }
     #[cfg(target_os = "linux")]
     {
-        use tauri::Emitter;
         let Some(commit) = option_env!("KLIPT_COMMIT").filter(|c| !c.is_empty()) else {
             let reason = if cfg!(debug_assertions) {
                 "Development builds don't check for updates."
@@ -230,7 +250,7 @@ pub async fn check_for_update(app: AppHandle) -> Result<CheckResult> {
         return match newer_release(REPO_API, commit).await {
             Ok(Some(version)) => {
                 let command = Some(LINUX_UPDATE_COMMAND.to_string());
-                let _ = app.emit("update-available", Available { version: version.clone(), command: command.clone() });
+                announce(&app, Available { version: version.clone(), command: command.clone() });
                 Ok(CheckResult::Available { version, command })
             }
             Ok(None) => Ok(CheckResult::UpToDate),
@@ -246,6 +266,7 @@ pub async fn check_for_update(app: AppHandle) -> Result<CheckResult> {
 
 /// Starts the periodic update check (no-op on dev builds and other platforms).
 pub fn start(app: &AppHandle) {
+    tauri::Manager::manage(app, Announced::default());
     #[cfg(any(windows, target_os = "linux"))]
     imp::start(app);
     #[cfg(not(any(windows, target_os = "linux")))]

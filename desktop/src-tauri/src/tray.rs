@@ -1,12 +1,14 @@
 //! The tray icon: shows whether Klipt is recording, and a menu to save, pause/resume, open the
 //! window and quit.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder};
 
 use crate::errors::Result;
 use crate::recorder::{SupervisorEvent, SupervisorHandle};
@@ -186,11 +188,96 @@ fn toggle_pause(app: &AppHandle) {
     }
 }
 
+/// Shows the window, making it again if it was released (see [`hide_main_window`]).
 pub fn show_main_window(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(MAIN_WINDOW) else { return };
+    // Any release waiting for the hidden window is off.
+    if let Some(release) = app.try_state::<WindowRelease>() {
+        release.0.fetch_add(1, Ordering::SeqCst);
+    }
+    let window = match app.get_webview_window(MAIN_WINDOW) {
+        Some(window) => window,
+        None => match create_main_window(app) {
+            Ok(window) => window,
+            Err(e) => {
+                eprintln!("klipt: can't open the window: {e}");
+                return;
+            }
+        },
+    };
     let shown = window.unminimize().and_then(|()| window.show()).and_then(|()| window.set_focus());
     if let Err(e) = shown {
         eprintln!("klipt: can't show the window: {e}");
+    }
+}
+
+fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    let config = app.config().app.windows.iter().find(|w| w.label == MAIN_WINDOW).cloned();
+    let config = config.ok_or_else(|| tauri::Error::WindowNotFound)?;
+    WebviewWindowBuilder::from_config(app, &config)?.build()
+}
+
+/// How long the window stays hidden before its web view is closed, which frees its memory (a few
+/// hundred MB). Reopening within that time is instant; after it, the window loads again (~1 s).
+const RELEASE_AFTER: Duration = Duration::from_secs(5 * 60);
+/// [`RELEASE_AFTER`], or `KLIPT_RELEASE_AFTER_SECS` in a development build, to try it quickly.
+fn release_after() -> Duration {
+    let dev = cfg!(debug_assertions).then(|| std::env::var("KLIPT_RELEASE_AFTER_SECS").ok()).flatten();
+    dev.and_then(|s| s.parse().ok()).map_or(RELEASE_AFTER, Duration::from_secs)
+}
+
+/// When the UI says it's busy (editor open, unsaved settings, upload or import running), how long
+/// until it's asked again.
+const RELEASE_RETRY: Duration = Duration::from_secs(60);
+/// Event to the UI: the window has been hidden a while. It answers with `release_window` when
+/// nothing would be lost.
+pub const RELEASE_CHECK: &str = "release-window-check";
+
+/// Counts hides and shows, so a release waiting for an earlier hide stops when the window is shown.
+#[derive(Default)]
+pub struct WindowRelease(AtomicU64);
+
+/// Hides the window to the tray; its web view is released after [`RELEASE_AFTER`] if it stays
+/// hidden. Also called at a start in the tray, where the window was made hidden.
+pub fn hide_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        if let Err(e) = window.hide() {
+            eprintln!("klipt: can't hide the window: {e}");
+        }
+    }
+    let Some(release) = app.try_state::<WindowRelease>() else { return };
+    let generation = release.0.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(release_after()).await;
+        loop {
+            let current = app.state::<WindowRelease>().0.load(Ordering::SeqCst);
+            let Some(window) = app.get_webview_window(MAIN_WINDOW) else { return };
+            if current != generation || window.is_visible().unwrap_or(true) {
+                return;
+            }
+            let _ = app.emit(RELEASE_CHECK, ());
+            tokio::time::sleep(RELEASE_RETRY).await;
+        }
+    });
+}
+
+/// The UI's answer to [`RELEASE_CHECK`]: closes the window if it's still hidden. Klipt keeps
+/// running in the tray (`RunEvent::ExitRequested` is turned down in lib.rs).
+#[tauri::command]
+pub async fn release_window(app: AppHandle) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else { return };
+    if window.is_visible().unwrap_or(true) {
+        return;
+    }
+    // Linux: closing the window alone leaves WebKit's web process (most of the memory) running,
+    // kept for reuse; end it first.
+    #[cfg(target_os = "linux")]
+    {
+        use webkit2gtk::WebViewExt;
+        let _ = window.with_webview(|webview| webview.inner().terminate_web_process());
+    }
+    if let Err(e) = window.destroy() {
+        eprintln!("klipt: can't close the hidden window: {e}");
     }
 }
 

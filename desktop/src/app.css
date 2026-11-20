@@ -5,6 +5,12 @@
   font-weight: 700;
   font-display: block;
 }
+/* Emoji drawn in one colour, as in the export (libass can't draw colour emoji). */
+@font-face {
+  font-family: "Klipt Subtitles Emoji";
+  src: url("./assets/fonts/NotoEmoji.ttf") format("truetype");
+  font-display: block;
+}
 
 :root {
   /* Surfaces: near-black with a violet tint, so the greys belong to the brand purple. */

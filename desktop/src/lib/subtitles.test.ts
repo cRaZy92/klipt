@@ -9,6 +9,7 @@ import {
   sameSubtitles,
   savedSubtitles,
   setSubtitleText,
+  subtitleFontPx,
   subtitleIndexAt,
 } from "./subtitles";
 
@@ -69,5 +70,12 @@ describe("text", () => {
     expect(sameSubtitles([s(0, 1000)], [s(0, 1000, "b")])).toBe(false);
     expect(sameSubtitles([], [s(0, 1000)])).toBe(false);
     expect(removeSubtitle([s(0, 1000), s(1000, 2000)], 0)).toEqual([s(1000, 2000)]);
+  });
+});
+
+describe("preview size", () => {
+  it("matches the export: a capital is 0.055 × 714/1519 of the picture's height", () => {
+    // Noto Sans: capitals are 714 of 1000 units; libass sizes by ascent + descent (1519).
+    expect(subtitleFontPx(1080) * 0.714).toBeCloseTo((0.055 * 1080 * 714) / 1519, 1);
   });
 });

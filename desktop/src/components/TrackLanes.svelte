@@ -47,6 +47,7 @@
     onsubtitlegesture,
     onsubtitleremove,
     onsubtitleedit,
+    onlanedown,
     video,
   }: {
     /** The clip's length in ms. */
@@ -91,6 +92,11 @@
     onsubtitleremove: (i: number) => void;
     /** Opens subtitle `i`'s text box. */
     onsubtitleedit: (i: number) => void;
+    /**
+     * A press on the Zoom or Subtitles lane, before anything else happens: an open text box closes
+     * (which can remove a subtitle and shift the others' indices).
+     */
+    onlanedown?: () => void;
     /** The video lane: the TrimBar. */
     video: Snippet;
   } = $props();
@@ -138,6 +144,7 @@
 
   function zoomDown(e: PointerEvent, i: number) {
     if (e.button !== 0) return;
+    onlanedown?.();
     e.preventDefault();
     e.stopPropagation();
     const block = e.currentTarget as HTMLElement;
@@ -189,12 +196,17 @@
   /** A subtitle being dragged on the Subtitles lane: its body (moves it) or one edge (resizes it). */
   let subDrag: { i: number; what: "move" | "start" | "end"; offset: number } | null = $state(null);
 
-  function subDown(e: PointerEvent, i: number) {
+  function subDown(e: PointerEvent, index: number) {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     const block = e.currentTarget as HTMLElement;
     const area = block.parentElement as HTMLElement;
+    // Closing an open text box can remove a blank subtitle before this one: find it again.
+    const startMs = subtitles[index].startMs;
+    onlanedown?.();
+    const i = subtitles.findIndex((s) => s.startMs === startMs);
+    if (i < 0) return;
     const s = subtitles[i];
     onsubtitleselect(i);
     onseek(s.startMs);
@@ -307,6 +319,7 @@
     <div
       class="area"
       onpointerdown={(e) => {
+        onlanedown?.();
         onzoomselect(null);
         grab(e);
       }}
@@ -375,6 +388,7 @@
     <div
       class="area"
       onpointerdown={(e) => {
+        onlanedown?.();
         onsubtitleselect(null);
         grab(e);
       }}

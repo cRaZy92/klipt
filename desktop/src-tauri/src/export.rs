@@ -329,12 +329,14 @@ pub fn export(
     let subtitles = if events.is_empty() {
         None
     } else {
-        let fonts = crate::subtitles::write_font(cache_dir)?;
+        crate::subtitles::write_font(cache_dir)?;
         fs::write(&ass, crate::subtitles::ass_document(&events, size))?;
-        Some(crate::subtitles::filter(&ass, &fonts))
+        // Relative to `cache_dir` (ffmpeg runs there): libass may open `fontsdir` with the system
+        // code page on Windows, which can't spell a profile like C:\Users\Šromovský.
+        Some(crate::subtitles::filter(Path::new("exports").join(format!("{clip_id}.ass")).as_path(), Path::new("fonts")))
     };
     let result = export_args(input, &temp, edit, &tracks, size, subtitles.as_deref(), &encoder).and_then(|args| {
-        run(tools, &args, expected_us, &mut progress).and_then(|_| match fs::metadata(&temp) {
+        run(tools, &args, cache_dir, expected_us, &mut progress).and_then(|_| match fs::metadata(&temp) {
             Ok(meta) if meta.len() > 0 => Ok(fs::rename(&temp, &out)?),
             _ => Err(AppError::ToolFailed { tool: "ffmpeg", detail: "export produced no output".into() }),
         })
@@ -350,10 +352,11 @@ pub fn export(
     Ok(out)
 }
 
-fn run(tools: &Tools, args: &[String], expected_us: f64, progress: &mut impl FnMut(f32)) -> Result<()> {
+/// Runs ffmpeg in `cwd` (where relative paths in its filters point).
+fn run(tools: &Tools, args: &[String], cwd: &Path, expected_us: f64, progress: &mut impl FnMut(f32)) -> Result<()> {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
     let mut command = Command::new(&tools.ffmpeg);
-    command.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.current_dir(cwd).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -726,7 +729,7 @@ mod tests {
     #[test]
     fn a_subtitled_export_draws_text() {
         let dir = tempfile::tempdir().unwrap();
-        let cache = dir.path().join("a'b: c,d[e];f");
+        let cache = dir.path().join("Šromovský a'b: c,d[e];f");
         std::fs::create_dir_all(&cache).unwrap();
         let src = dir.path().join("black.mp4");
         let status = Command::new(&tools().ffmpeg)

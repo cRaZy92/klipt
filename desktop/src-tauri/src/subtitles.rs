@@ -12,6 +12,20 @@ const FONT: &[u8] = include_bytes!("../../src/assets/fonts/NotoSans-Bold.ttf");
 const FONT_FILE: &str = "NotoSans-Bold.ttf";
 /// The font's family name, as the ASS style names it.
 const FONT_NAME: &str = "Noto Sans";
+/// Emoji, in one colour: libass can't draw colour emoji fonts, and its fallback would pick one.
+const EMOJI_FONT: &[u8] = include_bytes!("../../src/assets/fonts/NotoEmoji.ttf");
+const EMOJI_FONT_FILE: &str = "NotoEmoji.ttf";
+const EMOJI_FONT_NAME: &str = "Noto Emoji";
+
+/// Whether `c` is an emoji picture (drawn with the emoji font).
+fn is_emoji(c: char) -> bool {
+    matches!(c as u32, 0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x2B00..=0x2BFF | 0x2300..=0x23FF)
+}
+
+/// Whether `c` belongs to the emoji before it: a zero-width joiner, a variation selector or a keycap.
+fn joins_emoji(c: char) -> bool {
+    matches!(c, '\u{200D}' | '\u{FE0F}' | '\u{20E3}' | '\u{E0020}'..='\u{E007F}')
+}
 
 /// The subtitles as they show in an export of `kept` (the file's kept parts, in order): each
 /// subtitle's overlap with each part, moved to the export's time. A subtitle across a removed
@@ -32,11 +46,21 @@ pub fn events(subs: &[SubtitleRange], kept: &[(u64, u64)]) -> Vec<(u64, u64, Str
 }
 
 /// `text` as ASS dialogue text that shows exactly as typed: braces would start override tags and
-/// `\N`, `\n`, `\h` would be line breaks or spaces.
+/// `\N`, `\n`, `\h` would be line breaks or spaces. Emoji switch to the emoji font and back.
 pub fn ass_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
+    let mut in_emoji = false;
     while let Some(c) = chars.next() {
+        let emoji = is_emoji(c) || (in_emoji && joins_emoji(c));
+        if emoji != in_emoji {
+            out.push_str(if emoji { "{\\fn" } else { "{\\fn}" });
+            if emoji {
+                out.push_str(EMOJI_FONT_NAME);
+                out.push('}');
+            }
+            in_emoji = emoji;
+        }
         match c {
             '{' => out.push_str("\\{"),
             '}' => out.push_str("\\}"),
@@ -50,6 +74,9 @@ pub fn ass_text(text: &str) -> String {
             '\n' | '\r' => out.push(' '),
             c => out.push(c),
         }
+    }
+    if in_emoji {
+        out.push_str("{\\fn}");
     }
     out
 }
@@ -100,14 +127,19 @@ pub fn filter_path(p: &Path) -> String {
     escape(&option, &['\\', '\'', '[', ']', ',', ';'])
 }
 
-/// Writes the bundled font to `<cache_dir>/fonts/` (unless it's there already) and returns that
-/// directory, for the `subtitles` filter's `fontsdir`.
+/// Writes the bundled fonts to `<cache_dir>/fonts/` (unless they're there already) and returns
+/// that directory, for the `subtitles` filter's `fontsdir`. Each is written to a temporary file
+/// first, so an export running meanwhile never reads half a font.
 pub fn write_font(cache_dir: &Path) -> Result<PathBuf> {
     let dir = cache_dir.join("fonts");
-    let file = dir.join(FONT_FILE);
-    if fs::metadata(&file).map(|m| m.len() != FONT.len() as u64).unwrap_or(true) {
-        fs::create_dir_all(&dir)?;
-        fs::write(&file, FONT)?;
+    for (name, bytes) in [(FONT_FILE, FONT), (EMOJI_FONT_FILE, EMOJI_FONT)] {
+        let file = dir.join(name);
+        if fs::metadata(&file).map(|m| m.len() != bytes.len() as u64).unwrap_or(true) {
+            fs::create_dir_all(&dir)?;
+            let temp = dir.join(format!("{name}.{}.tmp", std::process::id()));
+            fs::write(&temp, bytes)?;
+            fs::rename(&temp, &file)?;
+        }
     }
     Ok(dir)
 }
@@ -145,7 +177,41 @@ mod tests {
         assert!(!ass_text("a\\Nb").contains("\\N"));
         assert!(!ass_text("a\\hb").contains("\\h"));
         assert_eq!(ass_text("C:\\new").replace('\u{2060}', ""), "C:\\new");
-        assert_eq!(ass_text("čo to bolo, ľudia 💀"), "čo to bolo, ľudia 💀");
+        assert_eq!(ass_text("čo to bolo, ľudia"), "čo to bolo, ľudia");
+    }
+
+    #[test]
+    fn emoji_are_drawn_with_the_emoji_font() {
+        assert_eq!(ass_text("gg 💀🔥 ez"), "gg {\\fnNoto Emoji}💀🔥{\\fn} ez");
+        // Sequences stay together: ZWJ, a skin tone, the emoji variation selector, a keycap.
+        assert_eq!(ass_text("👍🏽"), "{\\fnNoto Emoji}👍🏽{\\fn}");
+        assert_eq!(ass_text("❤️ a"), "{\\fnNoto Emoji}❤️{\\fn} a");
+        assert_eq!(ass_text("🧑‍💻"), "{\\fnNoto Emoji}🧑‍💻{\\fn}");
+        assert_eq!(ass_text("čo ľudia"), "čo ľudia");
+    }
+
+    // Review: the preview is sized from this (src/lib/subtitles.ts, `subtitleFontPx`): a capital
+    // is 0.055 × 714/1519 of the picture's height, because libass sizes a font by its whole
+    // ascent + descent (1519 units for Noto Sans), not by its em (1000 units).
+    #[test]
+    fn a_capital_is_as_tall_as_the_preview_expects() {
+        let tools = crate::ffmpeg::locate().expect("ffmpeg");
+        let dir = tempfile::tempdir().unwrap();
+        let fonts = write_font(dir.path()).unwrap();
+        let ass = dir.path().join("h.ass");
+        fs::write(&ass, ass_document(&[(0, 5000, "HHHH".into())], (1920, 1080))).unwrap();
+        let out = std::process::Command::new(&tools.ffmpeg)
+            .args(["-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=1920x1080:d=1", "-vf"])
+            .arg(format!("{},format=gray", filter(&ass, &fonts)))
+            .args(["-frames:v", "1", "-f", "rawvideo", "-"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        // Rows where the letters' white fill (not the black outline) is.
+        let rows: Vec<usize> = (0..1080).filter(|y| out.stdout[y * 1920..(y + 1) * 1920].iter().any(|p| *p > 200)).collect();
+        let cap = rows.last().unwrap() - rows.first().unwrap() + 1;
+        let expected = 0.055 * 1080.0 * 714.0 / 1519.0;
+        assert!((cap as f64 - expected).abs() <= 2.0, "capital {cap} px, expected {expected:.1}");
     }
 
     #[test]
@@ -163,6 +229,13 @@ mod tests {
     fn filter_path_escapes_windows_paths() {
         assert_eq!(filter_path(Path::new("C:\\Users\\Ann's PC\\x.ass")), "C\\\\:\\\\\\\\Users\\\\\\\\Ann\\\\\\'s PC\\\\\\\\x.ass");
         assert_eq!(filter_path(Path::new("/tmp/a,b[c];d")), "/tmp/a\\,b\\[c\\]\\;d");
+    }
+
+    #[test]
+    fn both_fonts_are_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let fonts = write_font(dir.path()).unwrap();
+        assert!(fonts.join("NotoEmoji.ttf").is_file());
     }
 
     #[test]

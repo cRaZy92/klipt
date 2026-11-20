@@ -41,6 +41,7 @@
     sameSubtitles,
     savedSubtitles,
     setSubtitleText,
+    subtitleFontPx,
     subtitleIndexAt,
   } from "../lib/subtitles";
   import { toggleMute } from "../lib/lanes";
@@ -286,7 +287,7 @@
    * A drag on the timeline or a volume slider in progress: its changes become one undo step,
    * recorded when it ends (so a drag that rests is still one step).
    */
-  const gestures = new Gestures<"scrub" | "slider" | "zoom" | "subtitle">(() => history?.record(editState));
+  const gestures = new Gestures<"scrub" | "slider" | "zoom" | "subtitle" | "subtitleText">(() => history?.record(editState));
 
   function applyState(s: EditState) {
     trim = s.trim;
@@ -912,7 +913,7 @@
     if (playing) pause();
     closeSubtitleText();
     // Adding it and typing its text is one undo step.
-    gestures.start("subtitle");
+    gestures.start("subtitleText");
     subtitles = next;
     const i = subtitleIndexAt(next, Math.round(position));
     selectedSubtitle = i;
@@ -925,7 +926,7 @@
     if (editLocked || !subtitles[i]) return;
     if (playing) pause();
     closeSubtitleText();
-    gestures.start("subtitle");
+    gestures.start("subtitleText");
     selectedSubtitle = i;
     selectedZoom = null;
     editingSubtitle = i;
@@ -943,7 +944,15 @@
       subtitles = setSubtitleText(subtitles, i, text ?? subtitles[i].text);
       if (subtitles.length < before) selectedSubtitle = null;
     }
-    gestures.end("subtitle");
+    gestures.end("subtitleText");
+  }
+
+  /** The open text box, to keep what was typed when something else is clicked. */
+  let subtitleInput = $state<HTMLInputElement | null>(null);
+
+  /** Something on the lanes was pressed: the open text box keeps its text and closes first. */
+  function onlanedown() {
+    if (editingSubtitle !== null) closeSubtitleText(subtitleInput?.value ?? null);
   }
 
   /** The text box gets focus when it opens, with its text selected. */
@@ -967,7 +976,7 @@
     if (editLocked) return;
     if (editingSubtitle !== null) {
       editingSubtitle = null;
-      gestures.end("subtitle");
+      gestures.end("subtitleText");
     }
     subtitles = removeSubtitle(subtitles, i);
     selectedSubtitle = null;
@@ -1331,13 +1340,22 @@
         <!-- Drawn like the export (src-tauri/src/subtitles.rs): sized from the picture's height,
              never zoomed or blurred. -->
         {#if shownSubtitle}
-          <p class="subtitle" style:--h="{videoRect.height}px" style:--w="{videoRect.width}px">{shownSubtitle.text}</p>
+          <p
+            class="subtitle"
+            style:--h="{videoRect.height}px"
+            style:--w="{videoRect.width}px"
+            style:--size="{subtitleFontPx(videoRect.height)}px"
+          >
+            {shownSubtitle.text}
+          </p>
         {/if}
         {#if editingSubtitle !== null && subtitles[editingSubtitle]}
           <input
             class="subtitle subtitle-input"
+            bind:this={subtitleInput}
             style:--h="{videoRect.height}px"
             style:--w="{videoRect.width}px"
+            style:--size="{subtitleFontPx(videoRect.height)}px"
             value={subtitles[editingSubtitle].text}
             maxlength={MAX_SUBTITLE_CHARS * 2}
             placeholder="Type the subtitle, then Enter"
@@ -1474,6 +1492,7 @@
         onsubtitlegesture={(active) => (active ? gestures.start("subtitle") : gestures.end("subtitle"))}
         onsubtitleremove={removeSubtitleAt}
         onsubtitleedit={editSubtitle}
+        {onlanedown}
       >
         {#snippet video()}
           <TrimBar
@@ -1770,8 +1789,9 @@
   .freeze {
     visibility: hidden;
   }
-  /* The export's fixed style: 5.5% of the height, outline 0.35% (at least 2 px), 6% from the
-     bottom, 5% side margins. The stroke is centred on the outline, so it is drawn twice as wide. */
+  /* The export's fixed style: font size from `subtitleFontPx`, outline 0.35% of the height (at
+     least 2 px), 6% from the bottom, 5% side margins. The line box is libass's (ascent + descent,
+     1.519 em). The stroke is centred on the outline, so it is drawn twice as wide. */
   .subtitle {
     position: absolute;
     right: calc(var(--w) * 0.05);
@@ -1779,10 +1799,10 @@
     left: calc(var(--w) * 0.05);
     margin: 0;
     color: #fff;
-    font-family: "Klipt Subtitles", sans-serif;
-    font-size: calc(var(--h) * 0.055);
+    font-family: "Klipt Subtitles", "Klipt Subtitles Emoji", sans-serif;
+    font-size: var(--size);
     font-weight: 700;
-    line-height: 1.2;
+    line-height: 1.519;
     text-align: center;
     overflow-wrap: anywhere;
     -webkit-text-stroke: calc(max(2px, var(--h) * 0.0035) * 2) #000;

@@ -12,6 +12,15 @@ export const DEFAULT_SUBTITLE_MS = 2000;
 /** The longest a subtitle's text can be, in characters. */
 export const MAX_SUBTITLE_CHARS = 200;
 
+/**
+ * The preview's CSS font size (px) for a picture `height` px tall, matching the export
+ * (src-tauri/src/subtitles.rs): its ASS font size is 0.055 of the height, and libass sizes a
+ * font by its whole ascent + descent, which for Noto Sans is 1519 units of a 1000-unit em.
+ */
+export function subtitleFontPx(height: number): number {
+  return (height * 0.055 * 1000) / 1519;
+}
+
 /** The index of the subtitle showing at `ms`, or −1. */
 export function subtitleIndexAt(subs: SubtitleRange[], ms: number): number {
   return subs.findIndex((s) => ms >= s.startMs && ms < s.endMs);

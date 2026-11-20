@@ -19,6 +19,7 @@ pub mod media_server;
 pub mod mp4_mute;
 pub mod update;
 pub mod recorder;
+pub mod resources;
 pub mod screenshot;
 pub mod subtitles;
 pub mod server_clips;
@@ -147,6 +148,7 @@ pub fn run() {
             commands::close_editor,
             commands::save_edit,
             commands::export_copy,
+            resources::resource_usage,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Klipt")

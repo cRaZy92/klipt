@@ -46,6 +46,7 @@
     globe:
       "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3.5 9h17M3.5 15h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18",
     play: "",
+    pulse: "M3 12h4l3-7 4 14 3-7h4",
     clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
     spinner: "M12 3a9 9 0 1 0 9 9",
     // The app icon's glyph (src-tauri/icons/source.svg scaled 1/32 about its centre): frame brackets

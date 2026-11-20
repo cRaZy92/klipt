@@ -34,6 +34,8 @@ thiserror = "2.0.21"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio = { version = "1.54.1", features = ["fs", "io-util", "time", "rt", "macros", "sync"] }
 uuid = { version = "1.29.2", features = ["v4"] }
+# Settings → Resources: the app's own processes (RAM, CPU; GPU on Windows, see below).
+sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
@@ -43,6 +45,8 @@ tempfile = "3.27.0"
 wiremock = "0.6.5"
 
 [target.'cfg(windows)'.dependencies]
+# Per-process GPU load and memory from Windows' own counters (NVML can't report VRAM under WDDM).
+sysinfo = { version = "0.40.4", default-features = false, features = ["system", "gpu"] }
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-updater = "2.14.1"
 windows = { version = "0.62", features = [
@@ -57,5 +61,7 @@ windows = { version = "0.62", features = [
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# NVIDIA GPU load and VRAM per process; loads libnvidia-ml at runtime, so other GPUs just get none.
+nvml-wrapper = "0.13.0"
 ashpd = { version = "0.12.3", features = ["tokio"] }
 nix = { version = "0.31.3", features = ["process", "signal"] }

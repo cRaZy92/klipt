@@ -39,6 +39,7 @@
   import { toast } from "../lib/toasts.svelte";
   import Icon from "../components/Icon.svelte";
   import Keys from "../components/Keys.svelte";
+  import ResourcesPanel from "../components/ResourcesPanel.svelte";
 
   let {
     active = true,
@@ -293,6 +294,7 @@
     { id: "hotkey", label: "Hotkey", icon: "keyboard" },
     { id: "clips", label: "Clips folder", icon: "folder" },
     { id: "general", label: "General", icon: "sliders" },
+    { id: "resources", label: "Resources", icon: "pulse" },
     { id: "account", label: "Account", icon: "user" },
   ] as const;
   type Tab = (typeof TABS)[number]["id"];
@@ -791,6 +793,9 @@
         <span><strong>Notify me when a friend shares a clip</strong><small>Klipt checks the feed every few minutes.</small></span>
       </label>
     </section>
+
+    {:else if tab === "resources"}
+    <ResourcesPanel />
 
     {:else if tab === "account"}
     <section>

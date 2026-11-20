@@ -398,6 +398,32 @@ export interface FeedGame {
   count: number;
 }
 
+/** A part of Klipt on Settings → Resources. */
+export type ResourcePart = "app" | "window" | "recorder" | "videoJobs";
+
+export interface PartUsage {
+  part: ResourcePart;
+  /** How many processes of this part are running. */
+  processes: number;
+  ramBytes: number;
+  /** Of the whole CPU (all threads), 0–100. */
+  cpuPercent: number;
+  /** Null when GPU numbers can't be read (see `gpuNote`). */
+  gpuPercent: number | null;
+  vramBytes: number | null;
+}
+
+export interface ResourceUsage {
+  /** Every part, in a fixed order, running or not. */
+  parts: PartUsage[];
+  totalRamBytes: number;
+  cpuThreads: number;
+  gpuAvailable: boolean;
+  gpuNote: string | null;
+  gpuName: string | null;
+  totalVramBytes: number | null;
+}
+
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   /** Saves and applies settings: restarts the recorder, rebinds the shortcut, toggles autostart. */
@@ -489,6 +515,8 @@ export const api = {
   /** Resolves once the copy is written; progress arrives as `export-progress`. */
   exportCopy: (id: string, destPath: string, edit: EditInput) =>
     invoke<void>("export_copy", { id, destPath, ...edit }),
+  /** What Klipt's processes use right now; made for polling about once a second. */
+  resourceUsage: () => invoke<ResourceUsage>("resource_usage"),
 };
 
 export interface Events {

@@ -134,6 +134,9 @@ Picked by the owner from a list of suggestions. None has a spec yet.
 | 2 | Mute or duck part of a lane      | In the editor, drag over part of one audio lane (game, mic, voice chat) to silence it or turn it down, without cutting the video; kept in exports and uploads |
 | 3 | Uploads survive a restart        | An upload cut off by quitting Klipt, a crash or sleep resumes on the next launch (tus already resumes; the desktop keeps the queue) |
 | 4 | Copy link when the upload is done | Closing the editor while an upload runs still copies the share link to the clipboard when it finishes, with a notification |
+| 5 | Albums                           | Gather clips (your own or friends') into a named album with one share link, e.g. "Best of the tournament" |
+| 6 | Draw on the clip                 | Arrows, circles and boxes placed on the video for part of a clip, on their own editor lane like subtitles; burned into exports and uploads |
+| 7 | Download all my clips            | A website button that downloads every clip you uploaded as one zip, as a backup or to leave |
 
 ## Later: after v1
 

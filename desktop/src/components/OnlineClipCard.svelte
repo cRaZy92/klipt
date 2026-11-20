@@ -3,6 +3,7 @@
   import { menu } from "../lib/a11y";
   import { formatDuration, hueOf, relativeDate, viewsLabel } from "../lib/format";
   import Icon from "./Icon.svelte";
+  import { WHERE } from "../lib/myClips";
   import ProcessingPill from "./ProcessingPill.svelte";
   import "./clip-card.css";
 
@@ -94,8 +95,8 @@
         {#if selecting}<Icon name="check" size={15} /> {selected ? "Unselect" : "Select"}{:else}<Icon name="play" size={15} /> Play{/if}
       </span>
     </button>
-    <span class="badge badge-online" title="Uploaded; not on this computer">
-      <Icon name="cloud" size={13} /> Online only
+    <span class="badge badge-icon badge-online" role="img" aria-label={WHERE.online.title} title={WHERE.online.title}>
+      <Icon name={WHERE.online.icon} size={14} />
     </span>
     <ProcessingPill state={upload.processing} />
     {#if onfavorite}

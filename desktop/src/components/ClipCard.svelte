@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fileUrl, type ClipView } from "../lib/api";
   import { editedLength } from "../lib/cuts";
+  import { WHERE } from "../lib/myClips";
   import { formatDuration, hueOf, relativeDate } from "../lib/format";
   import { forgetUpload, fraction, isBusy, retryUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
   import { menu } from "../lib/a11y";
@@ -141,8 +142,11 @@
     {/if}
     {#if clip.fileMissing}
       <span class="badge badge-missing"><Icon name="alert" size={13} /> File missing</span>
-    {:else if uploaded}
-      <span class="badge badge-uploaded"><Icon name="check" size={13} /> Uploaded</span>
+    {:else}
+      {@const where = WHERE[uploaded ? "both" : "localOnly"]}
+      <span class="badge badge-icon {uploaded ? 'badge-uploaded' : 'badge-local'}" role="img" aria-label={where.title} title={where.title}>
+        <Icon name={where.icon} size={14} />
+      </span>
     {/if}
     <ProcessingPill state={processing} />
     {#if clip.kind === "screenshot"}

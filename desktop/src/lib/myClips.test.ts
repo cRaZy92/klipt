@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClipView, MyUpload } from "./api";
-import { gameCounts, isUploaded, matchesSearch, mergeClips, visibleClips } from "./myClips";
+import { gameCounts, isUploaded, matchesSearch, mergeClips, visibleClips, whereOf } from "./myClips";
 
 function local(id: string, at: number, extra: Partial<ClipView> = {}): ClipView {
   return {
@@ -46,13 +46,14 @@ describe("visibleClips", () => {
     [upload("S9", 20), upload("old", 10)],
   );
 
-  it("filters by place", () => {
-    const keys = (place: "all" | "local" | "uploaded" | "notUploaded") =>
+  it("filters by place: each clip is in exactly one of the three", () => {
+    const keys = (place: "all" | "localOnly" | "both" | "online") =>
       visibleClips(items, place, null, "newestFirst").map((i) => i.key);
     expect(keys("all")).toEqual(["l:new", "l:up", "s:old"]);
-    expect(keys("local")).toEqual(["l:new", "l:up"]);
-    expect(keys("uploaded")).toEqual(["l:up", "s:old"]);
-    expect(keys("notUploaded")).toEqual(["l:new"]);
+    expect(keys("localOnly")).toEqual(["l:new"]);
+    expect(keys("both")).toEqual(["l:up"]);
+    expect(keys("online")).toEqual(["s:old"]);
+    expect(items.map(whereOf)).toEqual(["localOnly", "both", "online"]);
   });
 
   it("filters by game and sorts both ways", () => {

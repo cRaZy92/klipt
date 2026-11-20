@@ -9,14 +9,14 @@
   import type { RemoveWhere } from "../lib/removal";
   import { keepShown, selectClick } from "../lib/selection";
   import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
-  import { gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
+  import { WHERE, gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import ImageViewer from "../components/ImageViewer.svelte";
-  import Icon from "../components/Icon.svelte";
+  import Icon, { type IconName } from "../components/Icon.svelte";
   import Keys from "../components/Keys.svelte";
   import Modal from "../components/Modal.svelte";
   import SearchInput from "../components/SearchInput.svelte";
@@ -412,12 +412,12 @@
     }
   }
 
-  const PLACES: { value: Place; label: string }[] = [
+  const PLACES: { value: Place; label: string; icon?: IconName }[] = [
     { value: "all", label: "All" },
-    { value: "local", label: "On this PC" },
-    { value: "uploaded", label: "Uploaded" },
-    { value: "notUploaded", label: "Not uploaded" },
-    { value: "favorites", label: "Favorites" },
+    { value: "localOnly", ...WHERE.localOnly },
+    { value: "both", ...WHERE.both },
+    { value: "online", ...WHERE.online },
+    { value: "favorites", label: "Favorites", icon: "star" },
   ];
 
   const MEDIA: { value: MediaKind; label: string }[] = [
@@ -466,6 +466,7 @@
       <div class="places" role="group" aria-label="Show clips">
         {#each PLACES as p (p.value)}
           <button class:active={place === p.value} aria-pressed={place === p.value} onclick={() => (place = p.value)}>
+            {#if p.icon}<Icon name={p.icon} size={15} />{/if}
             {p.label}
           </button>
         {/each}
@@ -508,13 +509,15 @@
         <p>No screenshots here yet. Press your screenshot shortcut in a game, or use the Screenshot button.</p>
       {:else if place === "favorites"}
         <p>No favorites yet. Star a clip to keep it here.</p>
-      {:else if place === "uploaded" && uploads === null && !uploadsError}
+      {:else if place === "online" && uploads === null && !uploadsError}
         <p>Log in to see your uploads.</p>
       {:else if game}
         <p>No clips for this game here.</p>
-      {:else if place === "uploaded"}
-        <p>Nothing uploaded yet.</p>
-      {:else if place === "notUploaded"}
+      {:else if place === "online"}
+        <p>Nothing that's only uploaded: every upload is also on this PC.</p>
+      {:else if place === "both"}
+        <p>No uploaded clips on this PC.</p>
+      {:else if place === "localOnly"}
         <p>Everything here is uploaded.</p>
       {:else}
         <p>No clips on this PC.</p>
@@ -785,6 +788,9 @@
   }
 
   .places button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     padding: 0.35rem 0.9rem;
     border: none;
     border-radius: 999px;

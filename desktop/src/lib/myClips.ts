@@ -1,11 +1,21 @@
 // My clips merges the clips on this PC with your uploads on the server. Pure logic, tested in
 // myClips.test.ts; Library.svelte renders it.
 
+import type { IconName } from "../components/Icon.svelte";
 import type { ClipView, GameCount, MyUpload, Sort } from "./api";
 
-/** Where a clip is: everything, the clips on this PC, the ones on the server, the ones not
- * uploaded yet, or starred ones. */
-export type Place = "all" | "local" | "uploaded" | "notUploaded" | "favorites";
+/** Where one clip is: only on this PC, on this PC and uploaded, or only uploaded. */
+export type Where = "localOnly" | "both" | "online";
+
+/** Each place's icon (on the filter and the card) and name. */
+export const WHERE: Record<Where, { icon: IconName; label: string; title: string }> = {
+  localOnly: { icon: "pc", label: "Only on this PC", title: "Only on this PC: not uploaded" },
+  both: { icon: "cloudCheck", label: "On PC & uploaded", title: "On this PC and uploaded" },
+  online: { icon: "cloud", label: "Only uploaded", title: "Uploaded; not on this PC" },
+};
+
+/** Which clips to show: everything, one place, or starred ones. */
+export type Place = "all" | Where | "favorites";
 
 export type MyClip =
   | { kind: "local"; key: string; clip: ClipView; at: number; game: string | null; steamAppId: number | null }
@@ -44,6 +54,11 @@ export function isUploaded(item: MyClip): boolean {
   return item.kind === "online" || !!item.clip.shareUrl;
 }
 
+export function whereOf(item: MyClip): Where {
+  if (item.kind === "online") return "online";
+  return item.clip.shareUrl ? "both" : "localOnly";
+}
+
 /** Videos, screenshots or both. */
 export type MediaKind = "all" | "clip" | "screenshot";
 
@@ -53,11 +68,9 @@ export function mediaKindOf(item: MyClip): "clip" | "screenshot" {
 }
 
 export function matchesPlace(item: MyClip, place: Place): boolean {
-  if (place === "local") return item.kind === "local";
-  if (place === "uploaded") return isUploaded(item);
-  if (place === "notUploaded") return !isUploaded(item);
   if (place === "favorites") return item.kind === "local" ? item.clip.favorite : !!item.upload.favorite;
-  return true;
+  if (place === "all") return true;
+  return whereOf(item) === place;
 }
 
 /** Lower case without accents, so "utek" finds "Útek". */

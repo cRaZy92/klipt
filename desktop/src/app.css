@@ -457,9 +457,15 @@ select.input option {
     var(--bg);
 }
 
-/* Scrolled (stickyTop.ts): a smaller title and no subtitle, so small windows keep room for clips. */
+/* Scrolled (stickyTop.ts): the title shrinks and the subtitle folds away, so small windows keep
+   room for clips. Everything eases together over --compact-t; the subtitle collapses its height
+   while it fades and lifts, so the list below glides up instead of jumping. */
 .page-top {
-  transition: padding-top 0.18s var(--ease-out), gap 0.18s var(--ease-out);
+  --compact-t: 0.32s;
+  --compact-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    padding-top var(--compact-t) var(--compact-ease),
+    gap var(--compact-t) var(--compact-ease);
 }
 
 .page-top.compact {
@@ -467,16 +473,47 @@ select.input option {
   padding-top: 0.9rem;
 }
 
-.page-head h1 {
-  transition: font-size 0.18s var(--ease-out);
+.page-top .page-head h1 {
+  transition: font-size var(--compact-t) var(--compact-ease);
 }
 
 .page-top.compact .page-head h1 {
   font-size: 1.3rem;
 }
 
+.page-top .page-head .subtitle {
+  max-height: 3rem;
+  overflow: hidden;
+  transition:
+    max-height var(--compact-t) var(--compact-ease),
+    margin-top var(--compact-t) var(--compact-ease),
+    opacity calc(var(--compact-t) * 0.6) ease,
+    transform var(--compact-t) var(--compact-ease);
+}
+
 .page-top.compact .page-head .subtitle {
-  display: none;
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  transform: translateY(-0.35rem);
+}
+
+/* Pinned over the list: a faint line under the header fades in to set it apart. */
+.page-top::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 2rem;
+  right: 2rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+  opacity: 0;
+  transition: opacity var(--compact-t) ease;
+  pointer-events: none;
+}
+
+.page-top.compact::before {
+  opacity: 1;
 }
 
 /* Soft edge so scrolled cards fade out under it instead of being cut by a hard line. */

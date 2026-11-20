@@ -124,6 +124,17 @@ Asked for by the owner. Item 1 is built (plan: `docs/superpowers/plans/2026-11-2
 | 2 | Several clips from one recording | In the editor, mark several parts of one clip or recording and export each as its own clip (own title, game kept, own thumbnail), without touching the source |
 | 3 | Combine clips into one upload    | Pick several clips (e.g. from the multi-select bar in My clips) and join them in order into one video that uploads as a single clip; each part keeps its own trim. Moved here from "Merging clips in the editor" under Later |
 
+## Planned: safety and editor additions (chosen 2026-11-20)
+
+Picked by the owner from a list of suggestions. None has a spec yet.
+
+| # | Feature                          | What it means                                                                                      |
+| - | -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 1 | Recording safety                 | While a full recording runs, show its length and size; warn when the disk runs low, and stop the recording cleanly before the disk fills so the file isn't lost |
+| 2 | Mute or duck part of a lane      | In the editor, drag over part of one audio lane (game, mic, voice chat) to silence it or turn it down, without cutting the video; kept in exports and uploads |
+| 3 | Uploads survive a restart        | An upload cut off by quitting Klipt, a crash or sleep resumes on the next launch (tus already resumes; the desktop keeps the queue) |
+| 4 | Copy link when the upload is done | Closing the editor while an upload runs still copies the share link to the clipboard when it finishes, with a notification |
+
 ## Later: after v1
 
 Ideas the spec left out of v1 on purpose, or that came up while building. Nothing here is committed.

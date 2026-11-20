@@ -94,20 +94,27 @@
     }
   }
 
+  /** Right-click: the same menu as ⋯ (a card without one keeps the usual right-click). */
+  function oncontextmenu(e: MouseEvent) {
+    if (clip.fileMissing) return;
+    e.preventDefault();
+    menuOpen = true;
+  }
+
   function pick(action: () => void) {
     menuOpen = false;
     action();
   }
 </script>
 
-<svelte:window onclick={closeMenuOutside} />
+<svelte:window onclick={closeMenuOutside} oncontextmenu={closeMenuOutside} />
 
 {#snippet selectPill()}
   <Icon name="check" size={15} />
   {selected ? "Unselect" : "Select"}
 {/snippet}
 
-<article class="card clip-card rise" class:missing={clip.fileMissing} class:menu-open={menuOpen} class:selected class:selecting style:--i={index}>
+<article class="card clip-card rise" class:missing={clip.fileMissing} class:menu-open={menuOpen} class:selected class:selecting style:--i={index} {oncontextmenu}>
   <div class="thumb">
     {#if onselect}
       <button

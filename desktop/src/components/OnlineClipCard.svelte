@@ -63,15 +63,21 @@
     if (menuOpen && !menuWrap?.contains(e.target as Node)) menuOpen = false;
   }
 
+  /** Right-click: the same menu as ⋯ (a card without one keeps the usual right-click). */
+  function oncontextmenu(e: MouseEvent) {
+    e.preventDefault();
+    menuOpen = true;
+  }
+
   function pick(action: () => void) {
     menuOpen = false;
     action();
   }
 </script>
 
-<svelte:window onclick={closeMenuOutside} />
+<svelte:window onclick={closeMenuOutside} oncontextmenu={closeMenuOutside} />
 
-<article class="card clip-card rise" class:menu-open={menuOpen} class:selected class:selecting style:--i={index}>
+<article class="card clip-card rise" class:menu-open={menuOpen} class:selected class:selecting style:--i={index} {oncontextmenu}>
   <div class="thumb">
     {#if onselect}
       <button

@@ -5,7 +5,7 @@ import fastifyStatic from '@fastify/static';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getActivity, getAdminStats, getGameShares, getTranscodes, isInviteActive, listActiveInvites, listAdminUsers } from '../admin/queries.js';
-import { toClip } from '../clips/routes.js';
+import { toClip, versionQuery } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
 import { users } from '../db/schema.js';
 import { getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, shareInviter, InvalidCursorError, type Scope } from '../clips/repo.js';
@@ -153,7 +153,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const plan = clip.kind === 'clip' ? embedPlan(clip) : null;
     const embed =
       plan && (await hasEmbed(join(config.dataDir, 'clips'), clip.id))
-        ? { url: `${config.baseUrl}/media/${embedFileName(clip.id)}`, width: plan.width, height: plan.height }
+        ? { url: `${config.baseUrl}/media/${embedFileName(clip.id)}${versionQuery(found.clip)}`, width: plan.width, height: plan.height }
         : null;
     return html(reply, SharePage({ user: req.user, clip, embed, canDelete, viewers, signup }) as string);
   });

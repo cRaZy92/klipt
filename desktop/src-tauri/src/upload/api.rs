@@ -59,6 +59,9 @@ pub struct FinalizeRequest {
     /// Friends in the clip, by username.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tagged: Vec<String>,
+    /// The server clip whose video this upload replaces (same link); `None` makes a new clip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
 }
 
 /// The server's `Clip`.
@@ -260,8 +263,9 @@ impl ApiClient {
         self.finalize_with(token, req, FinalizeOptions::default()).await
     }
 
-    /// 201 (new clip) and 200 (a repeat finalize of the same upload) both give the clip; 409
-    /// `upload_finalizing` means the server is still working on it, so wait and ask again.
+    /// 201 (new clip) and 200 (a repeat finalize of the same upload, or a replaced clip) both give
+    /// the clip; 409 `upload_finalizing` means the server is still working on it, so wait and ask
+    /// again. When the clip to replace is gone (`replace_missing`), the upload becomes a new clip.
     pub async fn finalize_with(
         &self,
         token: &str,
@@ -274,6 +278,14 @@ impl ApiClient {
         let started = tokio::time::Instant::now();
         loop {
             let resp = self.http.post(self.url("/api/clips")).bearer_auth(token).json(&req).send().await.map_err(network)?;
+            if resp.status() == StatusCode::NOT_FOUND && req.replaces.is_some() {
+                let err = error_from(resp).await;
+                if !matches!(&err, ApiError::Server { code, .. } if code == "replace_missing") {
+                    return Err(err);
+                }
+                req.replaces = None;
+                continue;
+            }
             if resp.status() == StatusCode::CONFLICT {
                 let err = error_from(resp).await;
                 let finalizing = matches!(&err, ApiError::Server { code, .. } if code == "upload_finalizing");

@@ -10,7 +10,11 @@
 
   // svelte-ignore state_referenced_locally
   let title = $state(uploadTitle(clip));
-  let visibility = $state<Visibility>("feed");
+  // svelte-ignore state_referenced_locally
+  let visibility = $state<Visibility>(clip.visibility ?? "feed");
+  /** Already online: the new upload can replace the video at its link (a screenshot can't). */
+  const replaceable = $derived(!!clip.serverClipId && clip.kind === "clip");
+  let replace = $state(true);
   /** Friends you can tag (everyone on the server but you); null until loaded or if it failed. */
   let friends = $state<string[] | null>(null);
   let tagged = $state<string[]>([]);
@@ -48,7 +52,7 @@
     e.preventDefault();
     if (!trimmedTitle) return;
     started = true;
-    void startUpload(clip.id, trimmedTitle, visibility, tagged);
+    void startUpload(clip.id, trimmedTitle, visibility, tagged, replaceable && replace);
   }
 
   async function copyAgain() {
@@ -61,9 +65,32 @@
   }
 </script>
 
-<Modal title={job?.status === "done" ? "Clip uploaded" : "Upload clip"} {onclose} closeOnBackdrop={false}>
+<Modal title={job?.status === "done" ? (job.replaced ? "Video replaced" : "Clip uploaded") : "Upload clip"} {onclose} closeOnBackdrop={false}>
   {#if !job}
     <form id="upload-form" onsubmit={submit}>
+      {#if replaceable}
+        <fieldset>
+          <legend>This clip is already online</legend>
+          <label class="option" class:selected={replace}>
+            <input type="radio" name="replace" value={true} bind:group={replace} />
+            <span class="opt-icon"><Icon name="retry" size={18} /></span>
+            <span class="opt-text">
+              <strong>Replace the video</strong>
+              <small>Same link: anyone who opens it sees the new version. Views and stars stay.</small>
+            </span>
+            <span class="ring" aria-hidden="true"></span>
+          </label>
+          <label class="option" class:selected={!replace}>
+            <input type="radio" name="replace" value={false} bind:group={replace} />
+            <span class="opt-icon"><Icon name="link" size={18} /></span>
+            <span class="opt-text">
+              <strong>Upload as a new clip</strong>
+              <small>Gets its own link. The old clip stays online.</small>
+            </span>
+            <span class="ring" aria-hidden="true"></span>
+          </label>
+        </fieldset>
+      {/if}
       <label class="field">
         <span>Title</span>
         <!-- svelte-ignore a11y_autofocus -->
@@ -92,7 +119,10 @@
       </fieldset>
       {#if friends && friends.length > 0}
         <fieldset>
-          <legend>Who's in it <span class="optional">optional</span></legend>
+          <legend>
+            Who's in it
+            <span class="optional">{replaceable && replace ? "leave empty to keep who's tagged now" : "optional"}</span>
+          </legend>
           <div class="friends">
             {#each friends as name (name)}
               <button
@@ -113,7 +143,14 @@
   {:else if job.status === "done"}
     <div class="done">
       <div class="done-icon"><Icon name="check" size={28} /></div>
-      <p>{job.copied ? "The link is copied — paste it anywhere to share." : "Your clip is online."}</p>
+      <p>
+        {#if job.replaced}
+          The video at your link is replaced. Discord messages that already show it keep the old
+          preview until the link is posted again.
+        {:else}
+          {job.copied ? "The link is copied — paste it anywhere to share." : "Your clip is online."}
+        {/if}
+      </p>
       {#if job.shareUrl}<code class="link">{job.shareUrl}</code>{/if}
     </div>
   {:else}

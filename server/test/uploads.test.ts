@@ -281,3 +281,62 @@ describe('uploads and finalize', () => {
     expect(retry.json().id).toBe(clipId);
   });
 });
+
+describe('replacing a clip with a new upload', () => {
+  const clipFile = (name: string) => existsSync(join(t.dataDir, 'clips', name));
+
+  it('keeps the link, views, stars and tags; serves the new video under a new name', async () => {
+    const bob = await createUser(t.db, { username: 'bob' });
+    const b = await sessionFor(t.db, bob.id, 'web');
+    const first = await tusUpload(t.app, token, fixture);
+    const original = (await finalize(first.uploadId, { tagged: ['bob'], visibility: 'link' })).json();
+    await t.app.inject({ method: 'POST', url: `/api/clips/${original.id}/view`, headers: b.headers });
+    await t.app.inject({ method: 'PUT', url: `/api/clips/${original.id}/favorite`, headers });
+
+    const second = await tusUpload(t.app, token, fixture);
+    const res = await finalize(second.uploadId, { title: 'Better cut', replaces: original.id });
+    expect(res.statusCode).toBe(200);
+    const replaced = res.json();
+    expect(replaced).toMatchObject({
+      id: original.id,
+      shareUrl: original.shareUrl,
+      title: 'Better cut',
+      visibility: 'link',
+      views: 1,
+      favorite: true,
+      tagged: ['bob'],
+      createdAt: original.createdAt,
+    });
+    expect(replaced.videoUrl).toBe(`http://localhost/media/${original.id}.v2.mp4`);
+    expect(replaced.thumbnailUrl).toBe(`http://localhost/media/${original.id}.jpg?v=2`);
+    expect(clipFile(`${original.id}.v2.mp4`)).toBe(true);
+    // The old file stays a while for viewers mid-play.
+    expect(clipFile(`${original.id}.mp4`)).toBe(true);
+    const [{ n }] = await t.db.select({ n: count() }).from(clips);
+    expect(n).toBe(1);
+    // A retry of the same finalize answers with the clip again.
+    expect((await finalize(second.uploadId, { replaces: original.id })).json()).toMatchObject({ id: original.id });
+  });
+
+  it('replaces the tags when they are sent', async () => {
+    await createUser(t.db, { username: 'bob' });
+    const original = (await finalize((await tusUpload(t.app, token, fixture)).uploadId, { tagged: ['bob'] })).json();
+    const res = await finalize((await tusUpload(t.app, token, fixture)).uploadId, { replaces: original.id, tagged: [] });
+    expect(res.json().tagged).toEqual([]);
+  });
+
+  it("answers replace_missing for a deleted or someone else's clip; the upload then finalizes as a new clip", async () => {
+    const bob = await createUser(t.db, { username: 'bob' });
+    const b = await sessionFor(t.db, bob.id, 'desktop');
+    const bobs = (await finalize((await tusUpload(t.app, b.token, fixture)).uploadId, {}, b.headers)).json();
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    for (const replaces of [bobs.id, 'AAAAAAAAAAAA']) {
+      const res = await finalize(uploadId, { replaces });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({ error: 'replace_missing' });
+    }
+    const res = await finalize(uploadId);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().id).not.toBe(bobs.id);
+  });
+});

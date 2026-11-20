@@ -10,7 +10,7 @@ import { requireUser } from '../auth/plugin.js';
 import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
 import { assertPlayable, makeThumbnail, MediaError, probeImage, probeVideo, remuxFaststart, toPng } from './media.js';
 import { newClipId } from './ids.js';
-import { embedFileName, MEDIA_FILE, mediaFileName } from './files.js';
+import { embedFileName, MEDIA_FILE, mediaFileName, videoFileName } from './files.js';
 import { createEmbed, EMBED_VERSION } from './embed.js';
 import {
   getClip,
@@ -57,8 +57,16 @@ export function toClip(
     owner: { username: owner.username },
     shareUrl: `${baseUrl}/c/${row.id}`,
     videoUrl: `${baseUrl}/media/${mediaFileName(row)}`,
-    thumbnailUrl: `${baseUrl}/media/${row.id}.jpg`,
+    thumbnailUrl: `${baseUrl}/media/${row.id}.jpg${versionQuery(row)}`,
   };
+}
+
+/**
+ * `?v=<n>` once a clip's video was replaced: the thumbnail and embed copy keep their names but
+ * change with the video, and the thumbnail is cached as immutable.
+ */
+export function versionQuery(row: Pick<ClipRow, 'mediaVersion'>): string {
+  return row.mediaVersion > 0 ? `?v=${row.mediaVersion}` : '';
 }
 
 /** Whether the server is still compressing the clip (it plays meanwhile). */
@@ -71,6 +79,8 @@ const CLAIM_TTL_MS = 30 * 60 * 1000;
 const EMBED_THREADS = 4;
 
 class AlreadyFinalizedError extends Error {}
+/** The clip an upload was to replace is gone (deleted meanwhile). */
+class ReplaceTargetGoneError extends Error {}
 
 const finalizeBody = z.object({
   uploadId: z.string().min(1).max(128),
@@ -82,6 +92,11 @@ const finalizeBody = z.object({
   thumbnailMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).nullish(),
   /** Friends in the clip, by username. */
   tagged: z.array(z.string().max(64)).max(20).optional(),
+  /**
+   * One of your video clips whose video this upload replaces: same link, views, stars and post
+   * date. Its tags stay unless `tagged` is sent.
+   */
+  replaces: z.string().regex(/^[A-Za-z0-9_-]{12}$/).optional(),
 });
 
 /**
@@ -289,9 +304,22 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const owned = await ownedUpload();
     if (!owned) return reply.code(404).send({ error: 'not_found' });
     if (owned.clipId) return sendFinalized(owned.clipId);
-    let tagIds: string[];
+    // `replace_missing`: the client finalizes the same upload as a new clip instead.
+    const replaceMissing = () =>
+      reply.code(404).send({ error: 'replace_missing', message: 'The clip to replace is no longer on the server.' });
+    let target: ClipRow | null = null;
+    if (body.replaces) {
+      const found = await getClip(db, body.replaces);
+      if (!found || found.clip.userId !== user.id) return replaceMissing();
+      if (found.clip.kind !== 'clip') {
+        return reply.code(400).send({ error: 'invalid_request', message: "A screenshot's picture can't be replaced." });
+      }
+      target = found.clip;
+    }
+    // Null: a replaced clip keeps its tags.
+    let tagIds: string[] | null;
     try {
-      tagIds = await resolveTags(db, user.id, body.tagged ?? []);
+      tagIds = target && body.tagged === undefined ? null : await resolveTags(db, user.id, body.tagged ?? []);
     } catch (err) {
       if (err instanceof UnknownUserError) return unknownUser(reply, err);
       throw err;
@@ -323,27 +351,32 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'upload_incomplete' });
     }
 
-    const id = newClipId();
+    const id = target?.id ?? newClipId();
     const clipsDir = join(config.dataDir, 'clips');
     await mkdir(clipsDir, { recursive: true });
-    const videoPath = join(clipsDir, `${id}.mp4`);
+    // A replacement is a new version of the video, so no cache mixes the two files. +2, not +1:
+    // a compression still running on the old video writes version +1 (and is then thrown away).
+    const version = target ? target.mediaVersion + 2 : 0;
+    const videoPath = join(clipsDir, videoFileName(id, version));
     const thumbPath = join(clipsDir, `${id}.jpg`);
     const tmpVideo = join(clipsDir, `.${id}.mp4.tmp`);
     const tmpThumb = join(clipsDir, `.${id}.jpg.tmp`);
     const imagePath = join(clipsDir, `${id}.png`);
     const tmpImage = join(clipsDir, `.${id}.png.tmp`);
     const embedPath = join(clipsDir, embedFileName(id));
-    const cleanOutputs = () =>
-      Promise.all([videoPath, thumbPath, tmpVideo, tmpThumb, imagePath, tmpImage, embedPath].map((p) => rm(p, { force: true })));
+    // A replaced clip's thumbnail and embed copy are live files: only what this request made goes.
+    const outputs = target ? [videoPath, tmpVideo, tmpThumb] : [videoPath, thumbPath, tmpVideo, tmpThumb, imagePath, tmpImage, embedPath];
+    const cleanOutputs = () => Promise.all(outputs.map((p) => rm(p, { force: true })));
 
     let row: ClipRow;
+    let embedMade = false;
     try {
       const source = tusFilePath(config.dataDir, upload.id);
       // A screenshot is kept as a PNG; anything else must be a playable video.
       const image = await probeImage(source);
       let info: { durationMs: number; width: number; height: number };
       let size: number;
-      let embedMade = false;
+      if (image && target) throw new MediaError('not_a_video', 'a clip can only be replaced by a video');
       if (image) {
         info = { durationMs: 0, ...image };
         await toPng(source, tmpImage);
@@ -360,40 +393,57 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         embedMade = await createEmbed({ clipsDir, clip: { id, ...info }, source: tmpVideo, threads: EMBED_THREADS, log: req.log });
         await rename(tmpVideo, videoPath);
       }
-      await rename(tmpThumb, thumbPath);
+      // A replaced clip keeps its old thumbnail until the swap is committed.
+      if (!target) await rename(tmpThumb, thumbPath);
       // Insert the clip and turn the upload into its tombstone in one step; if another finalize
       // (one that took over a stale claim) got there first, roll back and answer with its clip.
+      const media = {
+        title: body.title,
+        gameName: body.gameName ?? null,
+        steamAppId: body.steamAppId ?? null,
+        transcodeState: !image && config.transcode.enabled ? ('queued' as const) : null,
+        durationMs: info.durationMs,
+        width: info.width,
+        height: info.height,
+        sizeBytes: size,
+        embedVersion: embedMade ? EMBED_VERSION : 0,
+      };
       row = await db.transaction(async (tx) => {
-        const [inserted] = (await tx
-          .insert(clips)
-          .values({
-            id,
-            userId: user.id,
-            title: body.title,
-            gameName: body.gameName ?? null,
-            steamAppId: body.steamAppId ?? null,
-            visibility: body.visibility ?? 'feed',
-            kind: image ? 'screenshot' : 'clip',
-            transcodeState: !image && config.transcode.enabled ? 'queued' : null,
-            durationMs: info.durationMs,
-            width: info.width,
-            height: info.height,
-            sizeBytes: size,
-            embedVersion: embedMade ? EMBED_VERSION : 0,
-          })
-          .returning()) as [ClipRow];
+        const [inserted] = target
+          ? ((await tx
+              .update(clips)
+              .set({
+                ...media,
+                ...(body.visibility ? { visibility: body.visibility } : {}),
+                mediaVersion: version,
+                originalBytes: null,
+                transcodeError: null,
+                transcodeStartedAt: null,
+                transcodeFinishedAt: null,
+              })
+              .where(and(eq(clips.id, id), eq(clips.userId, user.id)))
+              .returning()) as ClipRow[])
+          : ((await tx
+              .insert(clips)
+              .values({ ...media, id, userId: user.id, visibility: body.visibility ?? 'feed', kind: image ? 'screenshot' : 'clip' })
+              .returning()) as ClipRow[]);
+        if (!inserted) throw new ReplaceTargetGoneError();
         const tomb = await tx
           .update(uploads)
           .set({ clipId: id, finalizingAt: new Date() })
           .where(and(eq(uploads.id, upload.id), isNull(uploads.clipId)))
           .returning({ id: uploads.id });
         if (tomb.length === 0) throw new AlreadyFinalizedError();
-        await setTags(tx, id, tagIds);
+        if (tagIds) await setTags(tx, id, tagIds);
         return inserted;
       });
     } catch (err) {
       // The insert is transactional, so outputs here are never committed media.
       await cleanOutputs();
+      if (err instanceof ReplaceTargetGoneError) {
+        await release();
+        return replaceMissing();
+      }
       if (err instanceof AlreadyFinalizedError) {
         const now = await ownedUpload();
         if (now?.clipId) return sendFinalized(now.clipId);
@@ -408,8 +458,20 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     }
     // The clip is committed; tus file removal is best-effort (stale cleanup will catch leftovers).
     await removeTusFiles(config.dataDir, upload.id).catch((e) => req.log.error(e, 'upload cleanup failed'));
+    if (target) {
+      // A compression of the old video is pointless now (its result wouldn't be saved anyway).
+      app.transcoder.cancel(id);
+      await rename(tmpThumb, thumbPath).catch((e) => req.log.error(e, 'replacing the thumbnail failed'));
+      // An old embed copy shows the old video: none is better (the embed then uses the video).
+      if (!embedMade) await rm(embedPath, { force: true });
+      // Earlier video files go once viewers who are mid-play are done with them.
+      app.transcoder.removeLater(...Array.from({ length: version }, (_, v) => join(clipsDir, videoFileName(id, v))));
+    }
     if (row.transcodeState === 'queued') app.transcoder.kick();
-    const created = await getClip(db, row.id);
+    const created = await getClip(db, row.id, user.id);
+    if (target && created) {
+      return reply.code(200).send(toClip(created.clip, created.owner, config.baseUrl, created.views, created.tagged, created.favorite));
+    }
     return reply.code(201).send(toClip(row, user, config.baseUrl, 0, created?.tagged ?? []));
   });
 }

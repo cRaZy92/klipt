@@ -205,11 +205,14 @@ export class Transcoder {
     }
   }
 
-  /** Viewers who started the clip before the swap keep streaming the old file for a while. */
-  private removeLater(path: string): void {
+  /**
+   * Viewers who started the clip before a swap keep streaming the old file for a while. Also used
+   * when an upload replaces a clip's video.
+   */
+  removeLater(...paths: string[]): void {
     const t = setTimeout(() => {
       this.timers.delete(t);
-      rm(path, { force: true }).catch(() => {});
+      for (const path of paths) rm(path, { force: true }).catch(() => {});
     }, this.opts.oldFileGraceMs ?? 10 * 60 * 1000);
     t.unref();
     this.timers.add(t);

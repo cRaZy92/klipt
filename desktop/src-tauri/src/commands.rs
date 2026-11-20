@@ -572,6 +572,8 @@ struct Job {
     visibility: Visibility,
     /// Friends in the clip, by username.
     tagged: Vec<String>,
+    /// The server clip whose video this upload replaces, keeping its link.
+    replaces: Option<String>,
     auth: Auth,
     tools: Tools,
     data_dir: PathBuf,
@@ -589,6 +591,7 @@ pub fn upload_clip(
     title: String,
     visibility: Visibility,
     tagged: Option<Vec<String>>,
+    replace: Option<bool>,
 ) -> Result<()> {
     let title = clean_title(&title)?;
     let tagged: Vec<String> =
@@ -601,7 +604,13 @@ pub fn upload_clip(
     let auth = auth::load(&state.data_dir).ok_or(AppError::Unauthorized)?;
     let cache_dir = cache_dir(&app)?;
     let guard = uploads.try_begin(&id)?;
-    let job = Job { clip, title, visibility, tagged, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
+    // A screenshot's picture can't be swapped on the server: it goes up as a new one.
+    let replaces = if replace.unwrap_or(false) && clip.kind == crate::library::ClipKind::Clip {
+        clip.server_clip_id.clone()
+    } else {
+        None
+    };
+    let job = Job { clip, title, visibility, tagged, replaces, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
     tauri::async_runtime::spawn(async move {
         let id = job.clip.id.clone();
         let cache_dir = job.cache_dir.clone();
@@ -616,7 +625,7 @@ pub fn upload_clip(
         // Free the clip before telling the UI, so a "Try again" right away isn't refused.
         drop(guard);
         match result {
-            Ok(share_url) => {
+            Ok((share_url, replaced)) => {
                 let copied = match copy_text(&app, &share_url) {
                     Ok(()) => true,
                     Err(e) => {
@@ -636,7 +645,7 @@ pub fn upload_clip(
                 if let Err(e) = cleanup {
                     eprintln!("klipt: cleanup after the upload of clip {id} failed: {e}");
                 }
-                emit(&app, events::UPLOAD_DONE, serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied }));
+                emit(&app, events::UPLOAD_DONE, serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied, "replaced": replaced }));
             }
             Err(e) => {
                 eprintln!("klipt: upload of clip {id} failed: {e}");
@@ -693,7 +702,8 @@ pub(crate) fn upload_thumbnail_ms(clip: &Clip) -> Option<u64> {
     Some(export::joined_time(at, &kept))
 }
 
-async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
+/// The share link, and whether the upload replaced the video at an existing one.
+async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
     let clip = &job.clip;
     let id = clip.id.as_str();
     let server = job.auth.server_url.as_str();
@@ -741,8 +751,10 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
         visibility: job.visibility,
         thumbnail_ms: if screenshot { None } else { upload_thumbnail_ms(clip) },
         tagged: job.tagged.clone(),
+        replaces: job.replaces.clone(),
     };
     let server_clip = client.finalize(token, &request).await?;
+    let replaced = job.replaces.as_deref() == Some(server_clip.id.as_str());
     let visibility = match server_clip.visibility {
         Visibility::Feed => "feed",
         Visibility::Link => "link",
@@ -766,7 +778,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<String> {
             eprintln!("klipt: can't delete the uploaded export {}: {e}", exported.display());
         }
     }
-    Ok(server_clip.share_url)
+    Ok((server_clip.share_url, replaced))
 }
 
 fn set_upload_progress(app: &AppHandle, id: &str, progress: Option<(&str, u64)>) {

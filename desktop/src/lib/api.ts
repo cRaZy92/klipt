@@ -193,6 +193,8 @@ export interface UploadDone {
   id: string;
   shareUrl: string;
   copied: boolean;
+  /** The video at the clip's existing link was replaced (the link is the same). */
+  replaced: boolean;
 }
 
 export interface UploadFailed {
@@ -433,8 +435,9 @@ export const api = {
   /** Downloads your upload into the library (linked to the server copy). */
   downloadUpload: (id: string) => invoke<ClipView>("download_upload", { id }),
   copyShareLink: (id: string) => invoke<string>("copy_share_link", { id }),
-  uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = []) =>
-    invoke<void>("upload_clip", { id, title, visibility, tagged }),
+  /** `replace`: swap the video at the clip's existing link instead of making a new one. */
+  uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = [], replace = false) =>
+    invoke<void>("upload_clip", { id, title, visibility, tagged, replace }),
   /** The server's users, for tagging friends in a clip. */
   listUsers: () => invoke<{ username: string }[]>("list_users"),
   /** One page of the feed; `search` matches title, game and uploader on the server. */

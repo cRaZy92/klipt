@@ -62,7 +62,38 @@ fn req() -> FinalizeRequest {
         visibility: Visibility::Feed,
         thumbnail_ms: None,
         tagged: Vec::new(),
+        replaces: None,
     }
+}
+
+#[tokio::test]
+async fn finalize_sends_replaces_and_falls_back_to_a_new_clip_when_it_is_gone() {
+    let server = MockServer::start().await;
+    let mut gone = req();
+    gone.replaces = Some("zzzzzzzzzzzz".into());
+    let mut sent = serde_json::to_value(&gone).unwrap();
+    sent["gameName"] = serde_json::Value::Null;
+    Mock::given(method("POST")).and(path("/api/clips")).and(body_json(&sent))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({"error": "replace_missing"})))
+        .expect(1).mount(&server).await;
+    sent.as_object_mut().unwrap().remove("replaces");
+    Mock::given(method("POST")).and(path("/api/clips")).and(body_json(&sent))
+        .respond_with(ResponseTemplate::new(201).set_body_json(clip_json())).expect(1).mount(&server).await;
+    let client = ApiClient::new(&server.uri()).unwrap();
+    assert_eq!(client.finalize("tok", &gone).await.unwrap().id, "abcdefghijkl");
+}
+
+#[tokio::test]
+async fn finalize_404_for_the_upload_itself_is_not_retried() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/api/clips"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({"error": "not_found"})))
+        .expect(1).mount(&server).await;
+    let client = ApiClient::new(&server.uri()).unwrap();
+    let mut r = req();
+    r.replaces = Some("zzzzzzzzzzzz".into());
+    let err = client.finalize("tok", &r).await.unwrap_err();
+    assert_eq!(err, ApiError::Server { status: 404, code: "not_found".into() });
 }
 
 #[tokio::test]

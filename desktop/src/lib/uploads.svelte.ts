@@ -20,6 +20,8 @@ export interface UploadJob {
   message?: string;
   shareUrl?: string;
   copied?: boolean;
+  /** Done by replacing the video at the existing link. */
+  replaced?: boolean;
 }
 
 export const uploads = $state<Record<string, UploadJob>>({});
@@ -141,15 +143,21 @@ export async function uploadInTurn(list: { id: string; title: string }[], visibi
 
 /** Friends tagged in each upload, kept for retries. */
 const taggedFor: Record<string, string[]> = {};
+/** Uploads that replace the video at the clip's link, kept for retries. */
+const replaceFor: Record<string, boolean> = {};
 
-/** Starts (or retries, resuming where it stopped) an upload. `tagged` is kept for retries. */
-export async function startUpload(id: string, title: string, visibility: Visibility, tagged?: string[]) {
+/**
+ * Starts (or retries, resuming where it stopped) an upload. `tagged` and `replace` are kept for
+ * retries.
+ */
+export async function startUpload(id: string, title: string, visibility: Visibility, tagged?: string[], replace?: boolean) {
   stoppedByLogout.delete(id);
   requested[id] = { title, visibility };
   if (tagged) taggedFor[id] = tagged;
+  if (replace !== undefined) replaceFor[id] = replace;
   const previous = uploads[id];
   try {
-    await api.uploadClip(id, title, visibility, taggedFor[id] ?? []);
+    await api.uploadClip(id, title, visibility, taggedFor[id] ?? [], replaceFor[id] ?? false);
   } catch (e) {
     // "Already uploading" means the core is still on it: leave what's shown alone; its
     // progress events keep updating the card.
@@ -200,7 +208,10 @@ const meters = new Map<string, RateMeter>();
  * Mirrors the core's upload events. `unauthorized` is called when the login expired mid-upload:
  * the app shows the login screen, then calls `resumeAfterLogin`.
  */
-export function watchUploads(handlers: { unauthorized: () => void; done: (shareUrl: string, copied: boolean) => void }) {
+export function watchUploads(handlers: {
+  unauthorized: () => void;
+  done: (shareUrl: string, copied: boolean, replaced: boolean) => void;
+}) {
   onUnauthorized = handlers.unauthorized;
   const stops = [
     on("upload-progress", ({ id, sent, total, phase }) => {
@@ -216,13 +227,13 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
       }
       uploads[id] = { ...jobFor(id), status: phase, sent, total, rate };
     }),
-    on("upload-done", ({ id, shareUrl, copied }) => {
+    on("upload-done", ({ id, shareUrl, copied, replaced }) => {
       meters.delete(id);
       // It finished before the logout reached the server: it's uploaded after all.
       stoppedByLogout.delete(id);
       const job = uploads[id];
-      if (job) uploads[id] = { ...job, status: "done", shareUrl, copied };
-      if (!inBulk.has(id)) handlers.done(shareUrl, copied);
+      if (job) uploads[id] = { ...job, status: "done", shareUrl, copied, replaced };
+      if (!inBulk.has(id)) handlers.done(shareUrl, copied, replaced);
       settle(id);
     }),
     on("upload-failed", ({ id, code, message, stale }) => {

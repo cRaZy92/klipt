@@ -520,6 +520,40 @@ select.input option {
   gap: 0.5rem;
 }
 
+/* A row of mutually exclusive filter buttons (My clips and the Feed). */
+.segmented {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.9rem;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  color: var(--text);
+}
+
+.segmented button.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
 .clip-groups {
   display: flex;
   flex-direction: column;

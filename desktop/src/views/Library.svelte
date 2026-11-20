@@ -481,7 +481,7 @@
     </header>
 
     <div class="filters">
-      <div class="places" role="group" aria-label="Show clips">
+      <div class="segmented" role="group" aria-label="Show clips">
         {#each PLACES as p (p.value)}
           <button class:active={place === p.value} aria-pressed={place === p.value} onclick={() => (place = p.value)}>
             {#if p.icon}<Icon name={p.icon} size={15} />{/if}
@@ -489,7 +489,7 @@
           </button>
         {/each}
       </div>
-      <div class="places" role="group" aria-label="Clips or screenshots">
+      <div class="segmented" role="group" aria-label="Clips or screenshots">
         {#each MEDIA as m (m.value)}
           <button class:active={media === m.value} aria-pressed={media === m.value} onclick={() => (media = m.value)}>
             {m.label}
@@ -795,39 +795,6 @@
     align-items: center;
     gap: 0.5rem 1rem;
     margin-bottom: 0.75rem;
-  }
-
-  .places {
-    display: inline-flex;
-    gap: 0.2rem;
-    padding: 0.2rem;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
-  }
-
-  .places button {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.35rem 0.9rem;
-    border: none;
-    border-radius: 999px;
-    background: none;
-    color: var(--text-muted);
-    font: inherit;
-    font-size: 0.88rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .places button:hover {
-    color: var(--text);
-  }
-
-  .places button.active {
-    background: var(--surface-3);
-    color: var(--text);
   }
 
   .import-hint {

@@ -9,7 +9,7 @@
   import Avatar from "../components/Avatar.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
   import GameFilter from "../components/GameFilter.svelte";
-  import Icon from "../components/Icon.svelte";
+  import Icon, { type IconName } from "../components/Icon.svelte";
   import ProcessingPill from "../components/ProcessingPill.svelte";
   import SearchInput from "../components/SearchInput.svelte";
 
@@ -29,12 +29,12 @@
   let games = $state<GameCount[]>([]);
   let game = $state<string | null>(null);
   let search = $state("");
-  /** Only clips you're tagged in. */
-  let withMe = $state(false);
+  /** Every clip, only ones you're tagged in, or only ones you starred (like My clips' places). */
+  let show = $state<"all" | "withMe" | "favorites">("all");
+  const withMe = $derived(show === "withMe");
+  const favoritesOnly = $derived(show === "favorites");
   /** Only video clips or only screenshots. */
   let kind = $state<"clip" | "screenshot" | null>(null);
-  /** Only clips you starred. */
-  let favoritesOnly = $state(false);
   let cursor = $state<string | null>(null);
   let loading = $state(false);
   let loaded = $state(false);
@@ -134,9 +134,8 @@
   function clearFilters() {
     game = null;
     search = "";
-    withMe = false;
+    show = "all";
     kind = null;
-    favoritesOnly = false;
     void load();
   }
 
@@ -190,6 +189,18 @@
   $effect(() => {
     if (!active) playing = null;
   });
+
+  const SHOWS: { value: typeof show; label: string; title?: string; icon?: IconName }[] = [
+    { value: "all", label: "All" },
+    { value: "withMe", label: "I'm in it", title: "Clips your friends tagged you in" },
+    { value: "favorites", label: "Favorites", title: "Clips you starred", icon: "star" },
+  ];
+
+  const MEDIA: { value: typeof kind; label: string }[] = [
+    { value: null, label: "Everything" },
+    { value: "clip", label: "Clips" },
+    { value: "screenshot", label: "Screenshots" },
+  ];
 </script>
 
 <section class="page">
@@ -210,6 +221,36 @@
     </header>
 
     <div class="filters">
+      <div class="segmented" role="group" aria-label="Show clips">
+        {#each SHOWS as sh (sh.value)}
+          <button
+            class:active={show === sh.value}
+            aria-pressed={show === sh.value}
+            title={sh.title}
+            onclick={() => {
+              show = sh.value;
+              void load();
+            }}
+          >
+            {#if sh.icon}<Icon name={sh.icon} size={15} />{/if}
+            {sh.label}
+          </button>
+        {/each}
+      </div>
+      <div class="segmented" role="group" aria-label="Clips or screenshots">
+        {#each MEDIA as m (m.label)}
+          <button
+            class:active={kind === m.value}
+            aria-pressed={kind === m.value}
+            onclick={() => {
+              kind = m.value;
+              void load();
+            }}
+          >
+            {m.label}
+          </button>
+        {/each}
+      </div>
       <SearchInput
         bind:value={search}
         bind:input={searchInput}
@@ -219,43 +260,6 @@
         delay={300}
         onsearch={() => void load()}
       />
-      <button
-        class="with-me"
-        class:on={withMe}
-        aria-pressed={withMe}
-        title="Clips your friends tagged you in"
-        onclick={() => {
-          withMe = !withMe;
-          void load();
-        }}
-      >
-        I'm in it
-      </button>
-      <button
-        class="with-me"
-        class:on={favoritesOnly}
-        aria-pressed={favoritesOnly}
-        title="Clips you starred"
-        onclick={() => {
-          favoritesOnly = !favoritesOnly;
-          void load();
-        }}
-      >
-        <Icon name={favoritesOnly ? "starFilled" : "star"} size={14} /> Favorites
-      </button>
-      {#each [["clip", "Clips"], ["screenshot", "Screenshots"]] as const as [value, label] (value)}
-        <button
-          class="with-me"
-          class:on={kind === value}
-          aria-pressed={kind === value}
-          onclick={() => {
-            kind = kind === value ? null : value;
-            void load();
-          }}
-        >
-          {label}
-        </button>
-      {/each}
     </div>
 
     {#if games.length > 0}
@@ -389,27 +393,8 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.5rem 1rem;
     margin-bottom: 0.75rem;
-  }
-
-  .with-me {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.42rem 0.9rem;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--text-muted);
-    font: inherit;
-    font-size: 0.88rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .with-me:hover {
-    color: var(--text);
   }
 
   /* Favorite star: always shown when starred, on hover or focus otherwise (like My clips). */
@@ -442,12 +427,6 @@
 
   .star.on {
     color: #ffc53d;
-  }
-
-  .with-me.on {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--text);
   }
 
   .refresh-icon {

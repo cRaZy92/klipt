@@ -255,27 +255,48 @@
     }
   }
 
+  let recordPendingTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function setRecordPending(pending: boolean) {
+    clearTimeout(recordPendingTimer);
+    recordPending = pending;
+    // The recorder answers with `full-recording-started` / `-stopped` or `recorder-error`; it may
+    // first wait a few seconds for the recorder to get ready, and a second press then would cancel.
+    if (pending) recordPendingTimer = setTimeout(() => (recordPending = false), 20_000);
+  }
+
   async function toggleRecording() {
-    recordPending = true;
-    await act(() => api.toggleFullRecording());
-    // The answer arrives as `full-recording-started` / `-stopped`; this only debounces the button.
-    setTimeout(() => (recordPending = false), 1500);
+    setRecordPending(true);
+    if (!(await act(() => api.toggleFullRecording()))) setRecordPending(false);
   }
 
   $effect(() => {
     // A window opened mid-recording shows the running timer.
-    void api.getFullRecording().then((since) => (recordingSince = since)).catch(() => {});
+    let answered = false;
+    void api
+      .getFullRecording()
+      .then((since) => {
+        // An event that arrived meanwhile is newer than this answer.
+        if (!answered) recordingSince = since;
+      })
+      .catch(() => {});
     const stops = [
       on("full-recording-started", ({ startedAtMs }) => {
+        answered = true;
         recordingSince = startedAtMs;
-        recordPending = false;
+        setRecordPending(false);
       }),
       on("full-recording-stopped", () => {
+        answered = true;
         recordingSince = null;
-        recordPending = false;
+        setRecordPending(false);
       }),
+      on("recorder-error", () => setRecordPending(false)),
     ];
-    return () => stops.forEach((stop) => stop());
+    return () => {
+      clearTimeout(recordPendingTimer);
+      stops.forEach((stop) => stop());
+    };
   });
 
   $effect(() => {

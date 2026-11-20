@@ -25,6 +25,11 @@ pub const GAME_POLL_INTERVAL: Duration = Duration::from_secs(3);
 /// A save that hasn't produced a file by then is given up on, so saving isn't blocked forever.
 pub const SAVE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// A helper started this recently may not handle the start signal yet (gsr dies from SIGRTMIN
+/// until its handlers are in, and a quick KMS failure respawns it within this window).
+pub const FULL_RECORDING_READY_AFTER: Duration = Duration::from_secs(3);
+/// A full recording that hasn't reported starting by then is given up on.
+pub const FULL_RECORDING_START_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a stopping full recording may take to produce its file (also on quit).
 pub const FULL_RECORDING_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -130,10 +135,10 @@ enum State {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum FullPhase {
-    /// Asked for while the replay buffer wasn't running: starts once the backend has.
-    WaitingForBackend,
-    /// Asked the backend to start; `FullRecordingStarted` not seen yet.
-    Starting,
+    /// Asked for while the helper wasn't ready: starts at `start_at` (None = once it has started).
+    WaitingForBackend { start_at: Option<Duration> },
+    /// Asked the backend to start; `FullRecordingStarted` not seen yet by `deadline`.
+    Starting { deadline: Duration },
     Running,
     /// Asked the backend to stop; waiting for the file until `deadline`.
     Stopping { deadline: Duration },
@@ -269,12 +274,12 @@ impl Supervisor {
                 }
             }
             Input::Shutdown => match self.full.as_ref().map(|f| f.phase) {
-                Some(FullPhase::Starting | FullPhase::Running) => {
+                Some(FullPhase::Starting { .. } | FullPhase::Running) => {
                     self.shutting_down = true;
                     self.stop_full();
                 }
                 Some(FullPhase::Stopping { .. }) => self.shutting_down = true,
-                Some(FullPhase::WaitingForBackend) | None => {
+                Some(FullPhase::WaitingForBackend { .. }) | None => {
                     self.full = None;
                     self.stop_backend();
                     self.done = true;
@@ -298,17 +303,19 @@ impl Supervisor {
                 let _ = reply.send(self.full_recording_started_at_ms());
             }
             Input::Pause => match self.full.as_ref().map(|f| f.phase) {
-                Some(FullPhase::Starting | FullPhase::Running) => {
+                Some(FullPhase::Starting { .. } | FullPhase::Running) => {
                     self.pause_after_full = true;
                     self.stop_full();
                 }
                 Some(FullPhase::Stopping { .. }) => self.pause_after_full = true,
-                Some(FullPhase::WaitingForBackend) | None => {
+                Some(FullPhase::WaitingForBackend { .. }) | None => {
                     self.full = None;
                     self.pause_now();
                 }
             },
             Input::Resume => {
+                // Resumed before a pause that waited for the recording's file took effect.
+                self.pause_after_full = false;
                 if self.paused {
                     self.paused = false;
                     self.state = State::Idle;
@@ -328,7 +335,8 @@ impl Supervisor {
             _ => None,
         };
         let full_stop = match self.full.as_ref().map(|f| f.phase) {
-            Some(FullPhase::Stopping { deadline }) => Some(deadline),
+            Some(FullPhase::Stopping { deadline } | FullPhase::Starting { deadline }) => Some(deadline),
+            Some(FullPhase::WaitingForBackend { start_at }) => start_at,
             _ => None,
         };
         [restart, self.next_poll, self.pending_save.as_ref().map(|p| p.deadline), full_stop]
@@ -358,9 +366,9 @@ impl Supervisor {
 
     fn on_toggle_full(&mut self) {
         match self.full.as_ref().map(|f| f.phase) {
-            Some(FullPhase::Starting | FullPhase::Running) => return self.stop_full(),
+            Some(FullPhase::Starting { .. } | FullPhase::Running) => return self.stop_full(),
             Some(FullPhase::Stopping { .. }) => return,
-            Some(FullPhase::WaitingForBackend) => {
+            Some(FullPhase::WaitingForBackend { .. }) => {
                 // Pressed again before the recorder was up: never mind.
                 self.full = None;
                 self.emit(SupervisorEvent::FullRecordingStopped);
@@ -373,10 +381,15 @@ impl Supervisor {
         }
         let game = (self.deps.detect_game)();
         match self.state {
-            State::Running { .. } => self.start_full(game),
+            State::Running { since } if self.now() >= since + FULL_RECORDING_READY_AFTER => self.start_full(game),
+            State::Running { since } => {
+                let start_at = Some(since + FULL_RECORDING_READY_AFTER);
+                self.full = Some(FullRecording { phase: FullPhase::WaitingForBackend { start_at }, game, started_at_ms: None });
+            }
             State::Idle => {
                 // "While a game runs" with no game: start the recorder for this recording.
-                self.full = Some(FullRecording { phase: FullPhase::WaitingForBackend, game, started_at_ms: None });
+                let phase = FullPhase::WaitingForBackend { start_at: None };
+                self.full = Some(FullRecording { phase, game, started_at_ms: None });
                 self.restarts = 0;
                 self.start_backend();
                 if !self.is_recording() {
@@ -390,7 +403,10 @@ impl Supervisor {
 
     fn start_full(&mut self, game: Detected) {
         match self.backend.start_full_recording() {
-            Ok(()) => self.full = Some(FullRecording { phase: FullPhase::Starting, game, started_at_ms: None }),
+            Ok(()) => {
+                let phase = FullPhase::Starting { deadline: self.now() + FULL_RECORDING_START_TIMEOUT };
+                self.full = Some(FullRecording { phase, game, started_at_ms: None });
+            }
             Err(e) => {
                 eprintln!("klipt: can't start a full recording: {e}");
                 let had = self.full.take().is_some();
@@ -431,6 +447,22 @@ impl Supervisor {
         self.after_full();
     }
 
+    /// The backend never answered a start or stop of the full recording. gsr only toggles, so it
+    /// may be recording after all: a fresh helper puts it back in step (stopping finishes and
+    /// reports any file it has).
+    fn full_timed_out(&mut self, code: &str) {
+        if self.full.take().is_some() {
+            self.emit_error(code);
+            self.emit(SupervisorEvent::FullRecordingStopped);
+        }
+        let restarts_anyway = self.shutting_down || self.pause_after_full || self.pending_config.is_some();
+        if !restarts_anyway && self.is_recording() {
+            self.stop_backend();
+            self.begin();
+        }
+        self.after_full();
+    }
+
     /// Does what waited for the full recording to end: quit, pause or new settings.
     fn after_full(&mut self) {
         if self.shutting_down {
@@ -438,7 +470,11 @@ impl Supervisor {
             self.done = true;
         } else if self.pause_after_full {
             self.pause_after_full = false;
-            self.pending_config = None;
+            // Settings saved meanwhile still count; they apply on resume.
+            if let Some((cfg, mode)) = self.pending_config.take() {
+                self.cfg = cfg;
+                self.mode = mode;
+            }
             self.pause_now();
         } else if let Some((cfg, mode)) = self.pending_config.take() {
             self.apply_config(cfg, mode);
@@ -571,14 +607,24 @@ impl Supervisor {
 
     fn on_tick(&mut self) {
         let now = self.now();
-        if let Some(FullPhase::Stopping { deadline }) = self.full.as_ref().map(|f| f.phase) {
-            if deadline <= now {
+        match self.full.as_ref().map(|f| f.phase) {
+            Some(FullPhase::Stopping { deadline }) if deadline <= now => {
                 eprintln!("klipt: the full recording didn't produce a file within {FULL_RECORDING_STOP_TIMEOUT:?}");
-                self.end_full("save_failed");
+                self.full_timed_out("save_failed");
                 if self.done {
                     return;
                 }
             }
+            Some(FullPhase::Starting { deadline }) if deadline <= now => {
+                eprintln!("klipt: the full recording didn't start within {FULL_RECORDING_START_TIMEOUT:?}");
+                self.full_timed_out("full_recording_failed");
+            }
+            Some(FullPhase::WaitingForBackend { start_at: Some(at) }) if at <= now && self.is_recording() => {
+                if let Some(full) = self.full.take() {
+                    self.start_full(full.game);
+                }
+            }
+            _ => {}
         }
         if self.pending_save.as_ref().is_some_and(|p| p.deadline <= now) {
             eprintln!("klipt: the save didn't produce a file within {SAVE_TIMEOUT:?}");
@@ -626,9 +672,12 @@ impl Supervisor {
         match event {
             RecorderEvent::Started { encoder } => {
                 self.emit(SupervisorEvent::Recording { encoder });
-                if let Some(FullRecording { phase: FullPhase::WaitingForBackend, game, .. }) = &self.full {
-                    let game = game.clone();
-                    self.start_full(game);
+                // Signalled once the helper had time to get ready (see FULL_RECORDING_READY_AFTER).
+                let ready_at = self.now() + FULL_RECORDING_READY_AFTER;
+                if let Some(full) = self.full.as_mut() {
+                    if let FullPhase::WaitingForBackend { start_at } = &mut full.phase {
+                        *start_at = Some(ready_at);
+                    }
                 }
             }
             RecorderEvent::Saved { path, duration_ms } => {
@@ -654,7 +703,7 @@ impl Supervisor {
             }
             RecorderEvent::Busy => self.emit(SupervisorEvent::SaveBusy),
             RecorderEvent::FullRecordingStarted => match self.full.as_mut() {
-                Some(full) if full.phase == FullPhase::Starting => {
+                Some(full) if matches!(full.phase, FullPhase::Starting { .. }) => {
                     let started_at_ms = (self.deps.wall_clock_ms)();
                     full.phase = FullPhase::Running;
                     full.started_at_ms = Some(started_at_ms);
@@ -689,7 +738,7 @@ impl Supervisor {
                 eprintln!("klipt: recorder error {code}: {message}");
                 if code == "recording_failed" {
                     // klipt-recorder: the full recording couldn't start or be finished.
-                    let starting = self.full.as_ref().is_some_and(|f| f.phase == FullPhase::Starting);
+                    let starting = self.full.as_ref().is_some_and(|f| matches!(f.phase, FullPhase::Starting { .. }));
                     self.end_full(if starting { "full_recording_failed" } else { "save_failed" });
                 } else if code == "save_failed" {
                     self.fail_pending_save();
@@ -840,6 +889,7 @@ mod tests {
         stops: usize,
         full_starts: usize,
         full_stops: usize,
+        last_cfg: Option<RecordConfig>,
         /// Sender of the newest `events()` receiver, so a test can play the helper.
         events: Option<Sender<RecorderEvent>>,
         /// When set, `start` fails with this error.
@@ -849,9 +899,10 @@ mod tests {
     struct FakeBackend(Arc<Mutex<Calls>>);
 
     impl RecorderBackend for FakeBackend {
-        fn start(&mut self, _cfg: &RecordConfig) -> Result<()> {
+        fn start(&mut self, cfg: &RecordConfig) -> Result<()> {
             let mut calls = self.0.lock().unwrap();
             calls.starts += 1;
+            calls.last_cfg = Some(cfg.clone());
             calls.start_error.map_or(Ok(()), |e| Err(e()))
         }
         fn save(&mut self) -> Result<()> {
@@ -1047,9 +1098,75 @@ mod tests {
         let mut s = w.supervisor(RecordingMode::Always);
         s.begin();
         backend(&mut s, RecorderEvent::Started { encoder: "h264".into() });
+        w.clock.advance(FULL_RECORDING_READY_AFTER);
         assert!(s.handle(Input::ToggleFullRecording));
         backend(&mut s, RecorderEvent::FullRecordingStarted);
         s
+    }
+
+    #[test]
+    fn a_recorder_that_just_started_gets_time_before_the_signal() {
+        // gsr dies from SIGRTMIN until it has installed its handlers.
+        let w = World::new();
+        let mut s = w.supervisor(RecordingMode::Always);
+        s.begin();
+        backend(&mut s, RecorderEvent::Started { encoder: "h264".into() });
+        assert!(s.handle(Input::ToggleFullRecording));
+        assert_eq!(w.full_starts(), 0);
+        assert_eq!(s.next_deadline(), Some(FULL_RECORDING_READY_AFTER));
+        w.clock.advance(FULL_RECORDING_READY_AFTER);
+        s.handle(Input::Tick);
+        assert_eq!(w.full_starts(), 1);
+    }
+
+    #[test]
+    fn a_start_that_never_starts_restarts_the_recorder() {
+        let w = World::new();
+        let mut s = w.supervisor(RecordingMode::Always);
+        s.begin();
+        w.clock.advance(FULL_RECORDING_READY_AFTER);
+        s.handle(Input::ToggleFullRecording);
+        assert_eq!(w.full_starts(), 1);
+        w.clock.advance(FULL_RECORDING_START_TIMEOUT);
+        s.handle(Input::Tick);
+        assert_eq!(w.error_codes(), ["full_recording_failed"]);
+        assert!(w.events().contains(&SupervisorEvent::FullRecordingStopped));
+        // gsr may have started after all: a fresh helper puts the toggle back in step.
+        assert_eq!((w.stops(), w.starts()), (1, 2));
+    }
+
+    #[test]
+    fn a_stop_timeout_restarts_the_recorder() {
+        let w = World::new();
+        let mut s = recording(&w);
+        s.handle(Input::ToggleFullRecording);
+        w.clock.advance(FULL_RECORDING_STOP_TIMEOUT);
+        s.handle(Input::Tick);
+        assert_eq!(w.error_codes(), ["save_failed"]);
+        assert_eq!((w.stops(), w.starts()), (1, 2));
+    }
+
+    #[test]
+    fn settings_then_pause_keep_the_new_settings() {
+        let w = World::new();
+        let mut s = recording(&w);
+        s.handle(Input::Configure(RecordConfig { fps: 30, ..cfg() }, RecordingMode::Always));
+        s.handle(Input::Pause);
+        backend(&mut s, recording_saved("/clips/Recordings/Video_1.mp4"));
+        assert!(s.is_paused());
+        s.handle(Input::Resume);
+        assert_eq!(w.calls.lock().unwrap().last_cfg.as_ref().map(|c| c.fps), Some(30));
+    }
+
+    #[test]
+    fn resume_while_stopping_cancels_the_pause() {
+        let w = World::new();
+        let mut s = recording(&w);
+        s.handle(Input::Pause);
+        s.handle(Input::Resume);
+        backend(&mut s, recording_saved("/clips/Recordings/Video_1.mp4"));
+        assert!(!s.is_paused());
+        assert_eq!(w.stops(), 0);
     }
 
     #[test]
@@ -1113,6 +1230,9 @@ mod tests {
         assert_eq!(w.starts(), 1);
         assert_eq!(w.full_starts(), 0);
         backend(&mut s, RecorderEvent::Started { encoder: "h264".into() });
+        assert_eq!(w.full_starts(), 0, "not before the recorder is ready");
+        w.clock.advance(FULL_RECORDING_READY_AFTER);
+        s.handle(Input::Tick);
         assert_eq!(w.full_starts(), 1);
         backend(&mut s, RecorderEvent::FullRecordingStarted);
         // Still no game: polls don't stop it while it records.
@@ -1148,6 +1268,8 @@ mod tests {
         s.begin();
         assert_eq!(w.starts(), 1);
         backend(&mut s, RecorderEvent::Started { encoder: "h264".into() });
+        w.clock.advance(FULL_RECORDING_READY_AFTER);
+        s.handle(Input::Tick);
         s.handle(Input::ToggleFullRecording);
         backend(&mut s, RecorderEvent::FullRecordingStarted);
         *w.game_running.lock().unwrap() = false;

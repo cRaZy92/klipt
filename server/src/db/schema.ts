@@ -71,6 +71,11 @@ export const clips = pgTable(
     transcodeState: text('transcode_state', { enum: ['queued', 'running', 'done', 'skipped', 'failed'] }),
     /** Bumped each time the video file is replaced: version n > 0 is stored as `<id>.v<n>.mp4`. */
     mediaVersion: integer('media_version').notNull().default(0),
+    /**
+     * The embed settings (`EMBED_VERSION`) that made the clip's `<id>.embed.mp4`; 0 for copies made
+     * before this was recorded. A lower one than current is remade by the embed backfill.
+     */
+    embedVersion: integer('embed_version').notNull().default(0),
     /** The uploaded file's size, once a compression ran (sizeBytes is then the stored file's). */
     originalBytes: bigint('original_bytes', { mode: 'number' }),
     transcodeError: text('transcode_error'),

@@ -11,7 +11,7 @@ import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../
 import { assertPlayable, makeThumbnail, MediaError, probeImage, probeVideo, remuxFaststart, toPng } from './media.js';
 import { newClipId } from './ids.js';
 import { embedFileName, MEDIA_FILE, mediaFileName } from './files.js';
-import { createEmbed } from './embed.js';
+import { createEmbed, EMBED_VERSION } from './embed.js';
 import {
   getClip,
   getUserStorage,
@@ -259,7 +259,10 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       if (!found) return reply.code(404).send({ error: 'not_found' });
       reply.header('content-disposition', downloadDisposition(found.clip.title, file.endsWith('.png') ? 'png' : 'mp4'));
     }
-    reply.header('cache-control', 'public, max-age=31536000, immutable');
+    // A video or picture never changes under its name; an embed copy is remade in place when the
+    // embed settings change (EMBED_VERSION), so caches must come back for it.
+    const immutable = !file.endsWith('.embed.mp4');
+    reply.header('cache-control', immutable ? 'public, max-age=31536000, immutable' : 'public, max-age=3600');
     return reply.sendFile(file, { cacheControl: false });
   });
 
@@ -340,6 +343,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       const image = await probeImage(source);
       let info: { durationMs: number; width: number; height: number };
       let size: number;
+      let embedMade = false;
       if (image) {
         info = { durationMs: 0, ...image };
         await toPng(source, tmpImage);
@@ -353,7 +357,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         await makeThumbnail(tmpVideo, tmpThumb, info.durationMs, body.thumbnailMs);
         size = (await stat(tmpVideo)).size;
         // Made now, not queued: the share link is handed out the moment this request answers.
-        await createEmbed({ clipsDir, clip: { id, ...info }, source: tmpVideo, threads: EMBED_THREADS, log: req.log });
+        embedMade = await createEmbed({ clipsDir, clip: { id, ...info }, source: tmpVideo, threads: EMBED_THREADS, log: req.log });
         await rename(tmpVideo, videoPath);
       }
       await rename(tmpThumb, thumbPath);
@@ -375,6 +379,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
             width: info.width,
             height: info.height,
             sizeBytes: size,
+            embedVersion: embedMade ? EMBED_VERSION : 0,
           })
           .returning()) as [ClipRow];
         const tomb = await tx

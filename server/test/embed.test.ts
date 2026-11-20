@@ -1,11 +1,14 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EmbedBackfill, embedPlan } from '../src/clips/embed.js';
+import { EMBED_VERSION, EmbedBackfill, embedPlan } from '../src/clips/embed.js';
+import { embedFileName } from '../src/clips/files.js';
 import { probeVideo } from '../src/clips/media.js';
+import { clips } from '../src/db/schema.js';
 import { createUser, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
 
 /** A 2 s H.264 + AAC clip at the given size and frame rate. */
@@ -20,8 +23,15 @@ async function makeVideo(dir: string, size: string, rate: number): Promise<strin
 }
 
 describe('embedPlan', () => {
-  it('a short 1080p clip gets a 720p copy at the full bitrate', () => {
-    expect(embedPlan({ width: 1920, height: 1080, durationMs: 12_000 })).toEqual({ width: 1280, height: 720, videoKbps: 2500 });
+  it('a short 1080p clip gets a 720p copy that spends its whole 8 MB on picture', () => {
+    const plan = embedPlan({ width: 1920, height: 1080, durationMs: 12_000 })!;
+    expect(plan).toMatchObject({ width: 1280, height: 720 });
+    expect(plan.videoKbps).toBeGreaterThan(5000);
+    expect(((plan.videoKbps + 96) * 12) / 8 / 1024).toBeLessThan(8 * 1024 * 0.96);
+  });
+
+  it('a very short clip stops at a bitrate past which a 720p copy looks no better', () => {
+    expect(embedPlan({ width: 1920, height: 1080, durationMs: 3000 })).toMatchObject({ videoKbps: 6000 });
   });
 
   it('a longer clip gets a lower bitrate and a smaller picture, so the copy stays about 8 MB', () => {
@@ -74,7 +84,7 @@ describe('embed copies', () => {
 
   it('an upload gets its embed copy right away, and the share page points Discord at it', async () => {
     const { id } = await upload(await makeVideo(dir, '1280x720', 60));
-    const file = join(clipsDir(), `${id}.embed.mp4`);
+    const file = join(clipsDir(), embedFileName(id));
     expect(existsSync(file)).toBe(true);
     const info = await probeVideo(file);
     expect(info).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac', width: 1280, height: 720 });
@@ -84,39 +94,82 @@ describe('embed copies', () => {
     expect(bytes.indexOf('moov')).toBeLessThan(bytes.indexOf('mdat'));
 
     const page = await t.app.inject({ url: `/c/${id}` });
-    expect(page.body).toContain(`<meta property="og:video" content="http://localhost/media/${id}.embed.mp4"`);
+    expect(page.body).toContain(`<meta property="og:video" content="http://localhost/media/${embedFileName(id)}"`);
     expect(page.body).toContain('<meta property="og:video:width" content="1280"');
     // The page's own player keeps the full video.
     expect(page.body).toContain(`src="http://localhost/media/${id}.mp4"`);
 
-    const media = await t.app.inject({ url: `/media/${id}.embed.mp4` });
+    const media = await t.app.inject({ url: `/media/${embedFileName(id)}` });
     expect(media.statusCode).toBe(200);
     expect(media.headers['content-type']).toBe('video/mp4');
   });
 
   it('without a copy the share page embeds the full video', async () => {
     const { id } = await upload(await makeVideo(dir, '640x360', 30));
-    await rm(join(clipsDir(), `${id}.embed.mp4`));
+    await rm(join(clipsDir(), embedFileName(id)));
     const page = await t.app.inject({ url: `/c/${id}` });
     expect(page.body).toContain(`<meta property="og:video" content="http://localhost/media/${id}.mp4"`);
     // A missing copy is a 404, never the full video under its name.
-    expect((await t.app.inject({ url: `/media/${id}.embed.mp4` })).statusCode).toBe(404);
+    expect((await t.app.inject({ url: `/media/${embedFileName(id)}` })).statusCode).toBe(404);
   });
 
   it('deleting a clip removes its embed copy', async () => {
     const { id } = await upload(await makeVideo(dir, '640x360', 30));
     const del = await t.app.inject({ method: 'DELETE', url: `/api/clips/${id}`, headers: aliceWeb });
     expect(del.statusCode).toBe(204);
-    expect(existsSync(join(clipsDir(), `${id}.embed.mp4`))).toBe(false);
+    expect(existsSync(join(clipsDir(), embedFileName(id)))).toBe(false);
   });
 
   it('the backfill makes copies for clips that have none', async () => {
     const { id } = await upload(await makeVideo(dir, '640x360', 30));
-    await rm(join(clipsDir(), `${id}.embed.mp4`));
+    await rm(join(clipsDir(), embedFileName(id)));
     const backfill = new EmbedBackfill({ db: t.db, clipsDir: clipsDir(), threads: 2, log: t.app.log });
     backfill.start();
     await backfill.idle();
-    expect(existsSync(join(clipsDir(), `${id}.embed.mp4`))).toBe(true);
+    expect(existsSync(join(clipsDir(), embedFileName(id)))).toBe(true);
+  });
+
+  const embedVersionOf = async (id: string) =>
+    (await t.db.select({ v: clips.embedVersion }).from(clips).where(eq(clips.id, id)))[0]!.v;
+  const runBackfill = async () => {
+    const backfill = new EmbedBackfill({ db: t.db, clipsDir: clipsDir(), threads: 2, log: t.app.log });
+    backfill.start();
+    await backfill.idle();
+  };
+
+  it('an upload records which embed settings made its copy', async () => {
+    const { id } = await upload(await makeVideo(dir, '640x360', 30));
+    expect(await embedVersionOf(id)).toBe(EMBED_VERSION);
+  });
+
+  it('the backfill remakes a copy made by older embed settings, serving the old one meanwhile', async () => {
+    const { id } = await upload(await makeVideo(dir, '640x360', 30));
+    const file = join(clipsDir(), embedFileName(id));
+    await writeFile(file, 'old copy');
+    await t.db.update(clips).set({ embedVersion: 0 }).where(eq(clips.id, id));
+    // Until the new copy is made, the share page keeps embedding the old one, never the full video.
+    const page = await t.app.inject({ url: `/c/${id}` });
+    expect(page.body).toContain(`<meta property="og:video" content="http://localhost/media/${embedFileName(id)}"`);
+
+    await runBackfill();
+    expect(await probeVideo(file)).toMatchObject({ videoCodec: 'h264', width: 640, height: 360 });
+    expect(await embedVersionOf(id)).toBe(EMBED_VERSION);
+  });
+
+  it('the backfill leaves copies made by the current settings alone', async () => {
+    const { id } = await upload(await makeVideo(dir, '640x360', 30));
+    const file = join(clipsDir(), embedFileName(id));
+    await writeFile(file, 'current copy');
+    await runBackfill();
+    expect(await readFile(file, 'utf8')).toBe('current copy');
+  });
+
+  it('a copy is cached briefly, since a settings change replaces it under the same URL', async () => {
+    const { id } = await upload(await makeVideo(dir, '640x360', 30));
+    const res = await t.app.inject({ url: `/media/${embedFileName(id)}` });
+    expect(res.headers['cache-control']).toBe('public, max-age=3600');
+    // The full video never changes under its name.
+    expect((await t.app.inject({ url: `/media/${id}.mp4` })).headers['cache-control']).toContain('immutable');
   });
 });
 
@@ -148,6 +201,6 @@ describe('embed copies with compression on', () => {
     await t.app.embedBackfill!.idle();
     await t.app.transcoder.start(); // what a restart does: sweep leftover files
     await t.app.transcoder.idle();
-    expect(existsSync(join(t.dataDir, 'clips', `${id}.embed.mp4`))).toBe(true);
+    expect(existsSync(join(t.dataDir, 'clips', embedFileName(id)))).toBe(true);
   });
 });

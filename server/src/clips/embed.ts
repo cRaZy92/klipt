@@ -14,9 +14,19 @@ import { encodeEmbed, probeVideo } from './media.js';
  * about a second.
  */
 export const EMBED_TARGET_BYTES = 8 * 1024 * 1024;
+/**
+ * Bump whenever the copy's settings change: clips record the version their copy was made with,
+ * and at start the backfill remakes every copy made with an older one, replacing it in place.
+ * 1: video capped at 2.5 Mbps. 2: capped at 6 Mbps.
+ */
+export const EMBED_VERSION = 2;
 /** A copy that still came out bigger than this (bitrate overshoot) isn't used. */
 export const EMBED_MAX_BYTES = 10 * 1024 * 1024;
-const MAX_VIDEO_KBPS = 2500;
+/**
+ * Short clips spend the whole size budget on picture: game footage at 30 fps is blocky below
+ * ~5 Mbps at 720p. Past this a 720p copy looks no better, it just downloads slower.
+ */
+const MAX_VIDEO_KBPS = 6000;
 /** Below this the picture is too poor to be worth it: long clips embed with their thumbnail only. */
 const MIN_VIDEO_KBPS = 500;
 const AUDIO_KBPS = 96;
@@ -49,7 +59,7 @@ export function embedPlan(clip: { width: number; height: number; durationMs: num
 }
 
 /**
- * Makes `<id>.embed.mp4` from `source`. Returns whether there is one now; failures are logged and
+ * Makes `<id>.embed.mp4` from `source`, replacing an older copy in one step. Returns whether there is one now; failures are logged and
  * never thrown, because a missing copy only means the embed falls back to the full video.
  */
 export async function createEmbed(opts: {
@@ -93,8 +103,9 @@ export async function hasEmbed(clipsDir: string, id: string): Promise<boolean> {
 }
 
 /**
- * Makes embed copies for clips uploaded before they existed, newest first, one at a time, in the
- * background. Clips too long for a copy are passed over; a failed one is tried again next start.
+ * Makes embed copies for clips that have none or one made by older settings (EMBED_VERSION),
+ * newest first, one at a time, in the background. An old copy is served until its replacement is
+ * ready. Clips too long for a copy are passed over; a failed one is tried again next start.
  */
 export class EmbedBackfill {
   private stopped = false;
@@ -119,18 +130,31 @@ export class EmbedBackfill {
   private async run(): Promise<void> {
     const { db, clipsDir, log } = this.opts;
     const rows = await db
-      .select({ id: clips.id, kind: clips.kind, mediaVersion: clips.mediaVersion, width: clips.width, height: clips.height, durationMs: clips.durationMs })
+      .select({
+        id: clips.id,
+        kind: clips.kind,
+        mediaVersion: clips.mediaVersion,
+        embedVersion: clips.embedVersion,
+        width: clips.width,
+        height: clips.height,
+        durationMs: clips.durationMs,
+      })
       .from(clips)
       .where(eq(clips.kind, 'clip'))
       .orderBy(desc(clips.createdAt), desc(clips.id));
     let made = 0;
     for (const row of rows) {
       if (this.stopped) return;
-      if (!embedPlan(row) || (await hasEmbed(clipsDir, row.id))) continue;
+      if (!embedPlan(row)) continue;
+      if (row.embedVersion >= EMBED_VERSION && (await hasEmbed(clipsDir, row.id))) continue;
       const source = join(clipsDir, mediaFileName(row));
       if (!(await stat(source).catch(() => null))) continue; // deleted meanwhile
       if (!(await createEmbed({ clipsDir, clip: row, source, threads: this.opts.threads, log }))) continue;
-      const [still] = await db.select({ id: clips.id }).from(clips).where(eq(clips.id, row.id));
+      const [still] = await db
+        .update(clips)
+        .set({ embedVersion: EMBED_VERSION })
+        .where(eq(clips.id, row.id))
+        .returning({ id: clips.id });
       if (still) made++;
       else await rm(join(clipsDir, embedFileName(row.id)), { force: true }); // deleted while encoding
     }

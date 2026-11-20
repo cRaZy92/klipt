@@ -1,0 +1,1 @@
+ALTER TABLE "clips" ADD COLUMN "embed_version" integer DEFAULT 0 NOT NULL;

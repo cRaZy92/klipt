@@ -103,8 +103,10 @@
 
   const ticks = $derived(rulerTicks(duration));
   const shading = $derived(laneShading(duration, trim, pieces));
-  /** Ruler, video, zoom, subtitles, one row per track: the playhead spans all but the first two. */
-  const rows = $derived(["auto", "auto", "auto", "auto", ...tracks.map(() => "auto")].join(" "));
+  /** The Zoom and Subtitles rows show only while they have something on them. */
+  const extraRows = $derived((zooms.length > 0 ? 1 : 0) + (subtitles.length > 0 ? 1 : 0));
+  /** Ruler, video, zoom and subtitles (when used), one row per track: the playhead spans all but the first two. */
+  const rows = $derived(["auto", "auto", ...Array(extraRows).fill("auto"), ...tracks.map(() => "auto")].join(" "));
 
   const level = (v: number) => (v === 0 ? "Off" : `${v}%`);
 
@@ -311,6 +313,7 @@
   </div>
   <div class="lane video">{@render video()}</div>
 
+  {#if zooms.length > 0}
   <div class="label zoom-label">
     <span class="name">Zoom</span>
   </div>
@@ -331,9 +334,6 @@
       {#each shading.dims as d, i (i)}
         <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
       {/each}
-      {#if zooms.length === 0}
-        <span class="zoom-hint">Press <kbd>Z</kbd> to zoom in at the playhead</span>
-      {/if}
       {#each zooms as z, i (i)}
         <!-- A pointer target for placing the zoom in time; Enter picks it from the keyboard. -->
         <div
@@ -380,6 +380,9 @@
     </div>
   </div>
 
+  {/if}
+
+  {#if subtitles.length > 0}
   <div class="label zoom-label">
     <span class="name">Subtitles</span>
   </div>
@@ -400,9 +403,6 @@
       {#each shading.dims as d, i (i)}
         <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
       {/each}
-      {#if subtitles.length === 0}
-        <span class="zoom-hint">Press <kbd>T</kbd> to add a subtitle at the playhead</span>
-      {/if}
       {#each subtitles as s, i (i)}
         <!-- A pointer target for placing the subtitle in time; Enter edits its text. -->
         <div
@@ -448,6 +448,8 @@
       {/each}
     </div>
   </div>
+
+  {/if}
 
   {#each tracks as t, i (t.key)}
     <div class="label" class:last={i === tracks.length - 1}>
@@ -506,7 +508,7 @@
 
 
   {#if tracks.length}
-    <div class="playhead-span" style:grid-row="3 / span {tracks.length + 2}" aria-hidden="true">
+    <div class="playhead-span" style:grid-row="3 / span {tracks.length + extraRows}" aria-hidden="true">
       <div class="playhead" style:left="{msToX(position, duration, 100)}%"></div>
     </div>
   {/if}
@@ -678,26 +680,6 @@
     touch-action: none;
   }
 
-  .zoom-hint {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-faint);
-    font-size: 0.75rem;
-    pointer-events: none;
-  }
-
-  .zoom-hint kbd {
-    margin: 0 0.3rem;
-    padding: 0 0.35rem;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--surface-2);
-    color: var(--text-muted);
-    font: inherit;
-  }
 
   .zoom-block {
     position: absolute;

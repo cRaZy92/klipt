@@ -4,6 +4,7 @@
   import { neighbors } from "../lib/clipNav";
   import { feedNeedsRefresh, type FeedLoaded } from "../lib/feedRefresh";
   import { formatDuration, groupByDay, hueOf, relativeDate, viewsLabel } from "../lib/format";
+  import { stickyTop } from "../lib/stickyTop";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "../components/Avatar.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
@@ -192,7 +193,7 @@
 </script>
 
 <section class="page">
-  <div class="page-top">
+  <div class="page-top" use:stickyTop>
     <header class="page-head">
       <div>
         <h1>Feed</h1>
@@ -459,6 +460,7 @@
 
   .card {
     position: relative;
+    isolation: isolate;
     overflow: hidden;
     border: 1px solid var(--border);
     border-radius: var(--radius);

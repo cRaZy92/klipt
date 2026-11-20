@@ -10,6 +10,7 @@
   import { keepShown, selectClick } from "../lib/selection";
   import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
   import { WHERE, gameChips, gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
+  import { stickyTop } from "../lib/stickyTop";
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
@@ -445,7 +446,7 @@
 </script>
 
 <section class="page">
-  <div class="page-top">
+  <div class="page-top" use:stickyTop>
     <header class="page-head">
       <div>
         <h1>My clips</h1>

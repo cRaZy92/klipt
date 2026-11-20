@@ -18,7 +18,13 @@
   transform: translateY(-2px);
 }
 
-/* Its menu must draw over the neighbouring cards. */
+/* A card keeps its badges and buttons' z-indexes to itself, so they slide under the pinned day
+   heading instead of drawing over it. */
+.clip-card {
+  isolation: isolate;
+}
+
+/* Its menu must draw over the neighbouring cards (and the day heading). */
 .clip-card.menu-open {
   z-index: 5;
 }

@@ -424,6 +424,8 @@ export const api = {
   setClipFavorite: (id: string, favorite: boolean) => invoke<void>("set_clip_favorite", { id, favorite }),
   deleteClip: (id: string, deleteFile: boolean) => invoke<void>("delete_clip", { id, deleteFile }),
   showInFolder: (id: string) => invoke<void>("show_in_folder", { id }),
+  /** Plays the clip's picture with no sound (the card's hover preview). */
+  clipPreviewUrl: (id: string) => invoke<string>("clip_preview_url", { id }),
   /** All your uploads, newest first; null when not logged in. */
   myUploads: () => invoke<MyUpload[] | null>("my_uploads"),
   /** How much server storage your uploads use. */

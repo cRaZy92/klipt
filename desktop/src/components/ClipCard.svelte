@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fileUrl, type ClipView } from "../lib/api";
+  import { api, fileUrl, type ClipView } from "../lib/api";
   import { editedLength } from "../lib/cuts";
   import { WHERE } from "../lib/myClips";
   import { formatDuration, hueOf, relativeDate } from "../lib/format";
@@ -80,6 +80,47 @@
   const length = $derived(formatDuration(editedLength(clip, clip.durationMs)));
   const recorded = $derived(formatDuration(clip.durationMs));
 
+  // Hover preview: resting on the picture plays the clip muted (its kept part, looping), to find
+  // "the one where…" without opening it. Not for screenshots, missing files, or while selecting.
+  const HOVER_DELAY_MS = 450;
+  let previewUrl = $state<string | null>(null);
+  let previewPlaying = $state(false);
+  let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+  const keptFrom = $derived((clip.trimStartMs ?? 0) / 1000);
+  const keptTo = $derived(clip.trimEndMs === null ? null : clip.trimEndMs / 1000);
+
+  function startHover() {
+    if (clip.kind === "screenshot" || clip.fileMissing || selecting || busy) return;
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(async () => {
+      try {
+        const url = await api.clipPreviewUrl(clip.id);
+        if (hoverTimer !== undefined) previewUrl = url;
+      } catch {
+        // No preview; the picture stays.
+      }
+    }, HOVER_DELAY_MS);
+  }
+
+  function stopHover() {
+    clearTimeout(hoverTimer);
+    hoverTimer = undefined;
+    previewUrl = null;
+    previewPlaying = false;
+  }
+
+  $effect(() => () => clearTimeout(hoverTimer));
+
+  function previewLoaded(e: Event) {
+    (e.currentTarget as HTMLVideoElement).currentTime = keptFrom;
+  }
+
+  /** Loops the kept part instead of the whole recording. */
+  function previewTime(e: Event) {
+    const video = e.currentTarget as HTMLVideoElement;
+    if (keptTo !== null && video.currentTime >= keptTo) video.currentTime = keptFrom;
+  }
+
   function closeMenuOutside(e: MouseEvent) {
     if (menuOpen && !menuWrap?.contains(e.target as Node)) menuOpen = false;
   }
@@ -114,8 +155,9 @@
   {selected ? "Unselect" : "Select"}
 {/snippet}
 
-<article class="card clip-card rise" class:missing={clip.fileMissing} class:menu-open={menuOpen} class:selected class:selecting style:--i={index} {oncontextmenu}>
-  <div class="thumb">
+<article class="card clip-card rise" class:missing={clip.fileMissing} class:menu-open={menuOpen} class:selected class:selecting class:previewing={previewPlaying} style:--i={index} {oncontextmenu}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="thumb" onmouseenter={startHover} onmouseleave={stopHover}>
     {#if onselect}
       <button
         class="select"
@@ -132,6 +174,21 @@
       <img src={thumb} alt="" loading="lazy" decoding="async" onerror={() => (thumbFailed = true)} />
     {:else}
       <div class="placeholder"><Icon name={clip.fileMissing ? "alert" : "film"} size={30} /></div>
+    {/if}
+    {#if previewUrl}
+      <video
+        class="preview"
+        class:shown={previewPlaying}
+        src={previewUrl}
+        muted
+        autoplay
+        loop
+        playsinline
+        disablepictureinpicture
+        onloadedmetadata={previewLoaded}
+        onplaying={() => (previewPlaying = true)}
+        ontimeupdate={previewTime}
+      ></video>
     {/if}
     {#if onview && !clip.fileMissing}
       <button class="open" onclick={(e) => open(e, onview)} aria-label="View {clip.title}">

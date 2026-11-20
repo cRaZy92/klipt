@@ -535,6 +535,18 @@ pub fn show_in_folder(app: AppHandle, state: State<'_, AppState>, id: String) ->
     app.opener().reveal_item_in_dir(&clip.path).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
 }
 
+/// A URL that plays the clip's picture without its sound, for the hover preview on its card. No
+/// sound at all: a muted video would still open a (muted) system audio stream, which made
+/// PipeWire start Klipt muted (see `MediaServer::url_for_video_only`).
+#[tauri::command]
+pub fn clip_preview_url(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<String> {
+    let clip = lock(&state.library).get(&id)?;
+    if !clip.path.is_file() {
+        return Err(AppError::FileMissing);
+    }
+    Ok(app.state::<crate::media_server::MediaServer>().url_for_video_only(&clip.path))
+}
+
 /// Copies the clip's share link to the clipboard and returns it.
 #[tauri::command]
 pub fn copy_share_link(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<String> {

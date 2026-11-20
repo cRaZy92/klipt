@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClipView, MyUpload } from "./api";
-import { gameCounts, isUploaded, matchesSearch, mergeClips, visibleClips, whereOf } from "./myClips";
+import { gameChips, gameCounts, isUploaded, matchesSearch, mergeClips, visibleClips, whereOf } from "./myClips";
 
 function local(id: string, at: number, extra: Partial<ClipView> = {}): ClipView {
   return {
@@ -120,5 +120,36 @@ describe("clips and screenshots", () => {
     expect(keys("all")).toEqual(["l:vid", "l:pic", "s:S1", "s:S2"]);
     expect(keys("clip")).toEqual(["l:vid", "s:S2"]);
     expect(keys("screenshot")).toEqual(["l:pic", "s:S1"]);
+  });
+});
+
+describe("gameChips", () => {
+  const items = mergeClips(
+    [
+      local("w1", 1, { gameName: "WARDOGS", kind: "screenshot" }),
+      local("w2", 2, { gameName: "WARDOGS", kind: "screenshot" }),
+      local("d1", 3, { title: "ace" }),
+      local("d2", 4, { kind: "screenshot" }),
+    ],
+    [],
+  );
+
+  it("counts only what the media filter shows", () => {
+    expect(gameChips(items, "all", null, "", "clip")).toEqual([{ name: "Deadlock", steamAppId: 1, count: 1 }]);
+    expect(gameChips(items, "all", null, "", "screenshot").map((c) => [c.name, c.count])).toEqual([
+      ["WARDOGS", 2],
+      ["Deadlock", 1],
+    ]);
+  });
+
+  it("counts only what the search finds", () => {
+    expect(gameChips(items, "all", null, "ace")).toEqual([{ name: "Deadlock", steamAppId: 1, count: 1 }]);
+  });
+
+  it("keeps the picked game's chip at 0 when the other filters hide all of it", () => {
+    expect(gameChips(items, "all", "WARDOGS", "", "clip")).toEqual([
+      { name: "Deadlock", steamAppId: 1, count: 1 },
+      { name: "WARDOGS", steamAppId: 1, count: 0 },
+    ]);
   });
 });

@@ -121,3 +121,23 @@ export function gameCounts(items: MyClip[]): GameCount[] {
   }
   return [...counts.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
+
+/**
+ * The game chips: clips per game among what the other filters (place, media, search) let
+ * through, so a chip never promises clips it then doesn't show. The picked game keeps its chip
+ * (at 0) so it can still be seen and unpicked while a search hides all of it.
+ */
+export function gameChips(
+  items: MyClip[],
+  place: Place,
+  game: string | null,
+  search = "",
+  media: MediaKind = "all",
+): GameCount[] {
+  const chips = gameCounts(visibleClips(items, place, null, "newestFirst", search, media));
+  if (game !== null && !chips.some((c) => c.name === game)) {
+    const steamAppId = items.find((i) => i.game === game)?.steamAppId ?? null;
+    chips.push({ name: game, steamAppId, count: 0 });
+  }
+  return chips;
+}

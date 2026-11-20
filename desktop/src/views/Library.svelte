@@ -9,7 +9,7 @@
   import type { RemoveWhere } from "../lib/removal";
   import { keepShown, selectClick } from "../lib/selection";
   import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
-  import { WHERE, gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
+  import { WHERE, gameChips, gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
@@ -79,7 +79,10 @@
   const items = $derived(mergeClips(local, uploads ?? []));
   /** A local clip's uploaded copy, by server id: its card plays that copy and shows its compression. */
   const uploadById = $derived(new Map((uploads ?? []).map((u) => [u.id, u])));
-  const games = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
+  /** The game chips: their counts follow every other filter (myClips.ts). */
+  const games = $derived(gameChips(items, place, game, search, media));
+  /** Every game with a clip in this place: the "Set game" suggestions, and whether the game filter still has anything. */
+  const placeGames = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
   const visible = $derived(visibleClips(items, place, game, sort, search, media));
   const groups = $derived(groupByDay(visible, (i) => i.at, now));
   /** The cards in the order they're shown, for Shift+click runs and "Select all". */
@@ -134,7 +137,7 @@
 
   $effect(() => {
     // A filter for a game with no clips left (in this place) would show nothing forever.
-    if (game !== null && !games.some((g) => g.name === game)) game = null;
+    if (game !== null && !placeGames.some((g) => g.name === game)) game = null;
   });
 
   // Shown (again): refresh both lists quietly, keeping what's on screen meanwhile. The editor
@@ -736,7 +739,7 @@
         <!-- svelte-ignore a11y_autofocus -->
         <input class="input" bind:value={tagging.value} list="known-games" placeholder="Unknown game" autofocus />
         <datalist id="known-games">
-          {#each games as g (g.name)}<option value={g.name}></option>{/each}
+          {#each gameCounts(items) as g (g.name)}<option value={g.name}></option>{/each}
         </datalist>
       </label>
       {#if tagging.clips.length === 1 && !tagging.clips[0].gameName && tagging.clips[0].exe && tagging.clips[0].steamAppId === null}

@@ -206,7 +206,7 @@ pub fn process_saved_clip(library: &Mutex<Library>, tools: Option<&Tools>, saved
         has_mic,
         has_voice,
         kind: crate::library::ClipKind::Clip,
-        is_recording: false,
+        is_recording: saved.is_recording,
         game_name: saved.game.game_name,
         steam_app_id: saved.game.steam_app_id,
         exe: saved.game.exe,
@@ -236,6 +236,10 @@ pub mod events {
     pub const RECORDER_ERROR: &str = "recorder-error";
     /// Payload: `{ encoder }`.
     pub const RECORDING_STARTED: &str = "recording-started";
+    /// Payload: `{ startedAtMs }` (Unix ms).
+    pub const FULL_RECORDING_STARTED: &str = "full-recording-started";
+    /// No payload. The recording's `clip-saved` (if any) follows.
+    pub const FULL_RECORDING_STOPPED: &str = "full-recording-stopped";
 }
 
 /// Starts the supervisor for the app: the platform backend, game detection in `data_dir`, the
@@ -251,6 +255,9 @@ pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) ->
             let state = pipeline_app.state::<AppState>();
             process_saved_clip(&state.library, state.tools.as_ref(), saved)
         }),
+        wall_clock_ms: Box::new(|| {
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+        }),
         sink: Box::new(move |event| {
             // Sound, notifications and the tray icon: the window is usually hidden while gaming.
             crate::feedback::on_supervisor_event(&sink_app, &event);
@@ -263,6 +270,10 @@ pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) ->
                 SupervisorEvent::Recording { encoder } => {
                     sink_app.emit(events::RECORDING_STARTED, serde_json::json!({ "encoder": encoder }))
                 }
+                SupervisorEvent::FullRecordingStarted { started_at_ms } => {
+                    sink_app.emit(events::FULL_RECORDING_STARTED, serde_json::json!({ "startedAtMs": started_at_ms }))
+                }
+                SupervisorEvent::FullRecordingStopped => sink_app.emit(events::FULL_RECORDING_STOPPED, ()),
             };
             if let Err(e) = sent {
                 eprintln!("klipt: can't send a recorder event to the UI: {e}");
@@ -325,7 +336,7 @@ mod tests {
         let view = process_saved_clip(
             &library,
             None,
-            SavedClip { path: path.clone(), duration_ms: Some(30_000), game, has_mic: true, has_voice: false },
+            SavedClip { path: path.clone(), duration_ms: Some(30_000), game, has_mic: true, has_voice: false, is_recording: false },
         )
         .unwrap();
         assert_eq!(view.clip.path, path);
@@ -339,10 +350,12 @@ mod tests {
         let untagged = process_saved_clip(
             &library,
             None,
-            SavedClip { path: dir.path().join("b.mp4"), duration_ms: None, game: Detected::default(), has_mic: false, has_voice: false },
+            SavedClip { path: dir.path().join("b.mp4"), duration_ms: None, game: Detected::default(), has_mic: false, has_voice: false, is_recording: true },
         )
         .unwrap();
         assert_eq!(untagged.clip.title, "b");
+        assert!(untagged.clip.is_recording, "a full recording is stored as one");
+        assert!(!view.clip.is_recording);
         assert!(untagged.file_missing);
     }
 }

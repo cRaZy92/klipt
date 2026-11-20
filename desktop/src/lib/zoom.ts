@@ -4,6 +4,7 @@
 
 import type { ZoomRange } from "./api";
 import type { TrimRange } from "./trim";
+import { moveRange, resizeRange, roomAt } from "./ranges";
 
 /** The least a zoom magnifies. */
 export const MIN_ZOOM = 1.25;
@@ -64,39 +65,15 @@ export function zoomAt(zooms: ZoomRange[], ms: number): ZoomView {
  * the trim end), or null when there's no room for MIN_ZOOM_MS there.
  */
 export function addZoomAt(zooms: ZoomRange[], ms: number, trim: TrimRange): ZoomRange[] | null {
-  const at = Math.round(ms);
-  if (at < trim.start || at >= trim.end || zoomIndexAt(zooms, at) >= 0) return null;
-  const next = zooms.find((z) => z.startMs >= at);
-  const end = Math.min(at + DEFAULT_ZOOM_MS, next ? next.startMs : Infinity, trim.end);
-  if (end - at < MIN_ZOOM_MS) return null;
-  const added: ZoomRange = { startMs: at, endMs: end, zoom: DEFAULT_ZOOM, x: 0.5, y: 0.5 };
+  const room = roomAt(zooms, ms, trim, DEFAULT_ZOOM_MS, MIN_ZOOM_MS);
+  if (!room) return null;
+  const added: ZoomRange = { ...room, zoom: DEFAULT_ZOOM, x: 0.5, y: 0.5 };
   return [...zooms, added].sort((a, b) => a.startMs - b.startMs);
-}
-
-/**
- * How far zoom `i` may reach: up to its neighbours and the trim. A zoom already outside the trim
- * (the trim moved past it) may stay where it is.
- */
-function bounds(zooms: ZoomRange[], i: number, trim: TrimRange): { lo: number; hi: number } {
-  const z = zooms[i];
-  const prev = zooms[i - 1];
-  const next = zooms[i + 1];
-  return {
-    lo: Math.max(prev ? prev.endMs : 0, Math.min(trim.start, z.startMs)),
-    hi: Math.min(next ? next.startMs : Infinity, Math.max(trim.end, z.endMs)),
-  };
 }
 
 /** Zoom `i` moved to start at `startMs`, keeping its length, between its neighbours and the trim. */
 export function moveZoom(zooms: ZoomRange[], i: number, startMs: number, trim: TrimRange): ZoomRange[] {
-  const z = zooms[i];
-  if (!z) return zooms;
-  const { lo, hi } = bounds(zooms, i, trim);
-  const len = z.endMs - z.startMs;
-  if (hi - lo < len) return zooms;
-  const start = clamp(Math.round(startMs), lo, hi - len);
-  if (start === z.startMs) return zooms;
-  return zooms.map((o, j) => (j === i ? { ...o, startMs: start, endMs: start + len } : o));
+  return moveRange(zooms, i, startMs, trim);
 }
 
 /** Zoom `i` with its `edge` moved to `ms`: at least MIN_ZOOM_MS long, between its neighbours and the trim. */
@@ -107,16 +84,7 @@ export function resizeZoom(
   ms: number,
   trim: TrimRange,
 ): ZoomRange[] {
-  const z = zooms[i];
-  if (!z) return zooms;
-  const { lo, hi } = bounds(zooms, i, trim);
-  const at = Math.round(ms);
-  const next =
-    edge === "start"
-      ? { ...z, startMs: clamp(at, lo, z.endMs - MIN_ZOOM_MS) }
-      : { ...z, endMs: clamp(at, z.startMs + MIN_ZOOM_MS, hi) };
-  if (next.startMs === z.startMs && next.endMs === z.endMs) return zooms;
-  return zooms.map((o, j) => (j === i ? next : o));
+  return resizeRange(zooms, i, edge, ms, trim, MIN_ZOOM_MS);
 }
 
 /** Zoom `i` with a new area: the zoom kept in MIN_ZOOM..MAX_ZOOM, `x` and `y` in 0..1. */

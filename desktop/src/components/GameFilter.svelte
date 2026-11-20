@@ -21,6 +21,9 @@
   let open = $state(false);
   let query = $state("");
   let moreWrap = $state<HTMLElement>();
+  // The menu hangs from the chip's left edge, unless that would run it past the right side of
+  // the window; then it hangs from the chip's right edge instead.
+  let alignEnd = $state(false);
 
   const selectedIndex = $derived(games.findIndex((g) => g.name === selected));
   const shown = $derived(games.slice(0, fit));
@@ -64,6 +67,11 @@
   });
 
   function toggle() {
+    if (!open && moreWrap) {
+      const menuWidth = 16 * parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const left = moreWrap.getBoundingClientRect().left;
+      alignEnd = left + menuWidth > document.documentElement.clientWidth - 8;
+    }
     open = !open;
     query = "";
   }
@@ -115,7 +123,7 @@
         +{hidden.length} more <Icon name="chevronDown" size={14} />
       </button>
       {#if open}
-        <div class="menu" role="menu" aria-label="More games" use:menu={{ close: () => (open = false) }}>
+        <div class="menu" class:end={alignEnd} role="menu" aria-label="More games" use:menu={{ close: () => (open = false) }}>
           {#if hidden.length > 6}
             <div class="search">
               <Icon name="search" size={14} />
@@ -267,6 +275,11 @@
     background: var(--surface-2);
     box-shadow: var(--shadow);
     animation: menu-in 0.15s var(--ease-out);
+  }
+
+  .menu.end {
+    right: 0;
+    left: auto;
   }
 
   @keyframes menu-in {

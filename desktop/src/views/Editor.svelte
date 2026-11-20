@@ -33,7 +33,8 @@
   } from "../lib/cuts";
   import { formatTenths, stepMs } from "../lib/timecode";
   import { addZoomAt, removeZoom, sameZooms, setZoomBox, zoomAt, zoomIndexAt } from "../lib/zoom";
-  import type { ZoomRange } from "../lib/api";
+  import type { SubtitleRange, ZoomRange } from "../lib/api";
+  import { addSubtitleAt, removeSubtitle, sameSubtitles, savedSubtitles, subtitleIndexAt } from "../lib/subtitles";
   import { toggleMute } from "../lib/lanes";
   import { menu } from "../lib/a11y";
   import { Autosave, type SaveStatus } from "../lib/autosave";
@@ -102,6 +103,12 @@
   let zooms = $state<ZoomRange[]>([]);
   /** The zoom picked on the Zoom lane: its box can be placed on the video. */
   let selectedZoom = $state<number | null>(null);
+  /** The subtitles (sorted, never overlapping), in ms into the file. */
+  let subtitles = $state<SubtitleRange[]>([]);
+  /** The subtitle picked on the Subtitles lane. */
+  let selectedSubtitle = $state<number | null>(null);
+  /** The subtitle whose text is being typed (its text box is open on the video). */
+  let editingSubtitle = $state<number | null>(null);
   /** The thumbnail's frame; null = automatic. */
   let thumb = $state<number | null>(null);
   /** The edit as last loaded or saved; `changed` compares against it. */
@@ -142,6 +149,11 @@
   );
   /** How the preview is zoomed at the playhead (the same easing as the export). */
   const view = $derived(placingZoom ? { scale: 1, x: 0.5, y: 0.5 } : zoomAt(zooms, position));
+  /** The subtitle showing at the playhead (hidden while its text is being typed). */
+  const shownSubtitle = $derived.by(() => {
+    const i = subtitleIndexAt(subtitles, position);
+    return i < 0 || i === editingSubtitle ? null : subtitles[i];
+  });
 
   /** How many filmstrip pictures of this clip are on disk (0 once a picture fails to load). */
   let stripFrames = $state(0);
@@ -203,6 +215,7 @@
       blurVideo,
       removedRanges: removedRanges(pieces, trim),
       zoomRanges: zooms.map((z) => ({ startMs: z.startMs, endMs: z.endMs, zoom: z.zoom, x: z.x, y: z.y })),
+      subtitles: savedSubtitles(subtitles),
     };
   });
 
@@ -226,6 +239,7 @@
         edit.blurVideo !== stored.blurVideo ||
         !sameRanges(edit.removedRanges, stored.removedRanges) ||
         !sameZooms(edit.zoomRanges, stored.zoomRanges) ||
+        !sameSubtitles(edit.subtitles, stored.subtitles) ||
         savedThumb !== storedThumb),
   );
 
@@ -240,6 +254,7 @@
     extraVolumes: Record<number, number>;
     blurVideo: boolean;
     zooms: ZoomRange[];
+    subtitles: SubtitleRange[];
     thumb: number | null;
   }
 
@@ -253,6 +268,7 @@
     extraVolumes: { ...extraVolumes },
     blurVideo,
     zooms: zooms.map((z) => ({ ...z })),
+    subtitles: subtitles.map((t) => ({ ...t })),
     thumb,
   });
 
@@ -262,7 +278,7 @@
    * A drag on the timeline or a volume slider in progress: its changes become one undo step,
    * recorded when it ends (so a drag that rests is still one step).
    */
-  const gestures = new Gestures<"scrub" | "slider" | "zoom">(() => history?.record(editState));
+  const gestures = new Gestures<"scrub" | "slider" | "zoom" | "subtitle">(() => history?.record(editState));
 
   function applyState(s: EditState) {
     trim = s.trim;
@@ -275,6 +291,9 @@
     blurVideo = s.blurVideo;
     zooms = s.zooms;
     if (selectedZoom !== null && selectedZoom >= zooms.length) selectedZoom = null;
+    subtitles = s.subtitles;
+    if (selectedSubtitle !== null && selectedSubtitle >= subtitles.length) selectedSubtitle = null;
+    editingSubtitle = null;
     thumb = s.thumb;
   }
 
@@ -357,6 +376,7 @@
       extraVolumes = Object.fromEntries(d.extraTracks.map((t) => [t.index, percent(d.clip.extraVolumes?.[t.index] ?? 1)]));
       blurVideo = d.clip.blurVideo ?? false;
       zooms = d.clip.zoomRanges ?? [];
+      subtitles = d.clip.subtitles ?? [];
       thumb = d.clip.thumbnailMs;
       position = trim.start;
       stripFrames = d.filmstrip.frames;
@@ -868,6 +888,31 @@
     }
     zooms = next;
     selectedZoom = zoomIndexAt(next, Math.round(position));
+    selectedSubtitle = null;
+  }
+
+  /** Adds a subtitle at the playhead and opens its text box. */
+  function subtitleHere() {
+    if (editLocked) return;
+    const next = addSubtitleAt(subtitles, position, trim);
+    if (!next) {
+      toast("Can't add a subtitle here: inside another one, too close to the next one, or outside the trim", "error");
+      return;
+    }
+    if (playing) pause();
+    history?.record(editState);
+    subtitles = next;
+    const i = subtitleIndexAt(next, Math.round(position));
+    selectedSubtitle = i;
+    selectedZoom = null;
+    editingSubtitle = i;
+  }
+
+  function removeSubtitleAt(i: number) {
+    if (editLocked) return;
+    subtitles = removeSubtitle(subtitles, i);
+    selectedSubtitle = null;
+    editingSubtitle = null;
   }
 
   function removeZoomAt(i: number) {
@@ -909,8 +954,10 @@
     else if (action.kind === "step") stepBy(action.direction * (action.second ? 1000 : frameMs));
     else if (action.kind === "split") splitHere();
     else if (action.kind === "zoom") zoomHere();
+    else if (action.kind === "subtitle") subtitleHere();
     else if (action.kind === "delete") {
       if (selectedZoom !== null) removeZoomAt(selectedZoom);
+      else if (selectedSubtitle !== null) removeSubtitleAt(selectedSubtitle);
     }
     else togglePlay();
   }
@@ -946,6 +993,7 @@
         blurVideo: next.blurVideo,
         removedRanges: next.removedRanges,
         zoomRanges: next.zoomRanges,
+        subtitles: next.subtitles,
         uploadId: null,
         uploadOffset: null,
       };
@@ -1222,6 +1270,11 @@
         {#if scrubFrame}
           <img class="scrub" src={scrubFrame} alt="" aria-hidden="true" style:filter={previewBlur} onerror={onscruberror} />
         {/if}
+        <!-- Drawn like the export (src-tauri/src/subtitles.rs): sized from the picture's height,
+             never zoomed or blurred. -->
+        {#if shownSubtitle}
+          <p class="subtitle" style:--h="{videoRect.height}px" style:--w="{videoRect.width}px">{shownSubtitle.text}</p>
+        {/if}
       </div>
       {#if placingZoom && selectedZoom !== null && zooms[selectedZoom] && !editLocked && !mediaError}
         <ZoomBox zoom={zooms[selectedZoom]} rect={videoRect} onchange={onzoombox} ongesture={onzoomgesture} />
@@ -1280,6 +1333,14 @@
           title="Zoom in at the playhead (Z), then drag the box on the video"
         >
           <Icon name="zoom" size={15} /> Zoom
+        </button>
+        <button
+          class="btn btn-sm"
+          onclick={subtitleHere}
+          disabled={mediaError || editLocked}
+          title="Add a subtitle at the playhead (T)"
+        >
+          <Icon name="subtitles" size={15} /> Subtitle
         </button>
         </div>
         <label class="master" title="The whole clip: every track together">
@@ -1347,6 +1408,7 @@
         <span><kbd>Space</kbd> play</span>
         <span><kbd>S</kbd> split</span>
         <span><kbd>Z</kbd> zoom</span>
+        <span><kbd>T</kbd> subtitle</span>
         <span><kbd>←</kbd><kbd>→</kbd> one frame</span>
         <span><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> one second</span>
         <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
@@ -1619,6 +1681,25 @@
   }
   .freeze {
     visibility: hidden;
+  }
+  /* The export's fixed style: 5.5% of the height, outline 0.35% (at least 2 px), 6% from the
+     bottom, 5% side margins. The stroke is centred on the outline, so it is drawn twice as wide. */
+  .subtitle {
+    position: absolute;
+    right: calc(var(--w) * 0.05);
+    bottom: calc(var(--h) * 0.06);
+    left: calc(var(--w) * 0.05);
+    margin: 0;
+    color: #fff;
+    font-family: "Klipt Subtitles", sans-serif;
+    font-size: calc(var(--h) * 0.055);
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    overflow-wrap: anywhere;
+    -webkit-text-stroke: calc(max(2px, var(--h) * 0.0035) * 2) #000;
+    paint-order: stroke fill;
+    pointer-events: none;
   }
   .freeze.show {
     visibility: visible;

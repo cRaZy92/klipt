@@ -21,7 +21,9 @@ export type EditorKeyAction =
   | { kind: "split" }
   /** Adds a zoom at the playhead. */
   | { kind: "zoom" }
-  /** Removes what is picked (the picked zoom). */
+  /** Adds a subtitle at the playhead. */
+  | { kind: "subtitle" }
+  /** Removes what is picked (the picked zoom or subtitle). */
   | { kind: "delete" }
   | { kind: "undo" }
   | { kind: "redo" }
@@ -46,6 +48,7 @@ export function editorKeyAction(e: EditorKey, target: KeyTarget, dialogOpen: boo
   if (e.key === " ") return { kind: "play" };
   if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "split" };
   if (key === "z" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "zoom" };
+  if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "subtitle" };
   if ((e.key === "Delete" || e.key === "Backspace") && !ctrl && !e.altKey && target !== "slider") return { kind: "delete" };
   return null;
 }

@@ -26,6 +26,15 @@ describe("editorKeyAction", () => {
     expect(editorKeyAction(key("s"), "text", false)).toBeNull();
   });
 
+  it("T adds a subtitle, but not with Ctrl, Alt or Super, nor in a text field", () => {
+    expect(editorKeyAction(key("t"), "none", false)).toEqual({ kind: "subtitle" });
+    expect(editorKeyAction(key("T", { shiftKey: true }), "control", false)).toEqual({ kind: "subtitle" });
+    expect(editorKeyAction(key("t", { ctrlKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("t", { altKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("t", { metaKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("t"), "text", false)).toBeNull();
+  });
+
   it("Z zooms; Ctrl+Z still undoes", () => {
     expect(editorKeyAction(key("z"), "none", false)).toEqual({ kind: "zoom" });
     expect(editorKeyAction(key("Z", { shiftKey: true }), "control", false)).toEqual({ kind: "zoom" });

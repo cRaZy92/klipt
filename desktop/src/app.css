@@ -1,3 +1,11 @@
+/* The subtitles' font: the same file the export draws them with (src-tauri/src/subtitles.rs). */
+@font-face {
+  font-family: "Klipt Subtitles";
+  src: url("./assets/fonts/NotoSans-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: block;
+}
+
 :root {
   /* Surfaces: near-black with a violet tint, so the greys belong to the brand purple. */
   --bg: #0b0a10;

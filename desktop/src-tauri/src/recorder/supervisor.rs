@@ -432,6 +432,7 @@ impl Supervisor {
                 }
             }
             RecorderEvent::Busy => self.emit(SupervisorEvent::SaveBusy),
+            RecorderEvent::FullRecordingStarted | RecorderEvent::FullRecordingSaved { .. } => {}
             RecorderEvent::Error { code, message } => {
                 eprintln!("klipt: recorder error {code}: {message}");
                 if code == "save_failed" {
@@ -557,6 +558,8 @@ mod tests {
         starts: usize,
         saves: usize,
         stops: usize,
+        full_starts: usize,
+        full_stops: usize,
         /// Sender of the newest `events()` receiver, so a test can play the helper.
         events: Option<Sender<RecorderEvent>>,
         /// When set, `start` fails with this error.
@@ -577,6 +580,14 @@ mod tests {
         }
         fn stop(&mut self) -> Result<()> {
             self.0.lock().unwrap().stops += 1;
+            Ok(())
+        }
+        fn start_full_recording(&mut self) -> Result<()> {
+            self.0.lock().unwrap().full_starts += 1;
+            Ok(())
+        }
+        fn stop_full_recording(&mut self) -> Result<()> {
+            self.0.lock().unwrap().full_stops += 1;
             Ok(())
         }
         fn events(&self) -> Receiver<RecorderEvent> {

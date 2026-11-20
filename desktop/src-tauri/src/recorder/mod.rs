@@ -25,6 +25,9 @@ use crate::state::AppState;
 
 pub use supervisor::{Deps, SavedClip, SupervisorEvent, SupervisorHandle, SystemClock};
 
+/// The folder inside the clips folder that full recordings go to.
+pub const RECORDINGS_DIR: &str = "Recordings";
+
 /// What to record, resolved from [`Settings`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordConfig {
@@ -65,6 +68,11 @@ impl RecordConfig {
     pub fn voice_track(&self) -> bool {
         !self.voice_apps.is_empty()
     }
+
+    /// Where full recordings are written: a folder inside the clips folder.
+    pub fn recordings_dir(&self) -> PathBuf {
+        self.output_dir.join(RECORDINGS_DIR)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +106,10 @@ pub enum RecorderEvent {
     Saved { path: PathBuf, duration_ms: Option<u64> },
     /// A save was requested while one was still running.
     Busy,
+    /// A full recording (beside the replay buffer) has started.
+    FullRecordingStarted,
+    /// A full recording was stopped and its file written.
+    FullRecordingSaved { path: PathBuf, duration_ms: Option<u64> },
     /// `code` is a backend code such as `save_failed`; never shown to users as-is.
     Error { code: String, message: String },
     /// The helper process exited (None = killed by a signal).
@@ -109,8 +121,14 @@ pub trait RecorderBackend {
     fn start(&mut self, cfg: &RecordConfig) -> Result<()>;
     /// Asks the helper to write the buffer to a file; `Saved` arrives when it's done.
     fn save(&mut self) -> Result<()>;
-    /// Stops the helper and waits for it to exit (killing it after a timeout).
+    /// Stops the helper and waits for it to exit (killing it after a timeout). A running full
+    /// recording is finished first, so its `FullRecordingSaved` still arrives.
     fn stop(&mut self) -> Result<()>;
+    /// Starts a full recording beside the replay buffer; `FullRecordingStarted` arrives when it
+    /// runs. Only call it when none is running (gsr only toggles).
+    fn start_full_recording(&mut self) -> Result<()>;
+    /// Stops the full recording; `FullRecordingSaved` arrives once its file is written.
+    fn stop_full_recording(&mut self) -> Result<()>;
     /// A fresh event stream. Events of a helper started after this call go to the returned
     /// receiver; a helper started before keeps sending to the receiver it was started with.
     fn events(&self) -> Receiver<RecorderEvent>;

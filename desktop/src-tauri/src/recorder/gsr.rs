@@ -79,6 +79,10 @@ pub fn build_args(cfg: &RecordConfig, target: &Target, portal_token: &Path) -> V
     args.push(cfg.buffer_seconds.to_string());
     args.extend(["-replay-storage", "ram", "-v", "no", "-o"].map(String::from));
     args.push(cfg.output_dir.to_string_lossy().into_owned());
+    // Full recordings (SIGRTMIN starts and stops one) go to their own folder, which is how their
+    // stdout line is told apart from a replay save.
+    args.push("-ro".into());
+    args.push(cfg.recordings_dir().to_string_lossy().into_owned());
     args
 }
 
@@ -196,6 +200,22 @@ pub fn parse_saved_line(line: &str) -> Option<PathBuf> {
     (path.is_absolute() && is_mp4 && path.is_file()).then(|| path.to_path_buf())
 }
 
+/// What a gsr stdout line means: a saved file in `recordings_dir` is a finished full recording,
+/// any other saved file a replay save; anything else is just logged.
+pub fn classify_stdout_line(line: &str, recordings_dir: &Path) -> Option<RecorderEvent> {
+    let path = parse_saved_line(line)?;
+    Some(if path.parent() == Some(recordings_dir) {
+        RecorderEvent::FullRecordingSaved { path, duration_ms: None }
+    } else {
+        RecorderEvent::Saved { path, duration_ms: None }
+    })
+}
+
+/// gsr's stderr line once a full recording has started.
+pub fn is_full_recording_started(line: &str) -> bool {
+    line.trim_end().ends_with("Started recording")
+}
+
 /// State shared between the backend and the thread that waits for the child.
 /// The slot holds the child until it has been reaped, so its PID is never stale while in there.
 struct Shared {
@@ -244,6 +264,25 @@ impl GsrBackend {
         backend
     }
 
+    /// Sends `signal` to our own gsr child, by its PID while it's held in the slot.
+    fn signal_child(&self, signal: i32) -> Result<()> {
+        let run = self.run.as_ref().ok_or(AppError::NotRecording)?;
+        let slot = lock(&run.shared.child);
+        let Some(child) = slot.as_ref() else {
+            return Err(if run.shared.restarting.load(Ordering::SeqCst) {
+                AppError::RecorderStarting
+            } else {
+                AppError::NotRecording
+            });
+        };
+        // SAFETY: a plain kill(2) on a PID we spawned and haven't reaped (it's still in the slot).
+        if unsafe { nix::libc::kill(child.id() as i32, signal) } != 0 {
+            let e = std::io::Error::last_os_error();
+            return Err(AppError::RecorderFailed(format!("can't signal gpu-screen-recorder: {e}")));
+        }
+        Ok(())
+    }
+
     fn is_running(&self) -> bool {
         self.run.as_ref().is_some_and(|r| lock(&r.shared.child).is_some())
     }
@@ -266,6 +305,7 @@ fn spawn_error(program: &Path, e: std::io::Error) -> AppError {
 fn spawn_child(
     program: &Path,
     args: &[String],
+    recordings_dir: &Path,
     tx: &Option<Sender<RecorderEvent>>,
     encoder_failed: &Arc<AtomicBool>,
 ) -> std::io::Result<Child> {
@@ -281,22 +321,25 @@ fn spawn_child(
     }
     let mut child = cmd.spawn()?;
     if let Some(stdout) = child.stdout.take() {
-        let tx = tx.clone();
+        let (tx, recordings_dir) = (tx.clone(), recordings_dir.to_path_buf());
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(|l| l.ok()) {
-                match parse_saved_line(&line) {
-                    Some(path) => send(&tx, RecorderEvent::Saved { path, duration_ms: None }),
+                match classify_stdout_line(&line, &recordings_dir) {
+                    Some(event) => send(&tx, event),
                     None => eprintln!("gsr: {line}"),
                 }
             }
         });
     }
     if let Some(stderr) = child.stderr.take() {
-        let encoder_failed = encoder_failed.clone();
+        let (encoder_failed, tx) = (encoder_failed.clone(), tx.clone());
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(|l| l.ok()) {
                 if is_encoder_failure(&line) {
                     encoder_failed.store(true, Ordering::SeqCst);
+                }
+                if is_full_recording_started(&line) {
+                    send(&tx, RecorderEvent::FullRecordingStarted);
                 }
                 eprintln!("gsr: {line}");
             }
@@ -313,6 +356,7 @@ fn wait_loop(
     first_args: Vec<String>,
     retry_args: Vec<String>,
     program: PathBuf,
+    recordings_dir: PathBuf,
     tx: Option<Sender<RecorderEvent>>,
 ) {
     let mut spawned_at = Instant::now();
@@ -352,7 +396,7 @@ fn wait_loop(
                 send(&tx, RecorderEvent::Exited { code });
                 return;
             }
-            match spawn_child(&program, &first_args, &tx, &shared.encoder_failed) {
+            match spawn_child(&program, &first_args, &recordings_dir, &tx, &shared.encoder_failed) {
                 Ok(new_child) => {
                     *slot = Some(new_child);
                     spawned_at = Instant::now();
@@ -368,7 +412,7 @@ fn wait_loop(
         }
         if kms_quick_failure && !shared.encoder_failed.load(Ordering::SeqCst) {
             eprintln!("klipt: gpu-screen-recorder KMS capture exited with {code:?}; retrying with the desktop portal");
-            match spawn_child(&program, &retry_args, &tx, &shared.encoder_failed) {
+            match spawn_child(&program, &retry_args, &recordings_dir, &tx, &shared.encoder_failed) {
                 Ok(new_child) => {
                     *slot = Some(new_child);
                     target = Target::Portal;
@@ -394,6 +438,7 @@ impl RecorderBackend for GsrBackend {
             let _ = old.waiter.join();
         }
         std::fs::create_dir_all(&cfg.output_dir)?;
+        std::fs::create_dir_all(cfg.recordings_dir())?;
         let target = match &cfg.display_id {
             Some(id) => Target::Monitor(id.clone()),
             None => match self.list_displays() {
@@ -407,7 +452,8 @@ impl RecorderBackend for GsrBackend {
         let tx = self.sink.current();
         let encoder_failed = Arc::new(AtomicBool::new(false));
         let first_args = build_args(cfg, &target, &self.portal_token);
-        let child = spawn_child(&self.program, &first_args, &tx, &encoder_failed)
+        let recordings_dir = cfg.recordings_dir();
+        let child = spawn_child(&self.program, &first_args, &recordings_dir, &tx, &encoder_failed)
             .map_err(|e| spawn_error(&self.program, e))?;
         let shared = Arc::new(Shared {
             child: Mutex::new(Some(child)),
@@ -418,7 +464,7 @@ impl RecorderBackend for GsrBackend {
         let retry_args = build_args(cfg, &Target::Portal, &self.portal_token);
         let waiter = {
             let (shared, program, tx) = (shared.clone(), self.program.clone(), tx.clone());
-            thread::spawn(move || wait_loop(shared, target, first_args, retry_args, program, tx))
+            thread::spawn(move || wait_loop(shared, target, first_args, retry_args, program, recordings_dir, tx))
         };
         self.run = Some(Run { shared, waiter });
         send(&tx, RecorderEvent::Started { encoder: "h264".into() });
@@ -426,17 +472,16 @@ impl RecorderBackend for GsrBackend {
     }
 
     fn save(&mut self) -> Result<()> {
-        let run = self.run.as_ref().ok_or(AppError::NotRecording)?;
-        let slot = lock(&run.shared.child);
-        let Some(child) = slot.as_ref() else {
-            return Err(if run.shared.restarting.load(Ordering::SeqCst) {
-                AppError::RecorderStarting
-            } else {
-                AppError::NotRecording
-            });
-        };
-        kill(Pid::from_raw(child.id() as i32), Signal::SIGUSR1)
-            .map_err(|e| AppError::RecorderFailed(format!("can't signal gpu-screen-recorder: {e}")))
+        self.signal_child(Signal::SIGUSR1 as i32)
+    }
+
+    fn start_full_recording(&mut self) -> Result<()> {
+        self.signal_child(nix::libc::SIGRTMIN())
+    }
+
+    fn stop_full_recording(&mut self) -> Result<()> {
+        // gsr only toggles; the supervisor knows one is running.
+        self.signal_child(nix::libc::SIGRTMIN())
     }
 
     fn stop(&mut self) -> Result<()> {
@@ -517,7 +562,7 @@ mod tests {
             args,
             strings(
                 "-w DP-1 -f 60 -k h264 -bm cbr -q 20000 -ac aac -a default_output -a default_input \
-                 -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt"
+                 -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt -ro /home/u/Videos/Klipt/Recordings"
             )
         );
     }
@@ -531,7 +576,7 @@ mod tests {
             strings(
                 "-w portal -restore-portal-session yes -portal-session-token-filepath /data/portal-token \
                  -f 30 -s 1280x720 -k h264 -bm cbr -q 20000 -ac aac -a default_output \
-                 -c mp4 -r 120 -replay-storage ram -v no -o /home/u/Videos/Klipt"
+                 -c mp4 -r 120 -replay-storage ram -v no -o /home/u/Videos/Klipt -ro /home/u/Videos/Klipt/Recordings"
             )
         );
     }
@@ -544,7 +589,7 @@ mod tests {
             args,
             strings(
                 "-w HDMI-A-1 -f 60 -k h264 -bm cbr -q 35000 -ac aac -a default_output -a alsa_input.usb-mic \
-                 -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt"
+                 -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt -ro /home/u/Videos/Klipt/Recordings"
             )
         );
     }
@@ -557,7 +602,7 @@ mod tests {
             args,
             strings(
                 "-w DP-1 -f 60 -k h264 -bm cbr -q 20000 -ac aac -a app-inverse:discord|app-inverse:vesktop \
-                 -a default_input -a app:discord|app:vesktop -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt"
+                 -a default_input -a app:discord|app:vesktop -c mp4 -r 30 -replay-storage ram -v no -o /home/u/Videos/Klipt -ro /home/u/Videos/Klipt/Recordings"
             )
         );
     }
@@ -655,6 +700,73 @@ garbage\n\
         assert_eq!(parse_saved_line("relative/clip.mp4"), None);
     }
 
+    #[test]
+    fn recordings_folder_lines_are_full_recordings() {
+        let dir = tempfile::tempdir().unwrap();
+        let recordings = dir.path().join("Recordings");
+        std::fs::create_dir_all(&recordings).unwrap();
+        let video = recordings.join("Video_2026-11-20_15-19-15.mp4");
+        std::fs::write(&video, b"x").unwrap();
+        let replay = dir.path().join("Replay_2026-11-20_15-19-20.mp4");
+        std::fs::write(&replay, b"x").unwrap();
+
+        assert_eq!(
+            classify_stdout_line(&video.display().to_string(), &recordings),
+            Some(RecorderEvent::FullRecordingSaved { path: video.clone(), duration_ms: None })
+        );
+        assert_eq!(
+            classify_stdout_line(&replay.display().to_string(), &recordings),
+            Some(RecorderEvent::Saved { path: replay.clone(), duration_ms: None })
+        );
+        assert_eq!(classify_stdout_line("gsr info: hello", &recordings), None);
+    }
+
+    #[test]
+    fn stderr_started_line_is_full_recording_started() {
+        assert!(is_full_recording_started("gsr info: Started recording"));
+        assert!(!is_full_recording_started("gsr info: Stopped recording"));
+        assert!(!is_full_recording_started("gsr info: using socketpair"));
+    }
+
+    #[test]
+    fn real_child_records_on_sigrtmin() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake-gsr.sh");
+        // The first SIGRTMIN starts a recording, the second writes it into the -ro folder.
+        std::fs::write(
+            &script,
+            r#"#!/bin/bash
+ro=""; prev=""
+for a; do [ "$prev" = "-ro" ] && ro=$a; prev=$a; done
+on=0
+toggle() {
+  if [ $on = 0 ]; then on=1; echo "gsr info: Started recording" >&2
+  else on=0; f="$ro/Video_x.mp4"; : > "$f"; echo "gsr info: Stopped recording" >&2; echo "$f"; fi
+}
+trap toggle RTMIN
+trap 'exit 0' INT
+while :; do sleep 0.05; done
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut backend = GsrBackend::with_program(script, dir.path());
+        let rx = backend.events();
+        let c = RecordConfig { output_dir: dir.path().join("out"), ..cfg() };
+        backend.start(&c).unwrap();
+        assert_eq!(next(&rx), RecorderEvent::Started { encoder: "h264".into() });
+        thread::sleep(Duration::from_millis(300)); // let the script install its traps
+        backend.start_full_recording().unwrap();
+        assert_eq!(next(&rx), RecorderEvent::FullRecordingStarted);
+        backend.stop_full_recording().unwrap();
+        let video = c.recordings_dir().join("Video_x.mp4");
+        assert_eq!(next(&rx), RecorderEvent::FullRecordingSaved { path: video, duration_ms: None });
+        backend.stop().unwrap();
+        assert_eq!(next(&rx), RecorderEvent::Exited { code: Some(0) });
+        assert!(matches!(backend.start_full_recording(), Err(AppError::NotRecording)));
+    }
+
     /// A stand-in for gsr: saves on SIGUSR1 (prints the path), exits 0 on SIGINT. With
     /// `fail_kms`, anything but `-w portal` exits 1 at once (like KMS capture without permission).
     fn fake_gsr(dir: &Path, fail_kms: bool) -> PathBuf {
@@ -666,7 +778,7 @@ garbage\n\
             format!(
                 r#"#!/bin/sh
 {kms}
-for a; do out=$a; done
+prev=; for a; do [ "$prev" = -o ] && out=$a; prev=$a; done
 echo "$@" > "$out/args"
 trap 'f="$out/clip.mp4"; : > "$f"; echo "$f"' USR1
 trap 'exit 0' INT
@@ -710,7 +822,7 @@ while :; do sleep 0.05; done
             &script,
             format!(
                 r#"#!/bin/sh
-for a; do out=$a; done
+prev=; for a; do [ "$prev" = -o ] && out=$a; prev=$a; done
 echo "$@" >> "$out/args"
 if [ ! -e {m} ]; then : > {m}; echo "gsr error: gsr_cuda_load failed: unable to create CUDA context, error: out of memory (result: 2)" >&2; exit 54; fi
 trap 'exit 0' INT

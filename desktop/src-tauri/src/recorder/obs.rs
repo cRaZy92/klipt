@@ -341,6 +341,14 @@ impl RecorderBackend for ObsBackend {
         Ok(())
     }
 
+    fn start_full_recording(&mut self) -> Result<()> {
+        Err(AppError::RecorderFailed("full recording isn't supported yet".into()))
+    }
+
+    fn stop_full_recording(&mut self) -> Result<()> {
+        Err(AppError::RecorderFailed("full recording isn't supported yet".into()))
+    }
+
     fn events(&self) -> Receiver<RecorderEvent> {
         self.sink.subscribe()
     }

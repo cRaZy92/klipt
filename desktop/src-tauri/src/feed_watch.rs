@@ -179,19 +179,23 @@ pub fn feed_new_count(app: AppHandle) -> u32 {
     app.try_state::<FeedWatch>().map_or(0, |w| w.count())
 }
 
-/// You've looked at the feed up to the clip made at `newest` (its `createdAt`).
+/// You've looked at the feed up to the clip made at `newest` (its `createdAt`). Returns what you
+/// had seen up to before this, so the Feed can mark the clips that were new; `None` before the
+/// first check of this account.
 #[tauri::command]
-pub fn mark_feed_seen(app: AppHandle, newest: String) {
-    let Some(watch) = app.try_state::<FeedWatch>() else { return };
+pub fn mark_feed_seen(app: AppHandle, newest: String) -> Option<String> {
+    let watch = app.try_state::<FeedWatch>()?;
     let mut inner = watch.lock();
-    let Some(seen) = inner.seen.as_mut() else { return };
+    let seen = inner.seen.as_mut()?;
+    let before = seen.seen_at.clone();
     if newest.as_str() <= seen.seen_at.as_str() {
-        return;
+        return Some(before);
     }
     seen.seen_at = newest;
     let seen = seen.clone();
     save(&path(&app), &seen);
     set_count(&app, &mut inner);
+    Some(before)
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { api, errorCode, errorMessage, type FeedClip, type GameCount } from "../lib/api";
   import { neighbors } from "../lib/clipNav";
-  import { feedNeedsRefresh, type FeedLoaded } from "../lib/feedRefresh";
+  import { feedNeedsRefresh, isNewClip, type FeedLoaded } from "../lib/feedRefresh";
   import { formatDuration, groupByDay, hueOf, relativeDate, viewsLabel } from "../lib/format";
   import { stickyTop } from "../lib/stickyTop";
   import { toast } from "../lib/toasts.svelte";
@@ -16,16 +16,21 @@
   let {
     active = true,
     server = null,
+    me = null,
     onunauthorized,
   }: {
     /** This is the screen shown (it's kept alive, hidden, while another one is). */
     active?: boolean;
     /** The server's host name, shown under the heading. */
     server?: string | null;
+    /** Your username: your own clips are never "new". */
+    me?: string | null;
     onunauthorized: () => void;
   } = $props();
 
   let clips = $state<FeedClip[]>([]);
+  /** What you'd seen of the feed before this visit: clips after it get the "New" dot. */
+  let seenBefore = $state<string | null>(null);
   let games = $state<GameCount[]>([]);
   let game = $state<string | null>(null);
   let search = $state("");
@@ -98,7 +103,12 @@
       clips = more ? [...clips, ...page.items] : page.items;
       cursor = page.nextCursor;
       // The unfiltered first page is the whole feed's newest end: you've now seen it.
-      if (!more && !game && !search.trim() && !withMe && !kind && !favoritesOnly && page.items[0]) api.markFeedSeen(page.items[0].createdAt).catch(() => {});
+      if (!more && !game && !search.trim() && !withMe && !kind && !favoritesOnly && page.items[0]) {
+        api
+          .markFeedSeen(page.items[0].createdAt)
+          .then((before) => (seenBefore = before))
+          .catch(() => {});
+      }
       now = Date.now();
       shown = more ? { ...shown, pages: shown.pages + 1 } : { loadedAt: now, pages: 1 };
       loaded = true;
@@ -343,7 +353,12 @@
                 <div class="body">
                   <Avatar name={clip.owner.username} size={32} />
                   <div class="text">
-                    <div class="title" title={clip.title}>{clip.title}</div>
+                    <div class="title" title={clip.title}>
+                      {#if isNewClip(clip, seenBefore, me)}
+                        <span class="new-dot" role="img" aria-label="New" title="New since you last opened the Feed"></span>
+                      {/if}
+                      {clip.title}
+                    </div>
                     <div class="meta">
                       <span class="who">{clip.owner.username}</span>
                       <span aria-hidden="true">·</span>
@@ -572,6 +587,17 @@
     font-weight: 650;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .new-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-right: 0.3rem;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    vertical-align: 0.12em;
   }
 
   .meta {

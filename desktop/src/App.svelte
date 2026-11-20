@@ -364,6 +364,7 @@
           <Feed
             active={view.name === "feed"}
             server={hostOf(account.serverUrl)}
+            me={account.username}
             onunauthorized={() => {
               account = null;
               loginNotice = "Your session has expired. Log in again to see the feed.";

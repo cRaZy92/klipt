@@ -462,8 +462,9 @@ export const api = {
   feedGames: () => invoke<FeedGame[]>("feed_games"),
   /** Friends' clips new since you last opened the Feed. */
   feedNewCount: () => invoke<number>("feed_new_count"),
-  /** You've seen the feed up to the clip created at `newest`. */
-  markFeedSeen: (newest: string) => invoke<void>("mark_feed_seen", { newest }),
+  /** You've seen the feed up to the clip created at `newest`. Gives back what you'd seen up to
+   *  before (null before the app's first feed check). */
+  markFeedSeen: (newest: string) => invoke<string | null>("mark_feed_seen", { newest }),
   /** Counts a play of a server clip (best effort). */
   recordView: (id: string) => invoke<void>("record_view", { id }),
   /** Friends who watched your upload, first viewer first. */

@@ -452,68 +452,78 @@ select.input option {
   gap: 1.25rem;
   margin: -1.75rem -2rem 0;
   padding: 1.75rem 2rem 0;
+}
+
+/* Its backdrop, on its own layer so going compact can slide it up (see below). */
+.page-top::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background:
     radial-gradient(60rem 22rem at 20% -6rem, rgba(124, 92, 255, 0.11), transparent 70%),
     var(--bg);
 }
 
-/* Scrolled (stickyTop.ts): the title shrinks and the subtitle folds away, so small windows keep
-   room for clips. Everything eases together over --compact-t; the subtitle collapses its height
-   while it fades and lifts, so the list below glides up instead of jumping. */
+/* Scrolled (stickyTop.ts): the title shrinks, the subtitle fades, and the rows under them and the
+   backdrop slide up into the room that frees. Only transforms and opacity change, so the browser
+   doesn't lay the page out again on every frame; the block keeps its size, and while compact it
+   lets clicks through to the cards under the part it no longer covers. The --shift-* distances
+   are measured by stickyTop.ts. */
 .page-top {
-  --compact-t: 0.32s;
+  --compact-t: 0.34s;
   --compact-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  transition:
-    padding-top var(--compact-t) var(--compact-ease),
-    gap var(--compact-t) var(--compact-ease);
 }
 
-.page-top.compact {
-  gap: 0.75rem;
-  padding-top: 0.9rem;
+.page-top::before,
+.page-top::after,
+.page-top > *,
+.page-top .page-head > :first-child,
+.page-top .page-head h1,
+.page-top .page-tools {
+  transition: transform var(--compact-t) var(--compact-ease);
 }
 
 .page-top .page-head h1 {
-  transition: font-size var(--compact-t) var(--compact-ease);
-}
-
-.page-top.compact .page-head h1 {
-  font-size: 1.3rem;
+  transform-origin: left top;
 }
 
 .page-top .page-head .subtitle {
-  max-height: 3rem;
-  overflow: hidden;
   transition:
-    max-height var(--compact-t) var(--compact-ease),
-    margin-top var(--compact-t) var(--compact-ease),
     opacity calc(var(--compact-t) * 0.6) ease,
     transform var(--compact-t) var(--compact-ease);
 }
 
-.page-top.compact .page-head .subtitle {
-  max-height: 0;
-  margin-top: 0;
-  opacity: 0;
-  transform: translateY(-0.35rem);
-}
-
-/* Pinned over the list: a faint line under the header fades in to set it apart. */
-.page-top::before {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 2rem;
-  right: 2rem;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
-  opacity: 0;
-  transition: opacity var(--compact-t) ease;
+.page-top.compact {
   pointer-events: none;
 }
 
-.page-top.compact::before {
-  opacity: 1;
+.page-top.compact > * {
+  pointer-events: auto;
+}
+
+.page-top.compact::before,
+.page-top.compact::after,
+.page-top.compact > :not(.page-head) {
+  transform: translateY(calc(-1 * var(--shift-rest, 0px)));
+}
+
+.page-top.compact .page-head > :first-child {
+  transform: translateY(calc(-1 * var(--shift-title, 0px)));
+}
+
+.page-top.compact .page-head h1 {
+  transform: scale(0.7);
+}
+
+.page-top.compact .page-head .subtitle {
+  opacity: 0;
+  transform: translateY(-0.4rem);
+  pointer-events: none;
+}
+
+.page-top.compact .page-tools {
+  transform: translateY(calc(-1 * var(--shift-tools, 0px)));
 }
 
 /* Soft edge so scrolled cards fade out under it instead of being cut by a hard line. */
@@ -603,6 +613,7 @@ select.input option {
   position: sticky;
   top: calc(var(--page-top-h, 0px) - 1px);
   z-index: 4;
+  transition: top 0.34s cubic-bezier(0.22, 1, 0.36, 1);
   display: flex;
   align-items: center;
   gap: 0.6rem;

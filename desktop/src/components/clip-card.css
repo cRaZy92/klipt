@@ -168,6 +168,18 @@
   pointer-events: none;
 }
 
+.clip-card .duration.edited {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* The recording's full length, next to what the edit leaves. */
+.clip-card .duration s {
+  font-weight: 500;
+  opacity: 0.55;
+}
+
 .clip-card .overlay {
   position: absolute;
   inset: 0;

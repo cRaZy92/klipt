@@ -130,3 +130,14 @@ export function clampToKept(ms: number, kept: TrimRange[]): number {
 export function sameRanges(a: CutRange[], b: CutRange[]): boolean {
   return a.length === b.length && a.every((r, i) => r.startMs === b[i].startMs && r.endMs === b[i].endMs);
 }
+
+/** How long a saved edit (trim and removed parts) leaves a clip `duration` long, in ms. */
+export function editedLength(
+  edit: { trimStartMs: number | null; trimEndMs: number | null; removedRanges: CutRange[] },
+  duration: number,
+): number {
+  const total = Math.max(0, Math.round(duration));
+  const start = Math.min(Math.max(0, edit.trimStartMs ?? 0), total);
+  const end = Math.min(Math.max(start, edit.trimEndMs ?? total), total);
+  return keptLength(piecesFromRanges(edit.removedRanges, total), { start, end });
+}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fileUrl, type ClipView } from "../lib/api";
+  import { editedLength } from "../lib/cuts";
   import { formatDuration, hueOf, relativeDate } from "../lib/format";
   import { forgetUpload, fraction, isBusy, retryUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
   import { menu } from "../lib/a11y";
@@ -74,6 +75,9 @@
       : null,
   );
   const progress = $derived(job ? fraction(job) : null);
+  /** What the edit leaves (what uploads and exports get); shown when it differs from the recording. */
+  const length = $derived(formatDuration(editedLength(clip, clip.durationMs)));
+  const recorded = $derived(formatDuration(clip.durationMs));
 
   function closeMenuOutside(e: MouseEvent) {
     if (menuOpen && !menuWrap?.contains(e.target as Node)) menuOpen = false;
@@ -144,7 +148,15 @@
     {#if clip.kind === "screenshot"}
       <span class="duration" title="Screenshot"><Icon name="image" size={13} /></span>
     {:else}
-      <span class="duration">{formatDuration(clip.durationMs)}</span>
+      <span class="duration" class:edited={length !== recorded}>
+        {#if length !== recorded}
+          <Icon name="scissors" size={12} />
+          {length}
+          <s aria-label="recorded {recorded}">{recorded}</s>
+        {:else}
+          {length}
+        {/if}
+      </span>
     {/if}
     {#if onfavorite}
       <button

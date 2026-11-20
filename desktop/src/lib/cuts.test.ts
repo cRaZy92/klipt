@@ -3,6 +3,7 @@ import {
   canRemove,
   clampToKept,
   deleteSplit,
+  editedLength,
   keptLength,
   keptRanges,
   moveSplit,
@@ -105,5 +106,19 @@ describe("cuts", () => {
   it("compares ranges", () => {
     expect(sameRanges([{ startMs: 1, endMs: 2 }], [{ startMs: 1, endMs: 2 }])).toBe(true);
     expect(sameRanges([{ startMs: 1, endMs: 2 }], [])).toBe(false);
+  });
+});
+
+describe("editedLength", () => {
+  it("is the whole clip with no edit", () => {
+    expect(editedLength({ trimStartMs: null, trimEndMs: null, removedRanges: [] }, D)).toBe(D);
+  });
+  it("takes the trim and the removed parts off", () => {
+    const edit = { trimStartMs: 1000, trimEndMs: 9000, removedRanges: [{ startMs: 3000, endMs: 5000 }] };
+    expect(editedLength(edit, D)).toBe(6000);
+  });
+  it("ignores removed parts outside the trim and a trim past the end", () => {
+    const edit = { trimStartMs: 2000, trimEndMs: 20_000, removedRanges: [{ startMs: 0, endMs: 1000 }] };
+    expect(editedLength(edit, D)).toBe(8000);
   });
 });

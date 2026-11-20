@@ -114,6 +114,16 @@ slow motion built on 2026-11-20, one commit each; item 10 was dropped.
 Not now: sorting by size, length or views; moving between cards with the arrow keys. Dropped: undo
 instead of "Are you sure?" (item 10).
 
+## Planned: recording and multi-clip editing (chosen 2026-11-20)
+
+Asked for by the owner. None has a spec yet.
+
+| # | Feature                          | What it means                                                                                      |
+| - | -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 1 | Full recording (start/stop)      | Besides the replay buffer, a shortcut (and a button) starts and stops a normal recording of any length, saved into the library like a clip. The replay buffer keeps running while it records. Open: whether gsr can record and keep its replay buffer in one process on Linux, and the same for the libobs sidecar on Windows; how long recordings sit in the library and in storage cleanup |
+| 2 | Several clips from one recording | In the editor, mark several parts of one clip or recording and export each as its own clip (own title, game kept, own thumbnail), without touching the source |
+| 3 | Combine clips into one upload    | Pick several clips (e.g. from the multi-select bar in My clips) and join them in order into one video that uploads as a single clip; each part keeps its own trim. Moved here from "Merging clips in the editor" under Later |
+
 ## Later: after v1
 
 Ideas the spec left out of v1 on purpose, or that came up while building. Nothing here is committed.
@@ -127,7 +137,6 @@ Ideas the spec left out of v1 on purpose, or that came up while building. Nothin
 | GNOME and X11 on Linux                | v1 targets KDE Plasma on Wayland only                                        |
 | Code signing                          | Costs money; it would remove the SmartScreen warning and make a Program Files install practical |
 | Slow motion in the editor             | Picked on 2026-11-13, then put off by the owner                              |
-| Merging clips in the editor           | Cuts, zoom and typed subtitles are built; joining several clips into one is still out |
 | Speech-to-text subtitles              | Subtitles are typed by hand for now; the owner deferred automatic ones          |
 | Likes, comments, notifications        | A non-goal for v1; the Feed is enough for a small group                      |
 | Several qualities per clip on the server | The server compresses every clip to H.264 and makes a small Discord copy; picking a quality in the player is still out |

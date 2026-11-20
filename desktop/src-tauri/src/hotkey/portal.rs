@@ -18,7 +18,7 @@ use tauri::async_runtime::{self, JoinHandle};
 use tokio::sync::oneshot;
 
 use super::{
-    to_portal_trigger, Action, BoundKey, HotkeyService, Keys, PressSink, SCREENSHOT_DESCRIPTION, SCREENSHOT_ID,
+    to_portal_trigger, Action, BoundKey, HotkeyService, Keys, PressSink, RECORD_DESCRIPTION, RECORD_ID, SCREENSHOT_DESCRIPTION, SCREENSHOT_ID,
     SHORTCUT_DESCRIPTION, SHORTCUT_ID,
 };
 use crate::errors::{AppError, Result};
@@ -84,6 +84,7 @@ fn portal_error(e: ashpd::Error) -> AppError {
 async fn run_session(
     trigger: String,
     screenshot_trigger: Option<String>,
+    record_trigger: Option<String>,
     sink: PressSink,
     bound: mpsc::Sender<Result<BoundKey>>,
     mut stop: oneshot::Receiver<()>,
@@ -97,6 +98,9 @@ async fn run_session(
         if let Some(t) = &screenshot_trigger {
             shortcuts.push(NewShortcut::new(SCREENSHOT_ID, SCREENSHOT_DESCRIPTION).preferred_trigger(Some(t.as_str())));
         }
+        if let Some(t) = &record_trigger {
+            shortcuts.push(NewShortcut::new(RECORD_ID, RECORD_DESCRIPTION).preferred_trigger(Some(t.as_str())));
+        }
         let response = portal.bind_shortcuts(&session, &shortcuts, None).await?.response()?;
         let display_of = |id: &str| {
             response
@@ -108,10 +112,11 @@ async fn run_session(
         };
         let display = display_of(SHORTCUT_ID);
         let screenshot = display_of(SCREENSHOT_ID);
+        let record = display_of(RECORD_ID);
         let activated = portal.receive_activated().await?;
-        Ok::<_, ashpd::Error>((portal, session, display, screenshot, activated))
+        Ok::<_, ashpd::Error>((portal, session, display, screenshot, record, activated))
     };
-    let (portal, session, display, screenshot, mut activated) = match setup.await {
+    let (portal, session, display, screenshot, record, mut activated) = match setup.await {
         Ok(ok) => ok,
         Err(e) => {
             let _ = bound.send(Err(portal_error(e)));
@@ -134,7 +139,14 @@ async fn run_session(
         }
         Some(_) => (Some(screenshot), None),
     };
-    if bound.send(Ok(BoundKey { display, screenshot, screenshot_error })).is_err() {
+    let (record, record_error) = match &record_trigger {
+        None => (None, None),
+        Some(_) if record.is_empty() => {
+            (None, Some("The recording shortcut is taken by another app. Pick another one in Settings.".to_string()))
+        }
+        Some(_) => (Some(record), None),
+    };
+    if bound.send(Ok(BoundKey { display, screenshot, screenshot_error, record, record_error })).is_err() {
         let _ = session.close().await;
         return;
     }
@@ -143,6 +155,7 @@ async fn run_session(
             event = activated.next() => match event {
                 Some(event) if event.shortcut_id() == SHORTCUT_ID => sink.press(Action::SaveClip),
                 Some(event) if event.shortcut_id() == SCREENSHOT_ID => sink.press(Action::Screenshot),
+                Some(event) if event.shortcut_id() == RECORD_ID => sink.press(Action::ToggleFullRecording),
                 Some(_) => {}
                 None => break,
             },
@@ -164,10 +177,11 @@ impl HotkeyService for PortalHotkey {
     fn bind(&mut self, keys: &Keys) -> Result<BoundKey> {
         let trigger = to_portal_trigger(&keys.save)?;
         let screenshot_trigger = keys.screenshot.as_deref().map(to_portal_trigger).transpose()?;
+        let record_trigger = keys.record.as_deref().map(to_portal_trigger).transpose()?;
         self.unbind();
         let (tx, rx) = mpsc::channel();
         let (stop, stop_rx) = oneshot::channel();
-        let task = async_runtime::spawn(run_session(trigger, screenshot_trigger, self.sink.clone(), tx, stop_rx));
+        let task = async_runtime::spawn(run_session(trigger, screenshot_trigger, record_trigger, self.sink.clone(), tx, stop_rx));
         // Blocks until the portal answers, which includes the time the user spends in KDE's
         // dialog the first time. Callers run this off the main thread.
         let result = rx

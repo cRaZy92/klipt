@@ -200,6 +200,10 @@ pub struct SettingsSaved {
     pub screenshot_hotkey_display: Option<String>,
     /// Why the screenshot shortcut couldn't be bound (the rest was saved).
     pub screenshot_hotkey_error: Option<String>,
+    /// The start/stop recording shortcut as the system reports it, when it was rebound.
+    pub record_hotkey_display: Option<String>,
+    /// Why the recording shortcut couldn't be bound (the rest was saved).
+    pub record_hotkey_error: Option<String>,
 }
 
 /// One settings save at a time: each diffs against the settings the previous one saved.
@@ -253,11 +257,14 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
     }
 
     let (mut hotkey_display, mut screenshot_hotkey_display, mut screenshot_hotkey_error) = (None, None, None);
+    let (mut record_hotkey_display, mut record_hotkey_error) = (None, None);
     if effects.rebind_hotkey {
         let key = rebind_hotkey(&app, hotkey::Keys::from_settings(&new)).await?;
         hotkey_display = Some(key.display);
         screenshot_hotkey_display = key.screenshot;
         screenshot_hotkey_error = key.screenshot_error;
+        record_hotkey_display = key.record;
+        record_hotkey_error = key.record_error;
     }
     let saved = {
         let mut current = lock(&state.settings);
@@ -295,6 +302,8 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
         hotkey_display,
         screenshot_hotkey_display,
         screenshot_hotkey_error,
+        record_hotkey_display,
+        record_hotkey_error,
     })
 }
 

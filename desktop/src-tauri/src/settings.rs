@@ -69,6 +69,8 @@ pub struct Settings {
     pub hotkey: String,
     /// The take-screenshot shortcut, same syntax as `hotkey`; empty = no screenshot shortcut.
     pub screenshot_hotkey: String,
+    /// The start/stop full recording shortcut, same syntax as `hotkey`; empty = none.
+    pub record_hotkey: String,
     pub output_dir: PathBuf,
     pub start_with_os: bool,
     pub save_sound: bool,
@@ -96,6 +98,8 @@ pub struct FieldError {
 pub const DEFAULT_HOTKEY: &str = "Alt+Backquote";
 /// Alt+Shift plus the key under Esc, next to the save-clip shortcut.
 pub const DEFAULT_SCREENSHOT_HOTKEY: &str = "Alt+Shift+Backquote";
+/// Ctrl+Alt plus the key under Esc. Not Alt+F9: NVIDIA App takes it on Windows.
+pub const DEFAULT_RECORD_HOTKEY: &str = "Ctrl+Alt+Backquote";
 
 pub const BUFFER_SECONDS_RANGE: std::ops::RangeInclusive<u32> = 10..=600;
 pub const BITRATE_KBPS_RANGE: std::ops::RangeInclusive<u32> = 2_000..=80_000;
@@ -127,6 +131,7 @@ impl Default for Settings {
             mic_device_id: None,
             hotkey: DEFAULT_HOTKEY.into(),
             screenshot_hotkey: DEFAULT_SCREENSHOT_HOTKEY.into(),
+            record_hotkey: DEFAULT_RECORD_HOTKEY.into(),
             output_dir: default_output_dir(),
             start_with_os: true,
             save_sound: true,
@@ -233,6 +238,19 @@ impl Settings {
                 Some(_) => {}
             }
         }
+        if !self.record_hotkey.trim().is_empty() {
+            let canonical = |accel: &str| crate::hotkey::normalize(accel).ok();
+            match canonical(&self.record_hotkey) {
+                None => fail("recordHotkey", "That isn't a shortcut Klipt can use."),
+                Some(rec) if Some(&rec) == canonical(&self.hotkey).as_ref() => {
+                    fail("recordHotkey", "Use a different shortcut than the one for saving clips.")
+                }
+                Some(rec) if Some(&rec) == canonical(&self.screenshot_hotkey).as_ref() => {
+                    fail("recordHotkey", "Use a different shortcut than the one for screenshots.")
+                }
+                Some(_) => {}
+            }
+        }
         if self.output_dir.as_os_str().is_empty() {
             fail("outputDir", "Choose a folder for your clips.");
         }
@@ -270,6 +288,7 @@ impl Settings {
                 "bufferSeconds" => self.buffer_seconds = defaults.buffer_seconds,
                 "hotkey" => self.hotkey = defaults.hotkey.clone(),
                 "screenshotHotkey" => self.screenshot_hotkey = defaults.screenshot_hotkey.clone(),
+                "recordHotkey" => self.record_hotkey = defaults.record_hotkey.clone(),
                 "outputDir" => self.output_dir = defaults.output_dir.clone(),
                 "cleanupDays" => self.cleanup_days = defaults.cleanup_days,
                 "editorCacheGb" => self.editor_cache_gb = defaults.editor_cache_gb,
@@ -309,7 +328,8 @@ impl Effects {
         Effects {
             restart_recorder,
             rebind_hotkey: canonical(&old.hotkey) != canonical(&new.hotkey)
-                || canonical(&old.screenshot_hotkey) != canonical(&new.screenshot_hotkey),
+                || canonical(&old.screenshot_hotkey) != canonical(&new.screenshot_hotkey)
+                || canonical(&old.record_hotkey) != canonical(&new.record_hotkey),
             autostart: old.start_with_os != new.start_with_os,
         }
     }
@@ -555,5 +575,24 @@ mod tests {
         assert!(!ok(with("alt+backquote")), "same as the save shortcut");
         assert!(!ok(with("Ctrl+Nonsense")));
         assert!(Effects::between(&Settings::default(), &with("Ctrl+F12")).rebind_hotkey);
+    }
+
+    #[test]
+    fn record_shortcut_is_optional_and_differs_from_the_others() {
+        assert_eq!(Settings::default().record_hotkey, "Ctrl+Alt+Backquote");
+        let with = |key: &str| Settings { record_hotkey: key.into(), ..Settings::default() };
+        let ok = |s: Settings| s.validate().iter().all(|e| e.field != "recordHotkey");
+        assert!(ok(Settings::default()));
+        assert!(ok(with("")));
+        assert!(!ok(with("alt+backquote")), "same as the save shortcut");
+        assert!(!ok(with("Alt+Shift+Backquote")), "same as the screenshot shortcut");
+        assert!(!ok(with("Ctrl+Nonsense")));
+        assert!(Effects::between(&Settings::default(), &with("Ctrl+F12")).rebind_hotkey);
+        // Older settings files have no record shortcut: they get the default.
+        let old: Settings = serde_json::from_str(r#"{"hotkey":"Alt+Backquote"}"#).unwrap();
+        assert_eq!(old.record_hotkey, "Ctrl+Alt+Backquote");
+        let mut bad = Settings { record_hotkey: "Ctrl+Nonsense".into(), ..Settings::default() };
+        bad = bad.with_invalid_fields_reset();
+        assert_eq!(bad.record_hotkey, "Ctrl+Alt+Backquote");
     }
 }

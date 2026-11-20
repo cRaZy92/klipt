@@ -48,6 +48,11 @@ export function validateSettings(s: Settings): FieldError[] {
   if (s.screenshotHotkey && s.screenshotHotkey === s.hotkey) {
     fail("screenshotHotkey", "Use a different shortcut than the one for saving clips.");
   }
+  if (s.recordHotkey && s.recordHotkey === s.hotkey) {
+    fail("recordHotkey", "Use a different shortcut than the one for saving clips.");
+  } else if (s.recordHotkey && s.recordHotkey === s.screenshotHotkey) {
+    fail("recordHotkey", "Use a different shortcut than the one for screenshots.");
+  }
   if (!s.outputDir) fail("outputDir", "Choose a folder for your clips.");
   const badApp = (a: string) => !a.trim() || a.length > 64 || /[|:]/.test(a) || a.trim() !== a;
   if (s.voiceApps.length > 10 || s.voiceApps.some(badApp)) fail("voiceApps", "List up to 10 app names, without | or : characters.");

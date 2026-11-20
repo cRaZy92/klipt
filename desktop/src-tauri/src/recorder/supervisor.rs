@@ -752,6 +752,11 @@ impl SupervisorHandle {
         let _ = self.tx.send(Input::Save);
     }
 
+    /// Starts a full recording, or stops the running one.
+    pub fn toggle_full_recording(&self) {
+        let _ = self.tx.send(Input::ToggleFullRecording);
+    }
+
     /// New settings: stops the recorder and starts it again with them (clearing the buffer).
     pub fn configure(&self, cfg: RecordConfig, mode: RecordingMode) {
         let _ = self.tx.send(Input::Configure(cfg, mode));

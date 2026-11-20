@@ -119,7 +119,7 @@
   let storageFailed = $state(false);
 
   /** Which shortcut is being recorded. */
-  let capturing = $state<"hotkey" | "screenshotHotkey" | null>(null);
+  let capturing = $state<"hotkey" | "screenshotHotkey" | "recordHotkey" | null>(null);
   let captureHint = $state<string | null>(null);
   let captureBox = $state<HTMLDivElement>();
 
@@ -143,6 +143,11 @@
     draft.screenshotHotkey !== settings.screenshotHotkey
       ? hotkeyLabel(draft.screenshotHotkey)
       : (hotkeyStatus.screenshotDisplay ?? hotkeyLabel(draft.screenshotHotkey)),
+  );
+  const recordShown = $derived(
+    draft.recordHotkey !== settings.recordHotkey
+      ? hotkeyLabel(draft.recordHotkey)
+      : (hotkeyStatus.recordDisplay ?? hotkeyLabel(draft.recordHotkey)),
   );
   const hotkeyStatusError = $derived(
     hotkeyChanged || hotkeyStatus.display
@@ -236,7 +241,7 @@
     setErrors({});
   }
 
-  async function startCapture(target: "hotkey" | "screenshotHotkey" = "hotkey") {
+  async function startCapture(target: "hotkey" | "screenshotHotkey" | "recordHotkey" = "hotkey") {
     capturing = target;
     captureHint = null;
     hotkeyProblem = null;
@@ -344,6 +349,7 @@
     voiceApps: "audio",
     hotkey: "hotkey",
     screenshotHotkey: "hotkey",
+    recordHotkey: "hotkey",
     outputDir: "clips",
     cleanupDays: "clips",
     editorCacheGb: "clips",
@@ -691,6 +697,50 @@
         <small class="help">The new shortcut takes effect when you save.</small>
       {:else if hotkeyStatus.screenshotError}
         <small class="error">{hotkeyStatus.screenshotError}</small>
+      {/if}
+    </section>
+
+    <section>
+      <h2>Recording</h2>
+      <p class="intro muted">Starts a recording of any length, and stops it on the next press. The replay buffer keeps running.</p>
+      <div class="hotkey">
+        {#if capturing === "recordHotkey"}
+          <div
+            class="capture"
+            tabindex="0"
+            role="textbox"
+            aria-label="Press the new recording shortcut"
+            bind:this={captureBox}
+            onkeydown={oncapturekey}
+            onblur={stopCapture}
+          >
+            Press the new shortcut…
+          </div>
+          <button class="btn" onmousedown={(e) => e.preventDefault()} onclick={stopCapture}>Cancel</button>
+        {:else}
+          {#if draft.recordHotkey}
+            <span class="keycaps"><Keys shortcut={recordShown} size="lg" /></span>
+          {:else}
+            <span class="muted">No shortcut</span>
+          {/if}
+          <button class="btn" onclick={() => startCapture("recordHotkey")} disabled={!!capturing}>
+            {draft.recordHotkey ? "Change" : "Set shortcut"}
+          </button>
+          {#if draft.recordHotkey}
+            <button class="btn btn-ghost" onclick={() => (draft.recordHotkey = "")}>Turn off</button>
+          {/if}
+        {/if}
+      </div>
+      {#if capturing === "recordHotkey"}
+        <small class={captureHint ? "error" : "help"}>
+          {captureHint ?? "Hold Ctrl, Alt, Shift or Super and press a key. Esc cancels."}
+        </small>
+      {:else if fieldErrors.recordHotkey}
+        <small class="error">{fieldErrors.recordHotkey}</small>
+      {:else if draft.recordHotkey !== settings.recordHotkey}
+        <small class="help">The new shortcut takes effect when you save.</small>
+      {:else if hotkeyStatus.recordError}
+        <small class="error">{hotkeyStatus.recordError}</small>
       {/if}
     </section>
 

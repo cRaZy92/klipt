@@ -63,7 +63,14 @@ impl HotkeyService for PluginHotkey {
                 Err(e) => (None, Some(format!("The screenshot shortcut didn't work: {}", e.user_message()))),
             },
         };
-        Ok(BoundKey { display, screenshot, screenshot_error })
+        let (record, record_error) = match &keys.record {
+            None => (None, None),
+            Some(accel) => match self.register(accel, Action::ToggleFullRecording) {
+                Ok(shown) => (Some(shown), None),
+                Err(e) => (None, Some(format!("The recording shortcut didn't work: {}", e.user_message()))),
+            },
+        };
+        Ok(BoundKey { display, screenshot, screenshot_error, record, record_error })
     }
 
     fn events(&self) -> Receiver<Action> {

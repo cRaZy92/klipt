@@ -75,8 +75,16 @@
       }),
       on(
         "hotkey-bound",
-        ({ display, screenshotDisplay, screenshotError }) =>
-          (hotkeyStatus = { display, error: null, errorCode: null, screenshotDisplay, screenshotError }),
+        ({ display, screenshotDisplay, screenshotError, recordDisplay, recordError }) =>
+          (hotkeyStatus = {
+            display,
+            error: null,
+            errorCode: null,
+            screenshotDisplay,
+            screenshotError,
+            recordDisplay,
+            recordError,
+          }),
       ),
       on("clip-saved", (clip) => toast(clip.kind === "screenshot" ? "Screenshot saved" : "Clip saved", "success")),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
@@ -221,6 +229,8 @@
         errorCode: null,
         screenshotDisplay: result.screenshotHotkeyDisplay,
         screenshotError: result.screenshotHotkeyError,
+        recordDisplay: result.recordHotkeyDisplay,
+        recordError: result.recordHotkeyError,
       };
     }
   }

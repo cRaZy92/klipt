@@ -114,6 +114,8 @@ export interface Settings {
   hotkey: string;
   /** The take-screenshot shortcut; "" = none. */
   screenshotHotkey: string;
+  /** The start/stop recording shortcut; "" = none. */
+  recordHotkey: string;
   outputDir: string;
   startWithOs: boolean;
   saveSound: boolean;
@@ -144,6 +146,8 @@ export interface SettingsSaved {
   hotkeyDisplay: string | null;
   screenshotHotkeyDisplay: string | null;
   screenshotHotkeyError: string | null;
+  recordHotkeyDisplay: string | null;
+  recordHotkeyError: string | null;
 }
 
 export interface Display {
@@ -173,6 +177,10 @@ export interface HotkeyStatus {
   screenshotDisplay?: string | null;
   /** Why the screenshot shortcut isn't bound (saving clips still works). */
   screenshotError?: string | null;
+  /** The start/stop recording shortcut as the system reports it. */
+  recordDisplay?: string | null;
+  /** Why the recording shortcut isn't bound (saving clips still works). */
+  recordError?: string | null;
 }
 
 export interface AppError {
@@ -534,7 +542,13 @@ export interface Events {
   "import-finished": ImportSummary;
   "save-busy": null;
   "recorder-error": AppError;
-  "hotkey-bound": { display: string; screenshotDisplay: string | null; screenshotError: string | null };
+  "hotkey-bound": {
+    display: string;
+    screenshotDisplay: string | null;
+    screenshotError: string | null;
+    recordDisplay: string | null;
+    recordError: string | null;
+  };
   "hotkey-error": AppError;
   "upload-progress": UploadProgress;
   "upload-done": UploadDone;

@@ -27,12 +27,16 @@ pub const SHORTCUT_DESCRIPTION: &str = "Klipt: save clip";
 /// The portal id of the screenshot shortcut (Linux).
 pub const SCREENSHOT_ID: &str = "screenshot";
 pub const SCREENSHOT_DESCRIPTION: &str = "Klipt: take screenshot";
+/// The portal id of the start/stop recording shortcut (Linux).
+pub const RECORD_ID: &str = "full-recording";
+pub const RECORD_DESCRIPTION: &str = "Klipt: start/stop recording";
 
 /// What a shortcut press asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     SaveClip,
     Screenshot,
+    ToggleFullRecording,
 }
 
 /// The shortcuts to bind, as accelerators; no screenshot shortcut when `screenshot` is None.
@@ -40,11 +44,13 @@ pub enum Action {
 pub struct Keys {
     pub save: String,
     pub screenshot: Option<String>,
+    pub record: Option<String>,
 }
 
 impl Keys {
     pub fn from_settings(s: &crate::settings::Settings) -> Keys {
-        Keys { save: s.hotkey.clone(), screenshot: Some(s.screenshot_hotkey.clone()).filter(|k| !k.trim().is_empty()) }
+        let optional = |k: &String| Some(k.clone()).filter(|k| !k.trim().is_empty());
+        Keys { save: s.hotkey.clone(), screenshot: optional(&s.screenshot_hotkey), record: optional(&s.record_hotkey) }
     }
 }
 
@@ -57,6 +63,10 @@ pub struct BoundKey {
     pub screenshot: Option<String>,
     /// Why the screenshot shortcut couldn't be bound (saving clips still works).
     pub screenshot_error: Option<String>,
+    /// The start/stop recording binding as the system reports it.
+    pub record: Option<String>,
+    /// Why the recording shortcut couldn't be bound (saving clips still works).
+    pub record_error: Option<String>,
 }
 
 pub trait HotkeyService {
@@ -107,6 +117,10 @@ pub struct HotkeyStatus {
     pub screenshot_display: Option<String>,
     /// Why the screenshot shortcut isn't bound, if it should be.
     pub screenshot_error: Option<String>,
+    /// The bound start/stop recording shortcut as the system reports it.
+    pub record_display: Option<String>,
+    /// Why the recording shortcut isn't bound, if it should be.
+    pub record_error: Option<String>,
     /// A friendly message when binding failed or the binding was lost.
     pub error: Option<String>,
     /// The error's code (`hotkey_taken`, `hotkey_unavailable`), for the UI to branch on.
@@ -219,15 +233,23 @@ fn on_bound(app: &tauri::AppHandle, service: &dyn HotkeyService, presses: &Press
             display: Some(key.display.clone()),
             screenshot_display: key.screenshot.clone(),
             screenshot_error: key.screenshot_error.clone(),
+            record_display: key.record.clone(),
+            record_error: key.record_error.clone(),
             error: None,
             error_code: None,
         });
     }
     let _ = app.emit(
         events::HOTKEY_BOUND,
-        serde_json::json!({ "display": key.display, "screenshotDisplay": key.screenshot, "screenshotError": key.screenshot_error }),
+        serde_json::json!({
+            "display": key.display,
+            "screenshotDisplay": key.screenshot,
+            "screenshotError": key.screenshot_error,
+            "recordDisplay": key.record,
+            "recordError": key.record_error,
+        }),
     );
-    if let Some(error) = &key.screenshot_error {
+    for error in [&key.screenshot_error, &key.record_error].into_iter().flatten() {
         crate::feedback::notify(app, "Klipt", Some(error));
     }
     // A new subscription ends the previous forwarder's stream; its generation is stale by then,
@@ -244,6 +266,11 @@ fn on_bound(app: &tauri::AppHandle, service: &dyn HotkeyService, presses: &Press
                     }
                 }
                 Action::Screenshot => crate::screenshot::take_in_background(&app),
+                Action::ToggleFullRecording => {
+                    if let Some(recorder) = app.try_state::<crate::recorder::SupervisorHandle>() {
+                        recorder.toggle_full_recording();
+                    }
+                }
             }
         }
         // The press stream of the current binding only ends when it is lost (e.g. plasmashell
@@ -267,6 +294,8 @@ fn report_error(app: &tauri::AppHandle, e: &AppError) {
             display: None,
             screenshot_display: None,
             screenshot_error: None,
+            record_display: None,
+            record_error: None,
             error: Some(message.clone()),
             error_code: Some(e.code().into()),
         });
@@ -490,6 +519,15 @@ pub fn classify_register_error(message: &str) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_from_settings_leave_out_empty_optional_shortcuts() {
+        let s = crate::settings::Settings::default();
+        let keys = Keys::from_settings(&s);
+        assert_eq!(keys.record.as_deref(), Some("Ctrl+Alt+Backquote"));
+        let none = Keys::from_settings(&crate::settings::Settings { record_hotkey: " ".into(), ..s });
+        assert_eq!(none.record, None);
+    }
 
     #[test]
     fn normalizes_case_and_modifier_order() {

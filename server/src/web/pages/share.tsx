@@ -1,7 +1,7 @@
 import type { Clip } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import { esc as e } from '../escape.js';
-import { Layout } from '../layout.js';
+import { Avatar, Layout } from '../layout.js';
 import { skDate, viewsLabel } from '../components.js';
 
 function meta(attr: 'property' | 'name', key: string, value: string | number): string {
@@ -73,6 +73,48 @@ function JoinCard(props: { clip: Clip }): JSX.Element {
   );
 }
 
+/** A small line icon for a button (24×24 stroke paths). */
+function Icon(props: { d: string }): JSX.Element {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d={props.d} />
+    </svg>
+  );
+}
+
+/** Who's in the clip, and for the owner who watched it, with tagging right where the names are. */
+function People(props: { clip: Clip; viewers?: string[] }): JSX.Element {
+  const { clip, viewers } = props;
+  const owner = !!viewers;
+  const tag = (label: string) => (
+    <button type="button" class="link-btn" data-action="tag" data-tagged={e(clip.tagged.join(', '))}>
+      {label}
+    </button>
+  );
+  if (clip.tagged.length === 0 && !owner) return '';
+  return (
+    <div class="share-people">
+      {clip.tagged.length > 0 ? (
+        <p class="meta">
+          <span data-role="tagged">
+            With {clip.tagged.map((name, i) => `${i > 0 ? ', ' : ''}<a href="/u/${encodeURIComponent(name)}">${e(name)}</a>`).join('')}
+          </span>
+          {owner ? tag('Edit') : ''}
+        </p>
+      ) : (
+        <p class="meta">{tag('Tag friends in this clip')}</p>
+      )}
+      {viewers ? (
+        <p class="meta seen-by" data-role="seen-by">
+          {viewers.length > 0 ? `Seen by ${viewers.map((v) => e(v)).join(', ')}` : 'No friends have watched it yet.'}
+        </p>
+      ) : (
+        ''
+      )}
+    </div>
+  );
+}
+
 export function SharePage(props: {
   user: AuthUser | null;
   clip: Clip;
@@ -99,50 +141,49 @@ export function SharePage(props: {
             data-view-url={`/api/clips/${e(clip.id)}/view`}
           ></video>
         )}
-        <aside class="share-info">
-        <h1>{e(clip.title)}</h1>
-        <p class="meta">
-          <a href={`/u/${encodeURIComponent(clip.owner.username)}`}>{e(clip.owner.username)}</a>
-          {clip.gameName ? <span> · {e(clip.gameName)}</span> : ''}
-          <span> · {skDate(clip.createdAt)}</span>
-          <span data-role="views"> · {viewsLabel(clip.views)}</span>
-        </p>
-        {clip.tagged.length > 0 ? (
-          <p class="meta" data-role="tagged">
-            With {clip.tagged.map((name, i) => `${i > 0 ? ', ' : ''}<a href="/u/${encodeURIComponent(name)}">${e(name)}</a>`).join('')}
-          </p>
-        ) : (
-          ''
-        )}
-        {props.viewers ? (
-          <p class="meta seen-by" data-role="seen-by">
-            {props.viewers.length > 0 ? `Seen by ${props.viewers.map((v) => e(v)).join(', ')}` : 'No friends have watched it yet.'}
-          </p>
-        ) : (
-          ''
-        )}
-        <div class="actions" data-clip-id={e(clip.id)}>
-          <button type="button" class="btn" data-action="copy" data-url={e(clip.shareUrl)}>Copy link</button>
-          {props.user ? (
-            <button type="button" class={`btn fav${clip.favorite ? ' on' : ''}`} data-action="favorite" aria-pressed={String(clip.favorite)}>
-              {clip.favorite ? '★ Favorite' : '☆ Favorite'}
+        <aside class="share-info" data-clip-id={e(clip.id)}>
+          {clip.gameName ? <p class="share-game">{e(clip.gameName)}</p> : ''}
+          <h1>{e(clip.title)}</h1>
+          <a class="share-owner" href={`/u/${encodeURIComponent(clip.owner.username)}`}>
+            <Avatar name={clip.owner.username} size="md" />
+            <span>
+              <strong>{e(clip.owner.username)}</strong>
+              <span class="meta">
+                <span>{skDate(clip.createdAt)}</span>
+                <span data-role="views">{viewsLabel(clip.views)}</span>
+              </span>
+            </span>
+          </a>
+          <People clip={clip} viewers={props.viewers} />
+          <div class="share-main">
+            {/* Logged out, signing up is the main thing on the page, so the link button steps back. */}
+            <button type="button" class={props.user ? 'btn primary' : 'btn'} data-action="copy" data-url={e(clip.shareUrl)}>
+              <Icon d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1" />
+              Copy link
             </button>
-          ) : (
-            ''
-          )}
-          {props.viewers ? (
-            <button type="button" class="btn" data-action="tag" data-tagged={e(clip.tagged.join(', '))}>Tag friends</button>
-          ) : (
-            ''
-          )}
-          <a class="btn" href={e(`${clip.videoUrl}?download=1`)} download="">Download</a>
-          {props.canDelete ? (
-            <button type="button" class="btn danger" data-action="delete" data-redirect="/">Delete</button>
-          ) : (
-            ''
-          )}
-        </div>
-        {props.signup && !props.user ? <JoinCard clip={clip} /> : ''}
+            {props.user ? (
+              <button type="button" class={`btn fav${clip.favorite ? ' on' : ''}`} data-action="favorite" aria-pressed={String(clip.favorite)}>
+                {clip.favorite ? '★ Favorite' : '☆ Favorite'}
+              </button>
+            ) : (
+              ''
+            )}
+          </div>
+          <div class="share-more">
+            <a class="btn ghost small" href={e(`${clip.videoUrl}?download=1`)} download="">
+              <Icon d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14" />
+              Download
+            </a>
+            {props.canDelete ? (
+              <button type="button" class="btn ghost small danger" data-action="delete" data-redirect="/">
+                <Icon d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13" />
+                Delete
+              </button>
+            ) : (
+              ''
+            )}
+          </div>
+          {props.signup && !props.user ? <JoinCard clip={clip} /> : ''}
         </aside>
       </div>
     </Layout>

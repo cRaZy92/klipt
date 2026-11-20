@@ -107,3 +107,55 @@ export async function getTranscodes(db: Db, transcoder: Transcoder): Promise<Adm
   const { savedBytes, ...stateCounts } = counts;
   return { enabled: transcoder.enabled, counts: stateCounts, savedBytes, active: active.map(toJob), recent: recent.map(toJob) };
 }
+
+export interface WeekActivity {
+  /** Monday of the week, YYYY-MM-DD in Slovak time. */
+  week: string;
+  clips: number;
+  bytes: number;
+}
+
+const ACTIVITY_WEEKS = 12;
+const WEEK_EXPR = sql<string>`to_char(date_trunc('week', ${clips.createdAt} at time zone 'Europe/Bratislava'), 'YYYY-MM-DD')`;
+
+/** Mondays (YYYY-MM-DD, Slovak time) of the last `n` weeks, oldest first, ending with this week. */
+export function lastMondays(n: number, now = new Date()): string[] {
+  const local = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Bratislava', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  const today = new Date(`${local}T00:00:00Z`);
+  const monday = new Date(today.getTime() - ((today.getUTCDay() + 6) % 7) * 86400000);
+  return Array.from({ length: n }, (_, i) => new Date(monday.getTime() - (n - 1 - i) * 7 * 86400000).toISOString().slice(0, 10));
+}
+
+/** Uploads per week for the admin chart: the last 12 weeks, empty weeks included. */
+export async function getActivity(db: Db, now = new Date()): Promise<WeekActivity[]> {
+  const weeks = lastMondays(ACTIVITY_WEEKS, now);
+  const rows = await db
+    .select({ week: WEEK_EXPR, clips: sql<number>`count(*)::int`, bytes: sql<number>`coalesce(sum(${clips.sizeBytes}), 0)::float8` })
+    .from(clips)
+    // A day of slack on the cutoff; weeks outside the list are dropped below.
+    .where(gt(clips.createdAt, new Date(Date.parse(`${weeks[0]}T00:00:00Z`) - 86400000)))
+    .groupBy(WEEK_EXPR);
+  const byWeek = new Map(rows.map((r) => [r.week, r]));
+  return weeks.map((week) => ({ week, clips: Number(byWeek.get(week)?.clips ?? 0), bytes: Number(byWeek.get(week)?.bytes ?? 0) }));
+}
+
+export interface GameShare {
+  /** null for the "Other games" row that folds in the rest. */
+  gameName: string | null;
+  clips: number;
+}
+
+const TOP_GAMES = 6;
+
+/** Clips per game across the whole server: the top six, then the rest folded into one row. */
+export async function getGameShares(db: Db): Promise<GameShare[]> {
+  const rows = await db
+    .select({ gameName: clips.gameName, clips: sql<number>`count(*)::int` })
+    .from(clips)
+    .where(sql`${clips.gameName} is not null`)
+    .groupBy(clips.gameName)
+    .orderBy(sql`count(*) desc`, clips.gameName);
+  const top: GameShare[] = rows.slice(0, TOP_GAMES).map((r) => ({ gameName: r.gameName, clips: Number(r.clips) }));
+  const rest = rows.slice(TOP_GAMES).reduce((n, r) => n + Number(r.clips), 0);
+  return rest > 0 ? [...top, { gameName: null, clips: rest }] : top;
+}

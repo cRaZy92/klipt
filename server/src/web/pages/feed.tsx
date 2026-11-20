@@ -17,9 +17,11 @@ export function FeedPage(props: {
 }): JSX.Element {
   const base = feedBase(!!props.withMe, props.kind, !!props.favorites);
   return (
-    <Layout title="Feed" user={props.user}>
-      <h1>Feed</h1>
-      <SearchBox basePath="/" search={props.search} game={props.game} withMe={props.withMe} kind={props.kind} favorites={props.favorites} />
+    <Layout title="Feed" user={props.user} nav="feed">
+      <div class="page-head">
+        <h1>Feed</h1>
+        <SearchBox basePath="/" search={props.search} game={props.game} withMe={props.withMe} kind={props.kind} favorites={props.favorites} />
+      </div>
       <FeedFilters withMe={!!props.withMe} kind={props.kind} favorites={props.favorites} />
       <GameFilter games={props.games} active={props.game} basePath={base} search={props.search} />
       <ClipGrid

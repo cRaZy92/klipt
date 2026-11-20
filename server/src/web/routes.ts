@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { getAdminStats, getTranscodes, isInviteActive, listActiveInvites, listAdminUsers } from '../admin/queries.js';
+import { getActivity, getAdminStats, getGameShares, getTranscodes, isInviteActive, listActiveInvites, listAdminUsers } from '../admin/queries.js';
 import { toClip } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
 import { users } from '../db/schema.js';
@@ -169,15 +169,17 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   app.get('/admin', async (req, reply) => {
     if (!guard(req, reply)) return reply;
     if (!req.user!.isAdmin) return notFound(req, reply);
-    const [stats, inviteList, userList, transcodes] = await Promise.all([
+    const [stats, inviteList, userList, transcodes, activity, games] = await Promise.all([
       getAdminStats(db),
       listActiveInvites(db, config.baseUrl),
       listAdminUsers(db),
       getTranscodes(db, app.transcoder),
+      getActivity(db),
+      getGameShares(db),
     ]);
     return html(
       reply,
-      AdminPage({ user: req.user!, stats, invites: inviteList, users: userList, transcodes }) as string,
+      AdminPage({ user: req.user!, stats, invites: inviteList, users: userList, transcodes, activity, games }) as string,
     );
   });
 

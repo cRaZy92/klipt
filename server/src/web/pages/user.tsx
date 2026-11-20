@@ -3,7 +3,7 @@ import type { GameCount } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import type { ClipWithOwner, ProfileStats } from '../../clips/repo.js';
 import { ClipGrid, emptyText, GameFilter, Pager, SearchBox, viewsLabel } from '../components.js';
-import { Layout } from '../layout.js';
+import { Avatar, Layout } from '../layout.js';
 
 export function UserPage(props: {
   user: AuthUser;
@@ -19,7 +19,10 @@ export function UserPage(props: {
   const base = `/u/${encodeURIComponent(props.username)}`;
   return (
     <Layout title={props.username} user={props.user}>
-      <h1>{e(props.username)}</h1>
+      <div class="profile-head">
+        <Avatar name={props.username} size="lg" />
+        <h1>{e(props.username)}</h1>
+      </div>
       {stats.clips > 0 ? (
         <div class="stats profile-stats">
           <div class="stat" data-stat="clips"><b>{stats.clips}</b><span>{stats.clips === 1 ? 'clip' : 'clips'}</span></div>

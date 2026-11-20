@@ -1,7 +1,8 @@
 import type { AdminStats, AdminTranscodes, AdminUser, Invite, TranscodeJob } from '@klipt/shared';
+import type { GameShare, WeekActivity } from '../../admin/queries.js';
 import type { AuthUser } from '../../auth/sessions.js';
 import { formatDuration, formatGB, formatSize, relativeDate, skDate } from '../components.js';
-import { Layout } from '../layout.js';
+import { Avatar, Layout } from '../layout.js';
 
 import { esc as e } from '../escape.js';
 
@@ -79,12 +80,7 @@ export function TranscodeSection(props: { data: AdminTranscodes }): JSX.Element 
         device. A clip plays from its upload until that's done.
       </p>
       {!props.data.enabled ? <p class="empty">Compression is turned off on this server (TRANSCODE=off).</p> : ''}
-      <div class="stats">
-        <div class="stat"><b>{formatSize(props.data.savedBytes)}</b><span>saved</span></div>
-        <div class="stat"><b>{counts.queued + counts.running}</b><span>in queue</span></div>
-        <div class="stat"><b>{counts.done}</b><span>compressed</span></div>
-        <div class="stat"><b>{counts.failed}</b><span>failed</span></div>
-      </div>
+      <QueueBar counts={counts} saved={props.data.savedBytes} />
       {active.length > 0 ? (
         <>
           <h3>Now</h3>
@@ -106,21 +102,144 @@ export function TranscodeSection(props: { data: AdminTranscodes }): JSX.Element 
   );
 }
 
+/** Rounds a chart's top up to 1, 2 or 5 times a power of ten, so the gridlines get even labels. */
+function niceMax(n: number): number {
+  if (n <= 4) return 4;
+  const p = 10 ** Math.floor(Math.log10(n));
+  return ([1, 2, 5, 10].find((m) => m * p >= n) ?? 10) * p;
+}
+
+/** "10. 11." */
+function dayMonth(isoDay: string): string {
+  const [, m, d] = isoDay.split('-');
+  return `${Number(d)}. ${Number(m)}.`;
+}
+
+/** Uploads per week: a column per week, the newest on the right, with a tooltip on each. */
+function ActivityChart(props: { weeks: WeekActivity[] }): JSX.Element {
+  const { weeks } = props;
+  const top = niceMax(Math.max(...weeks.map((w) => w.clips)));
+  const total = weeks.reduce((n, w) => n + w.clips, 0);
+  const clipsLabel = (n: number) => (n === 1 ? '1 clip' : `${n} clips`);
+  return (
+    <figure class="panel chart-panel">
+      <figcaption>
+        <h3>Uploads per week</h3>
+        <p class="muted">{clipsLabel(total)} in the last 12 weeks</p>
+      </figcaption>
+      <div class="cols">
+        <div class="cols-grid" aria-hidden="true">
+          <span style="--v:1">{String(top)}</span>
+          <span style="--v:.5">{String(top / 2)}</span>
+          <span style="--v:0">0</span>
+        </div>
+        {weeks.map((w, i) => {
+          const last = i === weeks.length - 1;
+          const label = `${last ? 'This week' : `Week of ${dayMonth(w.week)}`}: ${clipsLabel(w.clips)}${w.clips ? `, ${formatSize(w.bytes)}` : ''}`;
+          return (
+            <div class={`col${last ? ' now' : ''}${i < 2 ? ' start' : i > weeks.length - 3 ? ' end' : ''}`} style={`--v:${w.clips / top}`} tabindex="0" aria-label={e(label)}>
+              <div class="col-bar">{last && w.clips > 0 ? <span class="col-value">{String(w.clips)}</span> : ''}</div>
+              <span class="tip" role="presentation">
+                <b>{last ? 'This week' : `Week of ${dayMonth(w.week)}`}</b>
+                {clipsLabel(w.clips)}
+                {w.clips ? <span>{formatSize(w.bytes)}</span> : ''}
+              </span>
+              <span class="col-x" aria-hidden="true">{last ? 'Now' : i % 3 === 0 ? dayMonth(w.week) : ''}</span>
+            </div>
+          );
+        })}
+      </div>
+    </figure>
+  );
+}
+
+/** Clips per game: horizontal bars, biggest first, the rest folded into "Other games". */
+function GamesChart(props: { games: GameShare[] }): JSX.Element {
+  const max = Math.max(1, ...props.games.map((g) => g.clips));
+  return (
+    <figure class="panel chart-panel">
+      <figcaption>
+        <h3>Top games</h3>
+        <p class="muted">By number of clips</p>
+      </figcaption>
+      {props.games.length === 0 ? (
+        <p class="muted">No clips with a game yet.</p>
+      ) : (
+        <ul class="hbars">
+          {props.games.map((g) => (
+            <li class={g.gameName ? '' : 'other'} title={e(`${g.gameName ?? 'Other games'}: ${g.clips}`)}>
+              <span class="hbar-name">{e(g.gameName ?? 'Other games')}</span>
+              <span class="hbar-track"><span class="hbar" style={`--v:${g.clips / max}`}></span></span>
+              <span class="hbar-value">{String(g.clips)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </figure>
+  );
+}
+
+/** Where every uploaded video stands in the compression queue, as one bar split by state. */
+function QueueBar(props: { counts: AdminTranscodes['counts']; saved: number }): JSX.Element {
+  const { counts } = props;
+  const parts: [string, string, number][] = [
+    ['done', 'Compressed', counts.done],
+    ['skipped', 'Kept original', counts.skipped],
+    ['waiting', 'Waiting', counts.queued + counts.running],
+    ['failed', 'Failed', counts.failed],
+  ];
+  const total = parts.reduce((n, [, , v]) => n + v, 0);
+  return (
+    <div class="panel queue">
+      <div class="queue-head">
+        <div>
+          <b class="big">{formatSize(props.saved)}</b>
+          <span class="muted">saved by compressing</span>
+        </div>
+        <span class="muted">{total === 1 ? '1 video' : `${total} videos`}</span>
+      </div>
+      {total > 0 ? (
+        <div class="seg" role="img" aria-label={e(parts.map(([, l, v]) => `${l} ${v}`).join(', '))}>
+          {parts.filter(([, , v]) => v > 0).map(([k, l, v]) => <span class={`seg-${k}`} style={`flex-grow:${v}`} title={e(`${l}: ${v}`)}></span>)}
+        </div>
+      ) : (
+        ''
+      )}
+      <ul class="legend">
+        {parts.map(([k, l, v]) => (
+          <li><i class={`seg-${k}`}></i>{l} <b>{String(v)}</b></li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function AdminPage(props: {
   user: AuthUser;
   stats: AdminStats;
   invites: Invite[];
   users: AdminUser[];
   transcodes: AdminTranscodes;
+  activity: WeekActivity[];
+  games: GameShare[];
 }): JSX.Element {
   const { stats } = props;
+  const thisWeek = props.activity.at(-1)?.clips ?? 0;
+  const users = [...props.users].sort((a, b) => b.storageBytes - a.storageBytes);
+  const maxBytes = Math.max(1, ...users.map((u) => u.storageBytes));
   return (
-    <Layout title="Admin" user={props.user}>
+    <Layout title="Admin" user={props.user} nav="admin">
       <h1>Admin</h1>
       <div class="stats">
         <div class="stat"><b>{stats.users}</b><span>users</span></div>
         <div class="stat"><b>{stats.clips}</b><span>clips</span></div>
         <div class="stat"><b>{formatGB(stats.storageBytes)}</b><span>storage</span></div>
+        <div class="stat"><b>{thisWeek}</b><span>{thisWeek === 1 ? 'clip this week' : 'clips this week'}</span></div>
+      </div>
+
+      <div class="charts">
+        <ActivityChart weeks={props.activity} />
+        <GamesChart games={props.games} />
       </div>
 
       <h2>Video compression</h2>
@@ -144,16 +263,21 @@ export function AdminPage(props: {
 
       <h2>Users</h2>
       <ul class="rows plain">
-        {props.users.map((u) => (
-          <li class="row" data-user-id={u.id}>
+        {users.map((u) => (
+          <li class="row user-row" data-user-id={u.id}>
+            <Avatar name={u.username} size="md" />
             <div class="row-main">
               <a href={`/u/${encodeURIComponent(u.username)}`}><strong>{e(u.username)}</strong></a>
               {u.isAdmin ? <span class="badge accent">admin</span> : ''}
               {u.disabled ? <span class="badge">disabled</span> : ''}
-              <div class="meta"><span>{u.clipCount} clips · {formatSize(u.storageBytes)}</span><span>joined {relativeDate(new Date(u.createdAt))}</span></div>
+              <div class="meta"><span>{u.clipCount === 1 ? '1 clip' : `${u.clipCount} clips`}</span><span>joined {relativeDate(new Date(u.createdAt))}</span></div>
+            </div>
+            <div class="usage" title="Storage on the server">
+              <span class="usage-track"><span class="usage-bar" style={`--v:${u.storageBytes / maxBytes}`}></span></span>
+              <span class="usage-value">{formatSize(u.storageBytes)}</span>
             </div>
             {u.id === props.user.id ? (
-              ''
+              <span class="btn-slot"></span>
             ) : (
               <button type="button" class="btn small" data-action="toggle-user" data-disabled={String(u.disabled)}>
                 {u.disabled ? 'Enable' : 'Disable'}

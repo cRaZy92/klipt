@@ -66,7 +66,7 @@ describe('share page', () => {
     const u = await createUser(t.db, { username: 'gina' });
     await addClip(u.id, 'shareclip006');
     const res = await get('/c/shareclip006');
-    expect(res.body).toMatch(/<a[^>]*class="btn"[^>]*href="http:\/\/localhost\/media\/shareclip006\.mp4\?download=1"[^>]*>Download<\/a>/);
+    expect(res.body).toMatch(/<a[^>]*class="btn[^"]*"[^>]*href="http:\/\/localhost\/media\/shareclip006\.mp4\?download=1"[^>]*>[\s\S]*?Download<\/a>/);
   });
 
   it('shows the view count to everyone and who watched it to the owner only', async () => {
@@ -79,7 +79,7 @@ describe('share page', () => {
     await t.app.inject({ method: 'POST', url: '/api/clips/shareclip007/view', headers: { cookie: (await sessionFor(t.db, friend.id)).cookie } });
     await t.app.inject({ method: 'POST', url: '/api/clips/shareclip007/view' });
     const mine = await page(owner.id);
-    expect(mine).toMatch(/data-role="views"> · 2 views</);
+    expect(mine).toMatch(/data-role="views">2 views</);
     expect(mine).toMatch(/data-role="seen-by">Seen by ivan</);
     const theirs = await page(friend.id);
     expect(theirs).toContain('2 views');
@@ -95,7 +95,7 @@ describe('share page', () => {
     await addClip(owner.id, 'shareclip005');
     const view = async (userId?: string) =>
       (await t.app.inject({ method: 'GET', url: '/c/shareclip005', headers: userId ? { cookie: (await sessionFor(t.db, userId)).cookie } : {} })).body;
-    const deleteButton = /<div[^>]*data-clip-id="shareclip005"[^>]*>[\s\S]*data-action="delete"[^>]*data-redirect="\/"/;
+    const deleteButton = /<aside[^>]*data-clip-id="shareclip005"[^>]*>[\s\S]*data-action="delete"[^>]*data-redirect="\/"/;
     expect(await view(owner.id)).toMatch(deleteButton);
     expect(await view(admin.id)).toMatch(deleteButton);
     expect(await view(other.id)).not.toContain('data-action="delete"');

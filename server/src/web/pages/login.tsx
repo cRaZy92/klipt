@@ -1,10 +1,11 @@
 import { esc as e } from '../escape.js';
-import { Layout } from '../layout.js';
+import { Layout, LogoMark } from '../layout.js';
 
 export function LoginPage(props: { next: string }): JSX.Element {
   return (
     <Layout title="Log in" user={null}>
       <div class="center-card">
+        <LogoMark size={44} />
         <h1>Log in to Klipt</h1>
         <form data-form="login" data-next={e(props.next)} class="form">
           <label>Username<input name="username" autocomplete="username" required maxlength="100" autofocus /></label>

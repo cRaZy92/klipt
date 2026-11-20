@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { clips, invites } from '../src/db/schema.js';
 import { createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
 import { safeNext } from '../src/web/routes.js';
+import { getActivity, getGameShares, lastMondays } from '../src/admin/queries.js';
 
 let t: TestApp;
 let seq = 0;
@@ -195,7 +196,7 @@ describe('web pages', () => {
     await addClip(a.u.id, { sizeBytes: 1_000_000_000 });
     await addClip(a.u.id, { sizeBytes: 610_000_000, visibility: 'link' });
     await addClip(b.u.id, { sizeBytes: 5_000_000_000 });
-    expect((await get('/me', a.cookie)).body).toMatch(/data-role="storage">2 clips · 1\.5 GB on the server</);
+    expect((await get('/me', a.cookie)).body).toMatch(/data-role="storage">2 clips, 1\.5 GB on the server</);
     const c = await mk('carol');
     expect((await get('/me', c.cookie)).body).not.toContain('data-role="storage"');
   });
@@ -220,6 +221,33 @@ describe('web pages', () => {
     expect(res.body).toContain('Create invite');
     expect(res.body).toContain('GB');
     expect(res.body).toContain('No open invites');
+    expect(res.body).toContain('Uploads per week');
+  });
+
+  it('admin charts: uploads per week in Slovak time, and the top games with the rest folded', async () => {
+    const a = await mk('alice');
+    const now = new Date('2026-11-18T12:00:00Z'); // a Wednesday
+    // Sunday 23:30 UTC is already Monday in Bratislava: it counts for this week.
+    await addClip(a.u.id, { createdAt: new Date('2026-11-15T23:30:00Z'), sizeBytes: 100, gameName: 'G1' });
+    await addClip(a.u.id, { createdAt: new Date('2026-11-15T21:00:00Z'), sizeBytes: 50, gameName: 'G1' });
+    await addClip(a.u.id, { createdAt: new Date('2026-08-01T12:00:00Z') }); // older than 12 weeks
+    const weeks = await getActivity(t.db, now);
+    expect(weeks).toHaveLength(12);
+    expect(weeks[11]).toEqual({ week: '2026-11-16', clips: 1, bytes: 100 });
+    expect(weeks[10]).toEqual({ week: '2026-11-09', clips: 1, bytes: 50 });
+    expect(weeks.slice(0, 10).every((w) => w.clips === 0)).toBe(true);
+
+    for (const [game, n] of [['G2', 3], ['G3', 2], ['G4', 2], ['G5', 2], ['G6', 1], ['G7', 1], ['G8', 1]] as const) {
+      for (let i = 0; i < n; i++) await addClip(a.u.id, { gameName: game });
+    }
+    const games = await getGameShares(t.db);
+    expect(games.map((g) => g.gameName)).toEqual(['G2', 'G1', 'G3', 'G4', 'G5', 'G6', null]);
+    expect(games.at(-1)).toEqual({ gameName: null, clips: 2 });
+  });
+
+  it('lastMondays counts back from the Monday of this week in Slovak time', () => {
+    expect(lastMondays(3, new Date('2026-11-15T23:30:00Z'))).toEqual(['2026-11-02', '2026-11-09', '2026-11-16']);
+    expect(lastMondays(1, new Date('2026-11-15T22:30:00Z'))).toEqual(['2026-11-09']);
   });
 
   it('invite page validates code', async () => {

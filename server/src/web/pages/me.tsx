@@ -55,16 +55,20 @@ export function MePage(props: {
 }): JSX.Element {
   const { storage } = props;
   return (
-    <Layout title="My clips" user={props.user}>
-      <h1>My clips</h1>
-      {storage.clips > 0 ? (
-        <p class="meta" data-role="storage">
-          {storage.clips === 1 ? '1 clip' : `${storage.clips} clips`} · {formatSize(storage.bytes)} on the server
-        </p>
-      ) : (
-        ''
-      )}
-      <SearchBox basePath="/me" search={props.search} game={props.game} />
+    <Layout title="My clips" user={props.user} nav="me">
+      <div class="page-head">
+        <div>
+          <h1>My clips</h1>
+          {storage.clips > 0 ? (
+            <p class="page-sub" data-role="storage">
+              {storage.clips === 1 ? '1 clip' : `${storage.clips} clips`}, {formatSize(storage.bytes)} on the server
+            </p>
+          ) : (
+            ''
+          )}
+        </div>
+        <SearchBox basePath="/me" search={props.search} game={props.game} />
+      </div>
       <GameFilter games={props.games} active={props.game} basePath="/me" search={props.search} />
       {props.items.length === 0 ? (
         <p class="empty">{e(emptyText(props.search, "You haven't uploaded any clips yet."))}</p>

@@ -1,5 +1,5 @@
 import { esc as e } from '../escape.js';
-import { Layout } from '../layout.js';
+import { Layout, LogoMark } from '../layout.js';
 
 export function InvitePage(props: { code: string; valid: boolean }): JSX.Element {
   return (
@@ -7,7 +7,8 @@ export function InvitePage(props: { code: string; valid: boolean }): JSX.Element
       <div class="center-card">
         {props.valid ? (
           <>
-            <h1>Join Klipt</h1>
+            <LogoMark size={44} />
+        <h1>Join Klipt</h1>
             <form data-form="register" data-next="/get-app?welcome=1" class="form">
               <input type="hidden" name="inviteCode" value={e(props.code)} />
               <label>Username<input name="username" autocomplete="username" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="3-24 letters, numbers or underscores" autofocus /></label>

@@ -13,7 +13,7 @@ export function GetAppPage(props: { user: AuthUser | null; server: string; next:
   const { user, server, next, welcome } = props;
   const continueLabel = next.startsWith('/c/') ? 'Back to the clip' : 'Go to the feed';
   return (
-    <Layout title="Get the app" user={user}>
+    <Layout title="Get the app" user={user} nav="get-app">
       <div class="guide">
         <h1>{welcome && user ? `Welcome, ${e(user.username)}!` : 'Get the Klipt app'}</h1>
         <p class="lead muted">

@@ -2,6 +2,7 @@ import type { GameCount } from '@klipt/shared';
 import type { ClipWithOwner } from '../clips/repo.js';
 
 import { esc as e } from './escape.js';
+import { Avatar } from './layout.js';
 
 export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -101,12 +102,17 @@ export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
         <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>
       </div>
       <div class="card-body">
-        <div class="card-title">{e(clip.title)}</div>
-        <div class="meta">
-          {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
-          <span>{e(owner.username)}</span>
-          <span>{relativeDate(clip.createdAt)}</span>
-          {views > 0 ? <span data-role="views">{viewsLabel(views)}</span> : ''}
+        <Avatar name={owner.username} />
+        <div class="card-text">
+          <div class="card-title">{e(clip.title)}</div>
+          <div class="meta">
+            <span class="owner">{e(owner.username)}</span>
+            {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
+          </div>
+          <div class="meta">
+            <span>{relativeDate(clip.createdAt)}</span>
+            {views > 0 ? <span data-role="views">{viewsLabel(views)}</span> : ''}
+          </div>
         </div>
       </div>
     </a>
@@ -124,6 +130,10 @@ function href(base: string, params: Record<string, string | null | undefined>): 
 export function SearchBox(props: { basePath: string; search?: string; game?: string; withMe?: boolean; kind?: KindFilter; favorites?: boolean }): JSX.Element {
   return (
     <form class="search" method="get" action={e(props.basePath)} role="search">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-3.5-3.5" />
+      </svg>
       <input type="search" name="q" value={e(props.search ?? '')} placeholder="Search by title, game or friend" aria-label="Search clips" maxlength="100" />
       {props.game ? <input type="hidden" name="game" value={e(props.game)} /> : ''}
       {props.withMe ? <input type="hidden" name="with" value="me" /> : ''}

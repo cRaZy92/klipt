@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Downloads ffmpeg.exe and ffprobe.exe (BtbN win64 GPL build) into -Dest.
+  Downloads ffmpeg.exe and ffprobe.exe (FFmpeg-Builds win64 GPL build, formerly BtbN) into -Dest.
 
 .DESCRIPTION
-  Uses the BtbN FFmpeg-Builds release named by -Tag ("latest" by default) and picks the
+  Uses the FFmpeg-Builds release named by -Tag ("latest" by default) and picks the
   release-branch build (ffmpeg-nX.Y-latest-win64-gpl-X.Y.zip), not the master snapshot, so
   the bundled ffmpeg changes only with a new FFmpeg release.
 #>
@@ -15,18 +15,21 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+# The project moved from BtbN/FFmpeg-Builds; the old name only redirects, and a redirect drops the
+# token (PowerShell's default), which leaves the shared runner IP's unauthenticated rate limit.
+$repo = 'FFmpeg-Builds/FFmpeg-Builds'
 $headers = @{ 'User-Agent' = 'klipt-fetch-ffmpeg' }
 if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
 $pattern = '^ffmpeg-n[0-9].*-win64-gpl-[0-9.]+\.zip$' # release-branch builds (nX.Y…), not master or shared
-# BtbN re-publishes its daily releases, so a release can briefly have no assets: take the newest
+# FFmpeg-Builds re-publishes its daily releases, so a release can briefly have no assets: take the newest
 # release (or -Tag) that has the build, and retry a few times.
 $asset = $null
 for ($try = 1; $try -le 4 -and -not $asset; $try++) {
   try {
     $releases = if ($Tag -eq 'latest') {
-      Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=10'
+      Invoke-RestMethod -Headers $headers -PreserveAuthorizationOnRedirect -Uri "https://api.github.com/repos/$repo/releases?per_page=10"
     } else {
-      @(Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$Tag")
+      @(Invoke-RestMethod -Headers $headers -PreserveAuthorizationOnRedirect -Uri "https://api.github.com/repos/$repo/releases/tags/$Tag")
     }
     foreach ($r in $releases) {
       $asset = $r.assets | Where-Object { $_.name -match $pattern } | Sort-Object name -Descending | Select-Object -First 1
@@ -35,7 +38,7 @@ for ($try = 1; $try -le 4 -and -not $asset; $try++) {
   } catch { Write-Host "attempt $try failed: $_" }
   if (-not $asset) { Start-Sleep -Seconds (15 * $try) }
 }
-if (-not $asset) { throw "no win64 GPL release build found in BtbN's recent releases" }
+if (-not $asset) { throw "no win64 GPL release build found in $repo's recent releases" }
 Write-Host "ffmpeg: $($asset.name) from $($release.tag_name)"
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) "klipt-ffmpeg"

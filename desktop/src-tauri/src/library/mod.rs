@@ -1,7 +1,7 @@
 //! The local clip library: one SQLite row per saved clip, plus generated thumbnails.
 
 mod db;
-pub use db::{validate_cuts, validate_edit, validate_zooms};
+pub use db::{validate_cuts, validate_edit, validate_subtitles, validate_zooms};
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -89,6 +89,8 @@ pub struct Clip {
     pub removed_ranges: Vec<CutRange>,
     /// Zooms set in the editor (ms into the video file), sorted, never overlapping.
     pub zoom_ranges: Vec<ZoomRange>,
+    /// Subtitles typed in the editor (ms into the video file), sorted, never overlapping.
+    pub subtitles: Vec<SubtitleRange>,
 }
 
 /// A part of a clip removed in the editor, `start_ms..end_ms` into the video file.
@@ -117,6 +119,21 @@ pub struct ZoomRange {
     pub zoom: f32,
     pub x: f32,
     pub y: f32,
+}
+
+/// The shortest a subtitle can be.
+pub const MIN_SUBTITLE_MS: u64 = 300;
+/// The longest a subtitle's text can be, in characters.
+pub const MAX_SUBTITLE_CHARS: usize = 200;
+
+/// A subtitle typed in the editor: `text` (one line) shows during `start_ms..end_ms` (into the
+/// video file), drawn onto the picture in exports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleRange {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
 }
 
 impl Clip {

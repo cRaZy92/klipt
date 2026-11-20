@@ -155,6 +155,7 @@ pub fn current_edit(clip: &Clip) -> Edit {
         blur_video: clip.blur_video,
         removed: clip.removed_ranges.clone(),
         zooms: clip.zoom_ranges.clone(),
+        subtitles: clip.subtitles.clone(),
     }
 }
 
@@ -180,11 +181,13 @@ pub fn save_edit(library: &Library, uploads: &Uploads, cache_dir: &Path, id: &st
     crate::library::validate_edit(trim, &volumes)?;
     crate::library::validate_cuts(trim, &edit.removed, clip.duration_ms)?;
     crate::library::validate_zooms(&edit.zooms, clip.duration_ms)?;
+    crate::library::validate_subtitles(&edit.subtitles, clip.duration_ms)?;
     forget_upload_export(library, cache_dir, id)?;
     library.update_edit(id, trim, &volumes)?;
     library.set_blur_video(id, edit.blur_video)?;
     library.set_removed_ranges(id, &edit.removed)?;
     library.set_zoom_ranges(id, &edit.zooms)?;
+    library.set_subtitles(id, &edit.subtitles)?;
     Ok(true)
 }
 
@@ -415,7 +418,7 @@ mod tests {
     }
 
     fn cut(start: u64, end: u64) -> Edit {
-        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new() }
+        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new() }
     }
 
     #[test]
@@ -427,6 +430,17 @@ mod tests {
         assert!(save_edit(&f.lib, &Uploads::default(), &f.cache(), &f.clip.id, edit).unwrap());
         assert_eq!(f.lib.get(&f.clip.id).unwrap().zoom_ranges, vec![zoom]);
         assert!(!export.exists(), "the old export has no zoom");
+    }
+
+    #[test]
+    fn saving_subtitles_drops_the_stale_upload_export() {
+        let f = Fixture::new();
+        let export = f.interrupted_upload();
+        let sub = crate::library::SubtitleRange { start_ms: 1_000, end_ms: 3_000, text: "bro what".into() };
+        let edit = Edit { subtitles: vec![sub.clone()], ..current_edit(&f.clip) };
+        assert!(save_edit(&f.lib, &Uploads::default(), &f.cache(), &f.clip.id, edit).unwrap());
+        assert_eq!(f.lib.get(&f.clip.id).unwrap().subtitles, vec![sub]);
+        assert!(!export.exists(), "the old export has no subtitles");
     }
 
     #[test]
@@ -454,7 +468,7 @@ mod tests {
     #[test]
     fn saving_a_full_clip_edit_without_any_cache_works() {
         let f = Fixture::new();
-        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new() };
+        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new() };
         assert!(save_edit(&f.lib, &Uploads::default(), &f.cache(), &f.clip.id, edit.clone()).unwrap());
         assert_eq!(current_edit(&f.lib.get(&f.clip.id).unwrap()), edit);
     }

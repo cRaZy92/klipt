@@ -717,6 +717,7 @@ mod tests {
                 blur_video: false,
                 removed_ranges: Vec::new(),
                 zoom_ranges: Vec::new(),
+                subtitles: Vec::new(),
             },
             file_missing: false,
             thumb_path: None,

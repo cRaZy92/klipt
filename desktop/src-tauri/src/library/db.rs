@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::{Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, ZoomRange};
-use super::{MAX_ZOOM, MIN_ZOOM, MIN_ZOOM_MS};
+use super::{Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
+use super::{MAX_SUBTITLE_CHARS, MAX_ZOOM, MIN_SUBTITLE_MS, MIN_ZOOM, MIN_ZOOM_MS};
 use crate::errors::{AppError, Result};
 
 /// Per-track volume range the editor offers (0–200 %).
@@ -76,12 +76,15 @@ const MIGRATIONS: &[&str] = &["
 ", "
     -- Zooms set in the editor: JSON list of {\"startMs\", \"endMs\", \"zoom\", \"x\", \"y\"} (ms into the file).
     ALTER TABLE clips ADD COLUMN zoom_ranges TEXT NOT NULL DEFAULT '[]';
+", "
+    -- Subtitles typed in the editor: JSON list of {\"startMs\", \"endMs\", \"text\"} (ms into the file).
+    ALTER TABLE clips ADD COLUMN subtitles TEXT NOT NULL DEFAULT '[]';
 "];
 
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
                        visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind, \
-                       extra_volumes, blur_video, removed_ranges, zoom_ranges";
+                       extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -116,6 +119,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         blur_video: row.get(27)?,
         removed_ranges: serde_json::from_str(&row.get::<_, String>(28)?).unwrap_or_default(),
         zoom_ranges: serde_json::from_str(&row.get::<_, String>(29)?).unwrap_or_default(),
+        subtitles: serde_json::from_str(&row.get::<_, String>(30)?).unwrap_or_default(),
     })
 }
 
@@ -245,6 +249,12 @@ impl Library {
         self.update(id, "UPDATE clips SET zoom_ranges = ?2 WHERE id = ?1", params![id, json])
     }
 
+    /// Stores the subtitles typed in the editor (checked with `validate_subtitles` by the caller).
+    pub fn set_subtitles(&self, id: &str, subs: &[SubtitleRange]) -> Result<()> {
+        let json = serde_json::to_string(subs).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.update(id, "UPDATE clips SET subtitles = ?2 WHERE id = ?1", params![id, json])
+    }
+
     /// The editor's "Blur video" for clip `id`.
     pub fn set_blur_video(&self, id: &str, blur: bool) -> Result<()> {
         self.update(id, "UPDATE clips SET blur_video = ?2 WHERE id = ?1", params![id, blur])
@@ -370,7 +380,7 @@ impl Library {
             "SELECT {COLUMNS}, sync_pending FROM clips WHERE sync_pending != '' AND server_clip_id IS NOT NULL"
         ))?;
         let rows = stmt
-            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(30)?))))?
+            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(31)?))))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -560,6 +570,36 @@ pub fn validate_zooms(zooms: &[ZoomRange], duration_ms: u64) -> Result<()> {
             return bad("a zoom's area is outside the picture");
         }
         at = z.end_ms;
+    }
+    Ok(())
+}
+
+/// Checks the subtitles of a clip `duration_ms` long: each at least `MIN_SUBTITLE_MS` long,
+/// sorted, not overlapping (touching is fine), inside the file, with one line of trimmed,
+/// non-empty text of at most `MAX_SUBTITLE_CHARS` characters.
+pub fn validate_subtitles(subs: &[SubtitleRange], duration_ms: u64) -> Result<()> {
+    let bad = |why: &str| Err(AppError::InvalidInput(format!("subtitles: {why}")));
+    let mut at = 0;
+    for s in subs {
+        if s.end_ms < s.start_ms.saturating_add(MIN_SUBTITLE_MS) {
+            return bad("a subtitle is too short");
+        }
+        if s.start_ms < at {
+            return bad("subtitles overlap or are out of order");
+        }
+        if s.end_ms > duration_ms {
+            return bad("a subtitle ends after the clip");
+        }
+        if s.text.trim().is_empty() || s.text.trim() != s.text {
+            return bad("a subtitle has no text or untrimmed text");
+        }
+        if s.text.contains(['\n', '\r']) {
+            return bad("a subtitle has more than one line");
+        }
+        if s.text.chars().count() > MAX_SUBTITLE_CHARS {
+            return bad("a subtitle is too long");
+        }
+        at = s.end_ms;
     }
     Ok(())
 }
@@ -852,6 +892,38 @@ mod tests {
         assert!(bad(&[z(1000, 3000, f32::NAN, 0.5, 0.5)]));
         assert!(validate_zooms(&[], 10_000).is_ok());
         assert!(validate_zooms(&[z(0, 500, 1.25, 0.5, 0.5), z(500, 10_000, 4.0, 1.0, 0.0)], 10_000).is_ok(), "touching");
+    }
+
+    fn s(start_ms: u64, end_ms: u64, text: &str) -> SubtitleRange {
+        SubtitleRange { start_ms, end_ms, text: text.into() }
+    }
+
+    #[test]
+    fn subtitles_round_trip() {
+        let f = Fixture::new();
+        let c = f.add("a.mp4", 1000, None);
+        assert!(f.lib.get(&c.id).unwrap().subtitles.is_empty(), "new clips have no subtitles");
+        f.lib.set_subtitles(&c.id, &[s(1000, 3000, "čo to bolo")]).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().subtitles, vec![s(1000, 3000, "čo to bolo")]);
+        assert!(matches!(f.lib.set_subtitles("nope", &[]), Err(AppError::ClipNotFound(_))));
+    }
+
+    #[test]
+    fn invalid_subtitles_are_refused() {
+        let bad = |subs: &[SubtitleRange]| matches!(validate_subtitles(subs, 10_000), Err(AppError::InvalidInput(_)));
+        assert!(bad(&[s(3000, 3000, "a")]), "empty");
+        assert!(bad(&[s(3000, 2000, "a")]), "backwards");
+        assert!(bad(&[s(1000, 1299, "a")]), "299 ms");
+        assert!(bad(&[s(1000, 3000, "a"), s(2500, 4000, "b")]), "overlap");
+        assert!(bad(&[s(5000, 6000, "a"), s(1000, 2000, "b")]), "out of order");
+        assert!(bad(&[s(9000, 10_001, "a")]), "past the end");
+        assert!(bad(&[s(1000, 3000, "")]), "no text");
+        assert!(bad(&[s(1000, 3000, "   ")]), "blank text");
+        assert!(bad(&[s(1000, 3000, "a\nb")]), "two lines");
+        assert!(bad(&[s(1000, 3000, &"a".repeat(201))]), "201 chars");
+        assert!(validate_subtitles(&[], 10_000).is_ok());
+        assert!(validate_subtitles(&[s(0, 300, "a"), s(300, 10_000, "b")], 10_000).is_ok(), "touching");
+        assert!(validate_subtitles(&[s(0, 1000, &"ľ".repeat(200))], 10_000).is_ok(), "200 chars, not bytes");
     }
 
     #[test]

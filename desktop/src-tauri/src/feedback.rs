@@ -14,6 +14,17 @@ pub fn saved_text(game_name: Option<&str>) -> String {
     format!("Clip saved — {}", game_name.unwrap_or("Unknown game"))
 }
 
+pub fn recording_saved_text(game_name: Option<&str>) -> String {
+    format!("Recording saved — {}", game_name.unwrap_or("Unknown game"))
+}
+
+pub const RECORDING_STARTED_TEXT: &str = "Recording started";
+
+/// Errors that end or prevent a full recording: always told, the window is usually hidden.
+pub fn is_recording_problem(code: &str) -> bool {
+    matches!(code, "full_recording_lost" | "full_recording_failed")
+}
+
 /// Shows a system notification; failures are only logged.
 pub fn notify(app: &AppHandle, title: &str, body: Option<&str>) {
     let mut builder = app.notification().builder().title(title);
@@ -43,9 +54,13 @@ pub fn on_supervisor_event(app: &AppHandle, event: &SupervisorEvent) {
                 crate::sound::play_saved();
             }
             if notification {
-                notify(app, &saved_text(view.clip.game_name.as_deref()), None);
+                let game = view.clip.game_name.as_deref();
+                let text = if view.clip.is_recording { recording_saved_text(game) } else { saved_text(game) };
+                notify(app, &text, None);
             }
         }
+        SupervisorEvent::FullRecordingStarted { .. } if notification => notify(app, RECORDING_STARTED_TEXT, None),
+        SupervisorEvent::Error { message, code } if is_recording_problem(code) => notify(app, "Klipt", Some(message)),
         SupervisorEvent::SaveBusy if notification => notify(app, BUSY_TEXT, None),
         // A press that saved nothing. The window is usually hidden in game, so the in-app toast
         // goes unseen; say so even when "Clip saved" notifications are off.
@@ -71,6 +86,19 @@ mod tests {
     fn saved_text_names_the_game_or_says_unknown() {
         assert_eq!(saved_text(Some("Active Matter")), "Clip saved — Active Matter");
         assert_eq!(saved_text(None), "Clip saved — Unknown game");
+    }
+
+    #[test]
+    fn recording_saved_text_names_the_game() {
+        assert_eq!(recording_saved_text(Some("Deadlock")), "Recording saved — Deadlock");
+        assert_eq!(recording_saved_text(None), "Recording saved — Unknown game");
+    }
+
+    #[test]
+    fn recording_problems_always_notify() {
+        assert!(is_recording_problem("full_recording_lost"));
+        assert!(is_recording_problem("full_recording_failed"));
+        assert!(!is_recording_problem("save_failed"));
     }
 
     #[test]

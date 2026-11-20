@@ -86,7 +86,9 @@
             recordError,
           }),
       ),
-      on("clip-saved", (clip) => toast(clip.kind === "screenshot" ? "Screenshot saved" : "Clip saved", "success")),
+      on("clip-saved", (clip) =>
+        toast(clip.kind === "screenshot" ? "Screenshot saved" : clip.isRecording ? "Recording saved" : "Clip saved", "success"),
+      ),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
       on("feed-new", ({ count }) => (feedNew = count)),
       // Hidden in the tray for a while: let the core close the window to free its memory, unless

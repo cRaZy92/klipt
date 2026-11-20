@@ -115,6 +115,8 @@ pub enum Input {
     ListDisplays(Sender<Result<Vec<Display>>>),
     /// Lists microphones through the backend (for Settings).
     ListAudioDevices(Sender<Result<Vec<AudioDevice>>>),
+    /// When the running full recording started (Unix ms), or None.
+    FullRecordingStatus(Sender<Option<i64>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -291,6 +293,9 @@ impl Supervisor {
             }
             Input::ListAudioDevices(reply) => {
                 let _ = reply.send(self.backend.list_audio_devices());
+            }
+            Input::FullRecordingStatus(reply) => {
+                let _ = reply.send(self.full_recording_started_at_ms());
             }
             Input::Pause => match self.full.as_ref().map(|f| f.phase) {
                 Some(FullPhase::Starting | FullPhase::Running) => {
@@ -757,6 +762,14 @@ impl SupervisorHandle {
         let _ = self.tx.send(Input::ToggleFullRecording);
     }
 
+    /// When the running full recording started (Unix ms); None when none runs or the
+    /// supervisor doesn't answer within `timeout`.
+    pub fn full_recording(&self, timeout: Duration) -> Option<i64> {
+        let (tx, rx) = mpsc::channel();
+        self.tx.send(Input::FullRecordingStatus(tx)).ok()?;
+        rx.recv_timeout(timeout).ok().flatten()
+    }
+
     /// New settings: stops the recorder and starts it again with them (clearing the buffer).
     pub fn configure(&self, cfg: RecordConfig, mode: RecordingMode) {
         let _ = self.tx.send(Input::Configure(cfg, mode));
@@ -1064,6 +1077,20 @@ mod tests {
         // A third press starts a new one.
         assert!(s.handle(Input::ToggleFullRecording));
         assert_eq!(w.full_starts(), 2);
+    }
+
+    #[test]
+    fn the_status_query_answers_when_the_recording_started() {
+        let w = World::new();
+        let mut s = w.supervisor(RecordingMode::Always);
+        s.begin();
+        let (tx, rx) = mpsc::channel();
+        assert!(s.handle(Input::FullRecordingStatus(tx)));
+        assert_eq!(rx.recv().unwrap(), None);
+        let mut s = recording(&w);
+        let (tx, rx) = mpsc::channel();
+        s.handle(Input::FullRecordingStatus(tx));
+        assert_eq!(rx.recv().unwrap(), Some(WALL_MS));
     }
 
     #[test]

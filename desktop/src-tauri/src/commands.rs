@@ -454,6 +454,25 @@ pub fn save_clip_now(recorder: State<'_, SupervisorHandle>) {
     recorder.save();
 }
 
+/// Starts a full recording, or stops the running one. The result arrives as
+/// `full-recording-started` / `full-recording-stopped` (+ `clip-saved`) or `recorder-error`.
+#[tauri::command]
+pub fn toggle_full_recording(recorder: State<'_, SupervisorHandle>) {
+    recorder.toggle_full_recording();
+}
+
+/// When the running full recording started (Unix ms), or null: a window opened mid-recording
+/// shows the timer.
+#[tauri::command]
+pub async fn get_full_recording(app: AppHandle) -> Option<i64> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.try_state::<SupervisorHandle>()?.full_recording(std::time::Duration::from_secs(2))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 // ---------------------------------------------------------------------------------------------
 // Library
 

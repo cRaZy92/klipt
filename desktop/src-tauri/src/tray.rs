@@ -18,6 +18,7 @@ const ICON_PAUSED: &[u8] = include_bytes!("../icons/tray-paused.png");
 const ICON_ERROR: &[u8] = include_bytes!("../icons/tray-error.png");
 
 const ID_SAVE: &str = "save";
+const ID_RECORD: &str = "record";
 const ID_PAUSE: &str = "pause";
 const ID_OPEN: &str = "open";
 const ID_QUIT: &str = "quit";
@@ -58,8 +59,27 @@ impl TrayStatus {
     }
 }
 
-/// Error codes that are about one save, not about the recorder: they don't change the icon.
-const SAVE_ONLY_CODES: &[&str] = &["save_failed", "not_recording", "recording_paused"];
+/// The tooltip; a running full recording shows unless the recorder has a problem.
+pub fn tooltip_for(status: TrayStatus, full_recording: bool) -> &'static str {
+    match status {
+        TrayStatus::Recording if full_recording => "Klipt — recording video",
+        status => status.tooltip(),
+    }
+}
+
+/// The start/stop recording menu item's label.
+pub fn full_recording_label(full_recording: bool) -> &'static str {
+    if full_recording {
+        "Stop recording"
+    } else {
+        "Start recording"
+    }
+}
+
+/// Error codes that are about one save or recording, not about the recorder: they don't change
+/// the icon.
+const SAVE_ONLY_CODES: &[&str] =
+    &["save_failed", "not_recording", "recording_paused", "full_recording_lost", "full_recording_failed"];
 
 /// The status after a supervisor event. Only the user leaves `Paused`.
 pub fn status_after(current: TrayStatus, event: &SupervisorEvent) -> TrayStatus {
@@ -78,34 +98,43 @@ pub fn status_after(current: TrayStatus, event: &SupervisorEvent) -> TrayStatus 
 /// main thread runs them, and the supervisor thread (which reports events) is joined by the main
 /// thread on exit, so calling them directly from there could deadlock Quit.
 pub struct Tray {
-    status: Mutex<TrayStatus>,
-    post: Box<dyn Fn(TrayStatus) + Send + Sync>,
+    /// The status, and whether a full recording runs.
+    status: Mutex<(TrayStatus, bool)>,
+    post: Box<dyn Fn(TrayStatus, bool) + Send + Sync>,
 }
 
 impl Tray {
-    pub fn new(status: TrayStatus, post: Box<dyn Fn(TrayStatus) + Send + Sync>) -> Tray {
-        Tray { status: Mutex::new(status), post }
+    pub fn new(status: TrayStatus, post: Box<dyn Fn(TrayStatus, bool) + Send + Sync>) -> Tray {
+        Tray { status: Mutex::new((status, false)), post }
     }
 
     pub fn status(&self) -> TrayStatus {
-        *self.status.lock().unwrap_or_else(PoisonError::into_inner)
+        self.status.lock().unwrap_or_else(PoisonError::into_inner).0
+    }
+
+    pub fn full_recording(&self) -> bool {
+        self.status.lock().unwrap_or_else(PoisonError::into_inner).1
     }
 
     /// Computes and stores the next status atomically; posts it if it changed. Returns it.
     fn update(&self, next: impl FnOnce(TrayStatus) -> TrayStatus) -> TrayStatus {
+        self.update_both(|(status, full)| (next(status), full)).0
+    }
+
+    fn update_both(&self, next: impl FnOnce((TrayStatus, bool)) -> (TrayStatus, bool)) -> (TrayStatus, bool) {
         let mut current = self.status.lock().unwrap_or_else(PoisonError::into_inner);
         let new = next(*current);
         if new != *current {
             *current = new;
             // Posted while holding the lock, so updates reach the main thread in order.
-            (self.post)(new);
+            (self.post)(new.0, new.1);
         }
         new
     }
 
     /// Recording is paused by the user (from the tray).
     pub fn is_paused(&self) -> bool {
-        *self.status.lock().unwrap_or_else(PoisonError::into_inner) == TrayStatus::Paused
+        self.status() == TrayStatus::Paused
     }
 
     pub fn set_status(&self, status: TrayStatus) {
@@ -113,7 +142,14 @@ impl Tray {
     }
 
     pub fn on_supervisor_event(&self, event: &SupervisorEvent) {
-        self.update(|current| status_after(current, event));
+        self.update_both(|(current, full)| {
+            let full = match event {
+                SupervisorEvent::FullRecordingStarted { .. } => true,
+                SupervisorEvent::FullRecordingStopped => false,
+                _ => full,
+            };
+            (status_after(current, event), full)
+        });
     }
 
     /// Flips between paused and recording; returns the new status.
@@ -124,14 +160,23 @@ impl Tray {
 }
 
 /// Applies a status to the tray widgets. Runs on the main thread.
-fn apply(icon: &TrayIcon, pause_item: &MenuItem<tauri::Wry>, status: TrayStatus) {
+fn apply(
+    icon: &TrayIcon,
+    pause_item: &MenuItem<tauri::Wry>,
+    record_item: &MenuItem<tauri::Wry>,
+    status: TrayStatus,
+    full_recording: bool,
+) {
     if let Err(e) = Image::from_bytes(status.icon()).and_then(|image| icon.set_icon(Some(image))) {
         eprintln!("klipt: can't change the tray icon: {e}");
     }
-    if let Err(e) = icon.set_tooltip(Some(status.tooltip())) {
+    if let Err(e) = icon.set_tooltip(Some(tooltip_for(status, full_recording))) {
         eprintln!("klipt: can't change the tray tooltip: {e}");
     }
     if let Err(e) = pause_item.set_text(status.pause_label()) {
+        eprintln!("klipt: can't change the tray menu: {e}");
+    }
+    if let Err(e) = record_item.set_text(full_recording_label(full_recording)) {
         eprintln!("klipt: can't change the tray menu: {e}");
     }
 }
@@ -140,11 +185,12 @@ fn apply(icon: &TrayIcon, pause_item: &MenuItem<tauri::Wry>, status: TrayStatus)
 pub fn create(app: &AppHandle) -> Result<(), tauri::Error> {
     let status = TrayStatus::Recording;
     let save = MenuItem::with_id(app, ID_SAVE, "Save clip now", true, None::<&str>)?;
+    let record_item = MenuItem::with_id(app, ID_RECORD, full_recording_label(false), true, None::<&str>)?;
     let pause_item = MenuItem::with_id(app, ID_PAUSE, status.pause_label(), true, None::<&str>)?;
     let open = MenuItem::with_id(app, ID_OPEN, "Open Klipt", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&save, &pause_item, &separator, &open, &quit])?;
+    let menu = Menu::with_items(app, &[&save, &record_item, &pause_item, &separator, &open, &quit])?;
     let icon = TrayIconBuilder::with_id("klipt")
         .icon(Image::from_bytes(status.icon())?)
         .tooltip(status.tooltip())
@@ -152,10 +198,12 @@ pub fn create(app: &AppHandle) -> Result<(), tauri::Error> {
         .on_menu_event(on_menu_event)
         .build(app)?;
     let main = app.clone();
-    let post = move |status: TrayStatus| {
-        let (icon, pause_item) = (icon.clone(), pause_item.clone());
+    let post = move |status: TrayStatus, full_recording: bool| {
+        let (icon, pause_item, record_item) = (icon.clone(), pause_item.clone(), record_item.clone());
         // Queues the update and returns right away; never waits for the main thread.
-        if let Err(e) = main.run_on_main_thread(move || apply(&icon, &pause_item, status)) {
+        if let Err(e) =
+            main.run_on_main_thread(move || apply(&icon, &pause_item, &record_item, status, full_recording))
+        {
             eprintln!("klipt: can't update the tray: {e}");
         }
     };
@@ -168,6 +216,11 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
         ID_SAVE => {
             if let Some(recorder) = app.try_state::<SupervisorHandle>() {
                 recorder.save();
+            }
+        }
+        ID_RECORD => {
+            if let Some(recorder) = app.try_state::<SupervisorHandle>() {
+                recorder.toggle_full_recording();
             }
         }
         ID_PAUSE => toggle_pause(app),
@@ -323,11 +376,24 @@ mod tests {
         assert_eq!(TrayStatus::Error.pause_label(), "Pause recording");
     }
 
-    fn recording_tray() -> (Tray, std::sync::Arc<Mutex<Vec<TrayStatus>>>) {
-        let posted = std::sync::Arc::new(Mutex::new(vec![]));
-        let sink = posted.clone();
+    type Posted<T> = std::sync::Arc<Mutex<Vec<T>>>;
+
+    fn recording_tray_with_full() -> (Tray, Posted<TrayStatus>, Posted<bool>) {
+        let (posted, posted_full) = (Posted::default(), Posted::default());
+        let (sink, sink_full) = (posted.clone(), posted_full.clone());
         // A post that only records: the tray logic itself never touches tray widgets.
-        let tray = Tray::new(TrayStatus::Recording, Box::new(move |s| sink.lock().unwrap().push(s)));
+        let tray = Tray::new(
+            TrayStatus::Recording,
+            Box::new(move |s, full| {
+                sink.lock().unwrap().push(s);
+                sink_full.lock().unwrap().push(full);
+            }),
+        );
+        (tray, posted, posted_full)
+    }
+
+    fn recording_tray() -> (Tray, Posted<TrayStatus>) {
+        let (tray, posted, _) = recording_tray_with_full();
         (tray, posted)
     }
 
@@ -349,6 +415,23 @@ mod tests {
         assert_eq!(tray.status(), TrayStatus::Paused);
         assert_eq!(tray.toggle_pause(), TrayStatus::Recording);
         assert_eq!(*posted.lock().unwrap(), [TrayStatus::Paused, TrayStatus::Recording]);
+    }
+
+    #[test]
+    fn the_full_recording_shows_in_the_menu_and_tooltip() {
+        assert_eq!(full_recording_label(false), "Start recording");
+        assert_eq!(full_recording_label(true), "Stop recording");
+        assert_eq!(tooltip_for(TrayStatus::Recording, true), "Klipt — recording video");
+        assert_eq!(tooltip_for(TrayStatus::Recording, false), "Klipt — recording");
+        assert_eq!(tooltip_for(TrayStatus::Error, true), "Klipt — recording stopped");
+        let (tray, posted, posted_full) = recording_tray_with_full();
+        tray.on_supervisor_event(&SupervisorEvent::FullRecordingStarted { started_at_ms: 1 });
+        assert!(tray.full_recording());
+        tray.on_supervisor_event(&error("full_recording_lost"));
+        tray.on_supervisor_event(&SupervisorEvent::FullRecordingStopped);
+        assert!(!tray.full_recording());
+        assert_eq!(*posted.lock().unwrap(), [TrayStatus::Recording, TrayStatus::Recording], "posted for each change");
+        assert_eq!(*posted_full.lock().unwrap(), [true, false]);
     }
 
     #[test]

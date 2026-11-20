@@ -451,6 +451,10 @@ export const api = {
   logout: () => invoke<void>("logout"),
   getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
   saveClipNow: () => invoke<void>("save_clip_now"),
+  /** Starts a full recording, or stops the running one (results arrive as events). */
+  toggleFullRecording: () => invoke<void>("toggle_full_recording"),
+  /** When the running full recording started (Unix ms), or null. */
+  getFullRecording: () => invoke<number | null>("get_full_recording"),
   /** Takes a screenshot; it arrives as `clip-saved`. */
   takeScreenshot: () => invoke<void>("take_screenshot"),
   listClips: (filter: ListFilter) => invoke<ClipView[]>("list_clips", { filter }),
@@ -541,6 +545,10 @@ export interface Events {
   "import-progress": ImportProgress;
   "import-finished": ImportSummary;
   "save-busy": null;
+  /** A full recording runs since `startedAtMs`. */
+  "full-recording-started": { startedAtMs: number };
+  /** The full recording ended; its `clip-saved` (if any) follows. */
+  "full-recording-stopped": null;
   "recorder-error": AppError;
   "hotkey-bound": {
     display: string;

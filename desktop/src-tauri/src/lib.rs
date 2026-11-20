@@ -113,6 +113,8 @@ pub fn run() {
             commands::open_clips_folder,
             commands::clips_folder_size,
             commands::save_clip_now,
+            commands::toggle_full_recording,
+            commands::get_full_recording,
             commands::take_screenshot,
             commands::list_clips,
             commands::list_games,

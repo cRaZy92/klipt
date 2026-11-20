@@ -216,7 +216,8 @@
     {#if clip.kind === "screenshot"}
       <span class="duration" title="Screenshot"><Icon name="image" size={13} /></span>
     {:else}
-      <span class="duration" class:edited={length !== recorded}>
+      <span class="duration" class:edited={length !== recorded} title={clip.isRecording ? "Recording" : undefined}>
+        {#if clip.isRecording}<Icon name="record" size={12} />{/if}
         {#if length !== recorded}
           <Icon name="scissors" size={12} />
           {length}

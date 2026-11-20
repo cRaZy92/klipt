@@ -6,6 +6,7 @@
   import ImportPanel from "../components/ImportPanel.svelte";
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
+  import { formatElapsed } from "../lib/elapsed";
   import type { RemoveWhere } from "../lib/removal";
   import { keepShown, selectClick } from "../lib/selection";
   import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
@@ -74,6 +75,11 @@
   let playing = $state<MyUpload | null>(null);
   let downloading = $state<Set<string>>(new Set());
   let saving = $state(false);
+  /** When the running full recording started (Unix ms), or null. */
+  let recordingSince = $state<number | null>(null);
+  /** Debounces the Record button between a press and the recorder's answer. */
+  let recordPending = $state(false);
+  let recordClock = $state(Date.now());
   /** Bumped when a clip's thumbnail file is made again, so its picture reloads. */
   let thumbVersion = $state<Record<string, number>>({});
 
@@ -248,6 +254,36 @@
       return false;
     }
   }
+
+  async function toggleRecording() {
+    recordPending = true;
+    await act(() => api.toggleFullRecording());
+    // The answer arrives as `full-recording-started` / `-stopped`; this only debounces the button.
+    setTimeout(() => (recordPending = false), 1500);
+  }
+
+  $effect(() => {
+    // A window opened mid-recording shows the running timer.
+    void api.getFullRecording().then((since) => (recordingSince = since)).catch(() => {});
+    const stops = [
+      on("full-recording-started", ({ startedAtMs }) => {
+        recordingSince = startedAtMs;
+        recordPending = false;
+      }),
+      on("full-recording-stopped", () => {
+        recordingSince = null;
+        recordPending = false;
+      }),
+    ];
+    return () => stops.forEach((stop) => stop());
+  });
+
+  $effect(() => {
+    if (recordingSince === null) return;
+    recordClock = Date.now();
+    const timer = setInterval(() => (recordClock = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
 
   async function saveNow() {
     saving = true;
@@ -473,6 +509,22 @@
         </button>
         <button class="btn" onclick={() => act(() => api.takeScreenshot())} title="Take a screenshot of the recorded screen">
           <Icon name="image" size={16} /> Screenshot
+        </button>
+        <button
+          class="btn"
+          class:btn-rec={recordingSince === null}
+          class:recording={recordingSince !== null}
+          onclick={toggleRecording}
+          disabled={recordPending}
+          title={recordingSince === null
+            ? "Record until you press again; the replay buffer keeps running"
+            : "Stop the recording and add it to My clips"}
+        >
+          {#if recordingSince !== null}
+            <span class="stop-square"></span> Stop · {formatElapsed(recordClock - recordingSince)}
+          {:else}
+            <Icon name="record" size={16} /> Record
+          {/if}
         </button>
         <button class="btn btn-rec" onclick={saveNow} disabled={saving}>
           <span class="rec-dot"></span> Save clip now
@@ -936,4 +988,18 @@
     background: var(--danger-soft);
   }
 
+
+  /* Record while a full recording runs: red, with a stop square and the running time. */
+  .recording {
+    border-color: rgba(255, 77, 109, 0.45);
+    background: var(--rec-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stop-square {
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 2px;
+    background: var(--rec);
+  }
 </style>

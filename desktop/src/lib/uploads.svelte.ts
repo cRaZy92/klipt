@@ -2,6 +2,7 @@
 // work; this mirrors its `upload-*` events.
 
 import { api, errorCode, errorMessage, on, type UploadPhase, type Visibility } from "./api";
+import { RateMeter, transferDetail } from "./progress";
 import { toast } from "./toasts.svelte";
 
 export type UploadStatus = "queued" | "starting" | UploadPhase | "done" | "failed" | "needsLogin";
@@ -13,6 +14,8 @@ export interface UploadJob {
   status: UploadStatus;
   sent: number;
   total: number;
+  /** Bytes per second while uploading, once known. */
+  rate?: number | null;
   /** Set when failed. */
   message?: string;
   shareUrl?: string;
@@ -30,6 +33,12 @@ export function isBusy(job: UploadJob | undefined): boolean {
 export function fraction(job: UploadJob): number | null {
   if (job.status === "finalizing" || job.status === "queued" || job.total <= 0) return null;
   return Math.min(1, Math.max(0, job.sent / job.total));
+}
+
+/** "12 MB of 38 MB · 2 MB/s · 13 s left" while uploading, else null. */
+export function transferLabel(job: UploadJob): string | null {
+  if (job.status !== "uploading" || job.total <= 0) return null;
+  return transferDetail(job.sent, job.total, job.rate ?? null);
 }
 
 export function statusLabel(job: UploadJob): string {
@@ -184,6 +193,9 @@ export function resumeAfterLogin() {
 
 let onUnauthorized: (() => void) | null = null;
 
+/** Upload speed per clip id, while it's uploading. */
+const meters = new Map<string, RateMeter>();
+
 /**
  * Mirrors the core's upload events. `unauthorized` is called when the login expired mid-upload:
  * the app shows the login screen, then calls `resumeAfterLogin`.
@@ -193,9 +205,19 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
   const stops = [
     on("upload-progress", ({ id, sent, total, phase }) => {
       if (stoppedByLogout.has(id)) return;
-      uploads[id] = { ...jobFor(id), status: phase, sent, total };
+      let rate: number | null = null;
+      if (phase === "uploading") {
+        const meter = meters.get(id) ?? new RateMeter();
+        meters.set(id, meter);
+        meter.add(performance.now(), sent);
+        rate = meter.rate();
+      } else {
+        meters.delete(id);
+      }
+      uploads[id] = { ...jobFor(id), status: phase, sent, total, rate };
     }),
     on("upload-done", ({ id, shareUrl, copied }) => {
+      meters.delete(id);
       // It finished before the logout reached the server: it's uploaded after all.
       stoppedByLogout.delete(id);
       const job = uploads[id];
@@ -204,6 +226,7 @@ export function watchUploads(handlers: { unauthorized: () => void; done: (shareU
       settle(id);
     }),
     on("upload-failed", ({ id, code, message, stale }) => {
+      meters.delete(id);
       const job = uploads[id];
       if (!job) return;
       if (stoppedByLogout.has(id)) {

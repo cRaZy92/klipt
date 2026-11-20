@@ -266,7 +266,7 @@ pub fn can_encode(tools: &Tools, encoder_args: &[&str]) -> bool {
 /// run leaves nothing behind. Used for import conversions.
 pub fn write_mp4(tools: &Tools, args: &[String], out: &Path) -> Result<()> {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
-    write_via_temp(tools, args, out, "tmp.mp4", "ffmpeg wrote nothing", || Some(())).map(|_| ())
+    write_via_temp(tools, args, out, "tmp.mp4", "ffmpeg wrote nothing", None, || Some(())).map(|_| ())
 }
 
 /// Writes a JPEG frame from `at_ms` into `out` (480 px wide), replacing it atomically.
@@ -283,15 +283,29 @@ pub fn thumbnail_if<G>(tools: &Tools, input: &Path, out: &Path, at_ms: u64, want
     args.push("-i".into());
     args.push(input.into());
     args.extend(os_args(["-frames:v", "1", "-vf", &format!("scale={THUMB_WIDTH}:-2"), "-q:v", "4", "-update", "1"]));
-    write_via_temp(tools, args, out, "tmp.jpg", &format!("no video frame at {at_ms} ms"), wanted)
+    write_via_temp(tools, args, out, "tmp.jpg", &format!("no video frame at {at_ms} ms"), None, wanted)
 }
 
 /// Copies audio track `track_index` (0 = game, 1 = mic) into an `.m4a` without re-encoding.
 pub fn demux_audio(tools: &Tools, input: &Path, track_index: u32, out: &Path) -> Result<()> {
+    demux_audio_progress(tools, input, track_index, out, 0, &mut |_| {})
+}
+
+/// Like `demux_audio`, reporting 0..=1 through `progress` as ffmpeg works through `duration_ms`
+/// of input (nothing when `duration_ms` is 0).
+pub fn demux_audio_progress(
+    tools: &Tools,
+    input: &Path,
+    track_index: u32,
+    out: &Path,
+    duration_ms: u64,
+    progress: &mut dyn FnMut(f64),
+) -> Result<()> {
     let mut args = os_args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i"]);
     args.push(input.into());
     args.extend(os_args(["-map", &format!("0:a:{track_index}"), "-vn", "-c", "copy", "-f", "ipod"]));
-    write_via_temp(tools, args, out, "tmp.m4a", &format!("no audio track {track_index}"), || Some(())).map(|_| ())
+    let detail = format!("no audio track {track_index}");
+    write_via_temp(tools, args, out, "tmp.m4a", &detail, Some((duration_ms, progress)), || Some(())).map(|_| ())
 }
 
 /// Runs ffmpeg with `args` plus a temp output path next to `out`, then renames the temp file over
@@ -303,14 +317,25 @@ fn write_via_temp<G>(
     out: &Path,
     temp_ext: &str,
     empty_detail: &str,
+    progress: Option<(u64, &mut dyn FnMut(f64))>,
     wanted: impl FnOnce() -> Option<G>,
 ) -> Result<bool> {
     if let Some(dir) = out.parent() {
         fs::create_dir_all(dir)?;
     }
     let temp = temp_path(out, temp_ext);
-    args.push(temp.clone().into());
-    let result = run("ffmpeg", &tools.ffmpeg, &args).and_then(|_| {
+    let ran = match progress {
+        Some((duration_ms, progress)) => {
+            args.extend(os_args(["-progress", "pipe:1", "-nostats", "-stats_period", "0.1"]));
+            args.push(temp.clone().into());
+            run_progress(&tools.ffmpeg, &args, duration_ms, progress)
+        }
+        None => {
+            args.push(temp.clone().into());
+            run("ffmpeg", &tools.ffmpeg, &args).map(|_| ())
+        }
+    };
+    let result = ran.and_then(|_| {
         // ffmpeg exits 0 when it had nothing to write (e.g. a seek past the end).
         match fs::metadata(&temp) {
             Ok(meta) if meta.len() > 0 => match wanted() {
@@ -339,6 +364,43 @@ fn temp_path(out: &Path, temp_ext: &str) -> PathBuf {
 
 fn os_args<'a>(args: impl IntoIterator<Item = &'a str>) -> Vec<OsString> {
     args.into_iter().map(OsString::from).collect()
+}
+
+/// Runs ffmpeg (with `-progress pipe:1` among `args`) without a console window, reporting 0..=1
+/// of `duration_ms` through `progress` as it goes.
+fn run_progress(program: &Path, args: &[OsString], duration_ms: u64, progress: &mut dyn FnMut(f64)) -> Result<()> {
+    use std::io::{BufRead, BufReader, Read};
+    let mut command = Command::new(program);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let fail = |detail: String| AppError::ToolFailed { tool: "ffmpeg", detail };
+    let mut child = command.spawn().map_err(|e| fail(format!("can't start {}: {e}", program.display())))?;
+    // stderr on its own thread, so a chatty ffmpeg can't block on a full pipe.
+    let mut stderr = child.stderr.take().expect("piped");
+    let stderr_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
+    for line in BufReader::new(child.stdout.take().expect("piped")).lines().map_while(std::result::Result::ok) {
+        // out_time_us (and the misnamed out_time_ms) are both microseconds.
+        let us = line.strip_prefix("out_time_us=").or_else(|| line.strip_prefix("out_time_ms="));
+        if let (Some(us), true) = (us.and_then(|v| v.trim().parse::<f64>().ok()), duration_ms > 0) {
+            progress((us / 1000.0 / duration_ms as f64).clamp(0.0, 1.0));
+        }
+    }
+    let status = child.wait().map_err(|e| fail(e.to_string()))?;
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if status.success() {
+        return Ok(());
+    }
+    let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
+    Err(fail(format!("exited with {status}: {}", tail.into_iter().rev().collect::<Vec<_>>().join(" | "))))
 }
 
 /// Runs a tool without a console window and returns its output if it exited successfully.

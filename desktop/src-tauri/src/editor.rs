@@ -58,10 +58,22 @@ pub fn is_fresh(cached: &Path, source: &Path) -> bool {
 /// Demuxes audio track `track` of `input` into `out` unless a fresh copy is already there.
 /// Returns whether it demuxed.
 pub fn demux_cached(tools: &Tools, input: &Path, track: u32, out: &Path) -> Result<bool> {
+    demux_cached_progress(tools, input, track, out, 0, &mut |_| {})
+}
+
+/// Like `demux_cached`, reporting 0..=1 of `duration_ms` through `progress` while it demuxes.
+fn demux_cached_progress(
+    tools: &Tools,
+    input: &Path,
+    track: u32,
+    out: &Path,
+    duration_ms: u64,
+    progress: &mut dyn FnMut(f64),
+) -> Result<bool> {
     if is_fresh(out, input) {
         return Ok(false);
     }
-    ffmpeg::demux_audio(tools, input, track, out)?;
+    ffmpeg::demux_audio_progress(tools, input, track, out, duration_ms, progress)?;
     Ok(true)
 }
 
@@ -86,12 +98,33 @@ pub fn prepare_audio(
     cache_dir: &Path,
     id: &str,
 ) -> Result<EditorAudio> {
+    prepare_audio_progress(tools, input, tracks, audio_tracks, cache_dir, id, 0, &mut |_, _, _| {})
+}
+
+/// Like `prepare_audio`, reporting `(track, of, fraction)` through `progress` as it works: the
+/// 0-based track it's on, how many there are, and 0..=1 of that one (of `duration_ms`).
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_audio_progress(
+    tools: &Tools,
+    input: &Path,
+    tracks: Tracks,
+    audio_tracks: u32,
+    cache_dir: &Path,
+    id: &str,
+    duration_ms: u64,
+    progress: &mut dyn FnMut(usize, usize, f64),
+) -> Result<EditorAudio> {
     let tracks = tracks.present_in(audio_tracks);
     let (game, mic) = edit_audio_paths(cache_dir, id);
-    demux_cached(tools, input, 0, &game)?;
-    let optional = |track: Option<u32>, out: PathBuf, what: &str| {
+    let of = 1 + usize::from(tracks.mic.is_some()) + usize::from(tracks.voice.is_some()) + tracks.extra.len();
+    let mut at = 0;
+    progress(at, of, 0.0);
+    demux_cached_progress(tools, input, 0, &game, duration_ms, &mut |f| progress(at, of, f))?;
+    let mut optional = |track: Option<u32>, out: PathBuf, what: &str| {
         let track = track?;
-        match demux_cached(tools, input, track, &out) {
+        at += 1;
+        progress(at, of, 0.0);
+        match demux_cached_progress(tools, input, track, &out, duration_ms, &mut |f| progress(at, of, f)) {
             Ok(_) => Some(out),
             Err(e) => {
                 eprintln!("klipt: clip {id} has no readable {what} track, editing without it: {e}");
@@ -273,6 +306,28 @@ mod tests {
         assert!(!demux_cached(&tools(), &input, 0, &game).unwrap(), "second open reuses the file");
         set_mtime(&input, SystemTime::now() + Duration::from_secs(60));
         assert!(demux_cached(&tools(), &input, 0, &game).unwrap(), "a changed clip is demuxed again");
+    }
+
+    #[test]
+    fn preparing_audio_reports_each_track_as_it_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        let duration_ms = ffmpeg::probe(&tools(), fixture()).unwrap().duration_ms;
+        let mut seen = vec![];
+        prepare_audio_progress(
+            &tools(),
+            fixture(),
+            Tracks { mic: Some(1), voice: None, extra: vec![] },
+            2,
+            dir.path(),
+            "p",
+            duration_ms,
+            &mut |track, of, f| seen.push((track, of, f)),
+        )
+        .unwrap();
+        assert!(seen.iter().all(|&(_, of, f)| of == 2 && (0.0..=1.0).contains(&f)), "{seen:?}");
+        assert_eq!(seen.first().map(|s| s.0), Some(0));
+        assert_eq!(seen.last().map(|s| s.0), Some(1), "the mic track is reported too: {seen:?}");
+        assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0), "tracks go in order: {seen:?}");
     }
 
     #[test]

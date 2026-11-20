@@ -49,8 +49,8 @@ function fakeContext() {
 
 function stubFetch() {
   vi.stubGlobal("fetch", async (url: string) => {
-    if (url === "bad") return { arrayBuffer: async () => new TextEncoder().encode("bad").buffer };
-    return { arrayBuffer: async () => new TextEncoder().encode(url).buffer };
+    const body = new TextEncoder().encode(url === "bad" ? "bad" : url);
+    return new Response(body, { headers: { "content-length": String(body.byteLength) } });
   });
 }
 
@@ -72,6 +72,16 @@ describe("AudioEngine", () => {
     engine.play(1500, skip);
     expect(starts.length).toBe(2);
     expect(starts.every((s) => s.url === "game")).toBe(true);
+  });
+
+  it("reports the bytes loaded, with the total once every size is known", async () => {
+    stubFetch();
+    const f = fakeContext();
+    const engine = new AudioEngine(() => f.ctx as unknown as AudioContext);
+    const seen: [number, number | null][] = [];
+    await engine.load([{ key: "game", url: "game" }, { key: "mic", url: "mic" }], (l, t) => seen.push([l, t]));
+    expect(seen.at(-1)).toEqual([7, 7]);
+    expect(seen.every(([l, t]) => t === null || l <= t)).toBe(true);
   });
 
   it("schedules one source per track per segment", async () => {

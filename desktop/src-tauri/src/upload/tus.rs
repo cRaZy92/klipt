@@ -3,10 +3,13 @@
 
 use std::io::SeekFrom;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
-use reqwest::header::{HeaderMap, CONTENT_TYPE, LOCATION};
+use futures_util::StreamExt;
+use reqwest::header::{HeaderMap, CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
 use reqwest::{Response, StatusCode};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -16,6 +19,12 @@ use super::api::{error_from, network, ApiClient, ApiError};
 const TUS_VERSION: &str = "1.0.0";
 
 pub const DEFAULT_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
+
+/// A chunk goes out in pieces this big, so progress can be counted as it's sent.
+const PIECE: usize = 64 * 1024;
+
+/// How often progress is reported while a chunk is being sent.
+const TICK: Duration = Duration::from_millis(100);
 
 #[derive(Debug, thiserror::Error)]
 pub enum UploadError {
@@ -44,7 +53,8 @@ impl Default for TusOptions {
 }
 
 /// Uploads `file`, resuming `(upload_url, offset)` from a previous run when given.
-/// `progress(sent, total)` fires after every chunk; `persist(upload_url, offset)` after every
+/// `progress(sent, total)` fires about every 100 ms while a chunk is being sent and after every
+/// chunk (bytes handed to the connection count as sent, so it may step back after a failure); `persist(upload_url, offset)` after every
 /// accepted chunk so a restarted app can pick the upload back up.
 pub async fn upload(
     client: &ApiClient,
@@ -191,7 +201,7 @@ async fn step(
     let mut chunk = vec![0u8; len];
     handle.seek(SeekFrom::Start(st.offset)).await.map_err(|e| Fail::Fatal(e.into()))?;
     handle.read_exact(&mut chunk).await.map_err(|e| Fail::Fatal(e.into()))?;
-    let new_offset = patch(client, token, &url, st.offset, chunk).await?;
+    let new_offset = patch(client, token, &url, st.offset, chunk, |sent| progress(st.offset + sent, total)).await?;
     if new_offset > total || new_offset <= st.offset {
         return Err(ApiError::Server { status: 204, code: "bad_offset".into() }.into());
     }
@@ -270,18 +280,54 @@ async fn head(client: &ApiClient, token: &str, url: &str, total: u64) -> Result<
     Ok(offset)
 }
 
-async fn patch(client: &ApiClient, token: &str, url: &str, offset: u64, chunk: Vec<u8>) -> Result<u64, Fail> {
-    let resp = client
+/// Sends one chunk; `sent(bytes)` reports how much of it has gone out so far, every [`TICK`].
+async fn patch(
+    client: &ApiClient,
+    token: &str,
+    url: &str,
+    offset: u64,
+    chunk: Vec<u8>,
+    sent: impl Fn(u64),
+) -> Result<u64, Fail> {
+    let len = chunk.len() as u64;
+    let counted = Arc::new(AtomicU64::new(0));
+    let counter = counted.clone();
+    let chunk = bytes::Bytes::from(chunk);
+    let pieces = (0..chunk.len()).step_by(PIECE).map(move |at| chunk.slice(at..(at + PIECE).min(chunk.len())));
+    let body = futures_util::stream::iter(pieces).map(move |piece| {
+        // Counted as the connection takes the piece, before it's handed over.
+        counter.fetch_add(piece.len() as u64, Ordering::Relaxed);
+        Ok::<_, std::io::Error>(piece)
+    });
+    let request = client
         .http
         .patch(url)
         .bearer_auth(token)
         .header("Tus-Resumable", TUS_VERSION)
         .header("Upload-Offset", offset)
         .header(CONTENT_TYPE, "application/offset+octet-stream")
-        .body(chunk)
-        .send()
-        .await
-        .map_err(|e| Fail::from(network(e)))?;
+        // A streamed body is sent with this length rather than chunked.
+        .header(CONTENT_LENGTH, len)
+        .body(reqwest::Body::wrap_stream(body))
+        .send();
+    tokio::pin!(request);
+    let mut tick = tokio::time::interval(TICK);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut reported = u64::MAX;
+    let resp = loop {
+        tokio::select! {
+            resp = &mut request => break resp,
+            _ = tick.tick() => {
+                // The last piece taken may still be in flight: never claim the whole chunk early.
+                let now = counted.load(Ordering::Relaxed).saturating_sub(PIECE as u64).min(len);
+                if now != reported {
+                    reported = now;
+                    sent(now);
+                }
+            }
+        }
+    }
+    .map_err(|e| Fail::from(network(e)))?;
     if !resp.status().is_success() {
         return Err(unexpected(resp).await);
     }

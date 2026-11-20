@@ -15,7 +15,8 @@
     audioStartMs,
     videoStarted,
   } from "../lib/playSchedule";
-  import { exportFileName, hueOf } from "../lib/format";
+  import { exportFileName, formatSize, hueOf } from "../lib/format";
+  import { editorStep, type EditorProgress } from "../lib/progress";
   import { frameUrl, previewIndex } from "../lib/filmstrip";
   import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
   import {
@@ -71,6 +72,11 @@
   let closed = false;
 
   let data = $state<EditorData | null>(null);
+  /** How far the core got preparing the clip, while `data` isn't here yet. */
+  let preparing = $state<EditorProgress | null>(null);
+  const prepStep = $derived(editorStep(preparing));
+  /** Audio bytes loaded so far, until the audio is ready; `total` null while unknown. */
+  let audioLoad = $state<{ loaded: number; total: number | null } | null>(null);
   let loadError = $state<string | null>(null);
   let mediaError = $state(false);
 
@@ -338,6 +344,7 @@
 
   async function load() {
     loadError = null;
+    preparing = null;
     try {
       const d = await api.openEditor(clip.id);
       duration = d.durationMs;
@@ -432,7 +439,9 @@
     const tracks = audioTracks(d);
     let failed: string[];
     try {
-      failed = await engine.load(tracks);
+      failed = await engine.load(tracks, (loaded, total) => {
+        if (!closed) audioLoad = { loaded, total };
+      });
     } catch {
       // No sound at all (e.g. Web Audio isn't available): the video still plays, silently.
       if (closed) return;
@@ -449,6 +458,10 @@
   }
 
   onMount(() => {
+    // Listening before `load` starts, so its first steps aren't missed.
+    const stopPreparing = on("editor-progress", ({ id, ...progress }) => {
+      if (id === clip.id && !data) preparing = progress;
+    });
     void load();
 
     // The audio clock moves the playhead; the video follows it.
@@ -474,6 +487,7 @@
       cancelAnimationFrame(frame);
       stopProgress();
       stopFilmstrip();
+      stopPreparing();
       clearTimeout(settleTimer);
       clearTimeout(startTimer);
       video?.pause();
@@ -1079,6 +1093,18 @@
     </div>
     <div class="actions">
       {#if data}
+        {#if !audioReady}
+          <span class="save-status" role="status" title="Play starts once the audio is loaded">
+            <span class="spinner"></span>
+            {#if audioLoad?.total && audioLoad.loaded < audioLoad.total}
+              Loading audio… {Math.round((audioLoad.loaded / audioLoad.total) * 100)}% · {formatSize(audioLoad.total)}
+            {:else if audioLoad?.total}
+              Decoding audio…
+            {:else}
+              Loading audio…
+            {/if}
+          </span>
+        {/if}
         {#if changed && !kept.length}
           <span class="save-status warn" role="status">Not saved: {nothingKept.toLowerCase()}</span>
         {:else if editLocked || saveStatus === "waiting"}
@@ -1153,9 +1179,17 @@
       </div>
     </div>
   {:else if !data}
-    <div class="center">
-      <span class="spinner"></span>
-      <p>Preparing the clip…</p>
+    <div class="center" role="status">
+      <p class="prep-title">Preparing the clip</p>
+      <div class="prep">
+        <div class="progress" class:indeterminate={prepStep.fraction === null} style:--value={prepStep.fraction ?? undefined}>
+          <div></div>
+        </div>
+        <p class="prep-step">
+          <span>{prepStep.label}</span>
+          {#if prepStep.fraction !== null}<span class="prep-pct">{Math.round(prepStep.fraction * 100)}%</span>{/if}
+        </p>
+      </div>
     </div>
   {:else}
     <div class="stage" bind:clientWidth={stageWidth} bind:clientHeight={stageHeight}>
@@ -1514,6 +1548,27 @@
   .menu .danger:hover:not(:disabled) {
     background: var(--danger-soft);
     color: var(--danger-text, var(--danger));
+  }
+
+  .prep-title {
+    color: var(--text);
+    font-weight: 650;
+  }
+
+  .prep {
+    width: min(320px, 70%);
+  }
+
+  .prep-step {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.55rem;
+    font-size: 0.85rem;
+  }
+
+  .prep-pct {
+    font-variant-numeric: tabular-nums;
   }
 
   .center {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fileUrl, type ClipView } from "../lib/api";
   import { formatDuration, hueOf, relativeDate } from "../lib/format";
-  import { forgetUpload, fraction, isBusy, retryUpload, statusLabel, uploads } from "../lib/uploads.svelte";
+  import { forgetUpload, fraction, isBusy, retryUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
   import { menu } from "../lib/a11y";
   import Icon from "./Icon.svelte";
   import ProcessingPill from "./ProcessingPill.svelte";
@@ -170,6 +170,7 @@
           <div class="progress" class:indeterminate={progress === null} style:--value={progress ?? undefined}>
             <div></div>
           </div>
+          {#if transferLabel(job)}<span class="transfer">{transferLabel(job)}</span>{/if}
         {:else if job.status === "failed"}
           <div class="overlay-actions">
             <button class="btn btn-sm btn-primary" onclick={() => retryUpload(clip.id)}>

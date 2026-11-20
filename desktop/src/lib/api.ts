@@ -1,6 +1,7 @@
 // Typed access to the Rust core: Tauri commands and events. Errors from commands arrive as
 // `{ code, message }`; the UI branches on `code` but only ever shows `message`.
 
+import type { EditorProgress } from "./progress";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -496,6 +497,8 @@ export interface Events {
   "thumbnail-changed": { id: string };
   /** More filmstrip frames of the open clip are readable. */
   "filmstrip-progress": { id: string; frames: number };
+  /** How far `openEditor` got preparing a clip. */
+  "editor-progress": { id: string } & EditorProgress;
   /** The automatic cleanup deleted old clips. */
   "clips-cleaned": { deleted: number; freedBytes: number };
   /**

@@ -45,6 +45,10 @@ pub mod events {
     pub const THUMBNAIL_CHANGED: &str = "thumbnail-changed";
     /// Payload: `{ id, frames }`: how many filmstrip frames of the open clip are readable now.
     pub const FILMSTRIP_PROGRESS: &str = "filmstrip-progress";
+    /// Payload: `{ id, step, track, tracks, fraction }` while `open_editor` prepares a clip: step
+    /// `reading` (looking at the file) or `audio` (extracting audio track `track` of `tracks`,
+    /// 0-based, `fraction` 0..=1 of that track).
+    pub const EDITOR_PROGRESS: &str = "editor-progress";
 }
 
 /// Server titles are 1–100 characters.
@@ -837,11 +841,26 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     let cache_dir = cache_dir(&app)?;
     let (input, tracks, stored_ms) = (clip.path.clone(), export::Tracks::of(&clip), clip.duration_ms);
     let (strip_tools, strip_cache) = (tools.clone(), cache_dir.clone());
+    let progress_app = app.clone();
     let (audio, duration_ms, fps) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
+        let step = |step: &str, track: usize, tracks: usize, fraction: f64| {
+            let payload = serde_json::json!({ "id": id, "step": step, "track": track, "tracks": tracks, "fraction": fraction });
+            emit(&progress_app, events::EDITOR_PROGRESS, payload);
+        };
+        step("reading", 0, 0, 0.0);
         // How many audio tracks the file has: an imported clip may have more than Klipt records.
         let info = crate::ffmpeg::probe(&tools, &input)?;
-        let audio = editor::prepare_audio(&tools, &input, tracks, info.audio_tracks.max(1), &cache_dir, &id)?;
         let duration_ms = if stored_ms > 0 { stored_ms } else { info.duration_ms };
+        let audio = editor::prepare_audio_progress(
+            &tools,
+            &input,
+            tracks,
+            info.audio_tracks.max(1),
+            &cache_dir,
+            &id,
+            duration_ms,
+            &mut |track, tracks, fraction| step("audio", track, tracks, fraction),
+        )?;
         Ok((audio, duration_ms, info.fps))
     })
     .await

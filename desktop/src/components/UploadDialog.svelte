@@ -2,7 +2,7 @@
   import { api, errorMessage, type ClipView, type Visibility } from "../lib/api";
   import { uploadTitle } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
-  import { fraction, isBusy, retryUpload, startUpload, statusLabel, uploads } from "../lib/uploads.svelte";
+  import { fraction, isBusy, retryUpload, startUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
 
@@ -132,6 +132,7 @@
       <div class="progress" class:indeterminate={progress === null} style:--value={progress ?? undefined}>
         <div></div>
       </div>
+      {#if transferLabel(job)}<p class="muted small transfer">{transferLabel(job)}</p>{/if}
       <p class="muted small">You can close this window — the upload keeps going.</p>
     {/if}
   {/if}
@@ -363,6 +364,10 @@
 
   .small {
     font-size: 0.85rem;
+  }
+
+  .transfer {
+    font-variant-numeric: tabular-nums;
   }
 
   .done {

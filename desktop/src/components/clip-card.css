@@ -193,6 +193,13 @@
   font-weight: 650;
 }
 
+.clip-card .transfer {
+  margin-top: -0.3rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .clip-card .status.failed {
   color: var(--danger-text);
   font-weight: 500;

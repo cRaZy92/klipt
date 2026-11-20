@@ -13,9 +13,11 @@ crate-type = ["rlib"]
 # Real paths without Windows' `\\?\` prefix, for imported files stored in the library.
 dunce = "1.0.5"
 base64 = "0.23.1"
+bytes = "1.11.1"
+futures-util = "0.3.34"
 dirs = "7.0.0"
 gethostname = "1.1.0"
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "stream"] }
 rodio = { version = "0.23.0", default-features = false, features = ["wav", "playback"] }
 rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
@@ -56,5 +58,4 @@ libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.12.3", features = ["tokio"] }
-futures-util = "0.3.34"
 nix = { version = "0.31.3", features = ["process", "signal"] }

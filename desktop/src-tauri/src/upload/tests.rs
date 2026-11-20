@@ -48,6 +48,8 @@ fn patch_ok(from: u64, to: u64) -> Mock {
         .and(header("upload-offset", from.to_string().as_str()))
         .and(header("tus-resumable", "1.0.0"))
         .and(header("content-type", "application/offset+octet-stream"))
+        // Sent with its length, not chunked: the server needs it.
+        .and(header("content-length", (to - from).to_string().as_str()))
         .respond_with(ResponseTemplate::new(204).insert_header("Upload-Offset", to.to_string().as_str()))
 }
 
@@ -94,13 +96,42 @@ async fn happy_path_uploads_in_chunks_then_finalizes() {
     .await
     .unwrap();
     assert_eq!(out.upload_id, "up1");
-    assert_eq!(*progress.lock().unwrap(), vec![(8, 20), (16, 20), (20, 20)]);
+    // Progress inside a chunk is timing-dependent; every chunk end is reported, in order.
+    let progress = progress.lock().unwrap();
+    assert!(progress.windows(2).all(|w| w[0].0 <= w[1].0), "{progress:?}");
+    assert!(progress.iter().all(|&(_, total)| total == 20));
+    for end in [8, 16, 20] {
+        assert!(progress.contains(&(end, 20)), "{progress:?}");
+    }
     let persisted = persisted.lock().unwrap();
     assert_eq!(persisted.last().unwrap().1, 20);
     assert!(persisted.iter().all(|(u, _)| u.ends_with("/api/uploads/up1")));
 
     let clip = client.finalize("tok", &req()).await.unwrap();
     assert_eq!(clip.id, "abcdefghijkl");
+}
+
+#[tokio::test]
+async fn progress_is_reported_while_a_chunk_is_still_being_sent() {
+    let server = MockServer::start().await;
+    let len: u64 = 1024 * 1024;
+    Mock::given(method("POST")).and(path("/api/uploads"))
+        .respond_with(ResponseTemplate::new(201).insert_header("Location", format!("{}/api/uploads/up1", server.uri()).as_str()))
+        .mount(&server).await;
+    // The server answers slowly, so the chunk is in flight across several progress ticks.
+    Mock::given(method("PATCH")).and(path("/api/uploads/up1"))
+        .respond_with(ResponseTemplate::new(204).insert_header("Upload-Offset", len.to_string().as_str()).set_delay(Duration::from_millis(400)))
+        .expect(1)
+        .mount(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("big.mp4");
+    std::fs::write(&f, vec![7u8; len as usize]).unwrap();
+    let client = ApiClient::new(&server.uri()).unwrap();
+    let progress = Mutex::new(vec![]);
+    tus::upload_with(&client, "tok", &f, None, |a, _| progress.lock().unwrap().push(a), |_, _| {}, &fast(len)).await.unwrap();
+    let progress = progress.lock().unwrap();
+    assert!(progress.iter().any(|&a| a > 0 && a < len), "nothing between the chunk ends: {progress:?}");
+    assert_eq!(progress.last(), Some(&len));
 }
 
 #[tokio::test]

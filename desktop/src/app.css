@@ -366,7 +366,8 @@ select.input option {
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent), #b18cff);
   box-shadow: 0 0 12px var(--accent-glow);
-  transition: width 0.25s ease;
+  /* Progress arrives about every 100 ms: a short linear glide joins the steps into one motion. */
+  transition: width 0.2s linear;
 }
 
 .progress.indeterminate > div {

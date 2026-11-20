@@ -107,7 +107,7 @@ slow motion built on 2026-11-20, one commit each; item 10 was dropped.
 | 8 | `/` focuses search                 | **Done.** In My clips and the Feed; the field shows the key while empty |
 | 9 | Select several clips               | **Done.** A check box on each card (or Ctrl+click; Shift+click selects a run, Ctrl+A all, Esc clears); a bar to star, set game, upload (one after another) or delete them together |
 | 11 | Right-click a clip card           | **Done.** Opens the ⋯ menu, in My clips |
-| 12 | Hover preview                      | **Done for clips on this PC.** Resting on the picture plays the kept part muted, served with no audio track (a muted stream once made PipeWire start Klipt muted). Feed and online-only cards wait for a sound-free copy on the server |
+| 12 | Hover preview                      | **Done for clips on this PC.** Resting on the picture plays the kept part muted, served with no audio track (a muted stream once made PipeWire start Klipt muted). Feed and upload-only cards show just the thumbnail: a sound-free preview copy on the server was turned down (2026-11-20) |
 | 13 | "New" dot on Feed cards            | **Done.** Friends' clips shared since you last opened the Feed get a dot by the title |
 | 14 | Slow motion in the editor          | **Not now.** Frame-by-frame stepping is done (2026-11-16); setting parts of a clip to 0.25×/0.5× waits |
 

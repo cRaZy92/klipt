@@ -25,19 +25,14 @@ import {
   resolveTags,
   setTags,
   UnknownUserError,
+  type ClipWithOwner,
 } from './repo.js';
 
 type ClipRow = typeof clips.$inferSelect;
 
 /** Maps a clip row to its API shape. Shared by every clip endpoint. */
-export function toClip(
-  row: ClipRow,
-  owner: { username: string },
-  baseUrl: string,
-  views = 0,
-  tagged: string[] = [],
-  favorite = false,
-): Clip {
+export function toClip(item: ClipWithOwner, baseUrl: string): Clip {
+  const { clip: row, owner, views, tagged, taggedNames, favorite } = item;
   return {
     id: row.id,
     title: row.title,
@@ -50,11 +45,12 @@ export function toClip(
     sizeBytes: row.sizeBytes,
     views,
     tagged,
+    taggedNames,
     favorite,
     kind: row.kind,
     processing: processingOf(row),
     createdAt: row.createdAt.toISOString(),
-    owner: { username: owner.username },
+    owner: { username: owner.username, displayName: owner.displayName },
     shareUrl: `${baseUrl}/c/${row.id}`,
     videoUrl: `${baseUrl}/media/${mediaFileName(row)}`,
     thumbnailUrl: `${baseUrl}/media/${row.id}.jpg${versionQuery(row)}`,
@@ -156,7 +152,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (!q.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
       const { items, nextCursor } = await listClips(db, req.user!, { ...q.data, search: q.data.q, withMe: q.data.with === 'me', kind: q.data.kind, favorites: q.data.favorites === '1' });
-      return { items: items.map((i) => toClip(i.clip, i.owner, config.baseUrl, i.views, i.tagged, i.favorite)), nextCursor };
+      return { items: items.map((i) => toClip(i, config.baseUrl)), nextCursor };
     } catch (err) {
       if (err instanceof InvalidCursorError) return reply.code(400).send({ error: 'invalid_cursor' });
       throw err;
@@ -175,7 +171,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const p = idParam.safeParse(req.params);
     const found = p.success ? await getClip(db, p.data.id, req.user?.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
-    return toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged, found.favorite);
+    return toClip(found, config.baseUrl);
   });
 
   // Starring: any clip you can open (the id is the secret, as for the share page).
@@ -229,7 +225,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const patch = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
     if (Object.keys(patch).length > 0) await db.update(clips).set(patch).where(eq(clips.id, found.clip.id));
     const now = (await getClip(db, found.clip.id, req.user!.id))!;
-    return toClip(now.clip, now.owner, config.baseUrl, now.views, now.tagged, now.favorite);
+    return toClip(now, config.baseUrl);
   });
 
   app.delete('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
@@ -298,7 +294,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const sendFinalized = async (clipId: string) => {
       const found = await getClip(db, clipId, user.id);
       if (!found) return reply.code(404).send({ error: 'not_found' });
-      return reply.code(200).send(toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged, found.favorite));
+      return reply.code(200).send(toClip(found, config.baseUrl));
     };
 
     const owned = await ownedUpload();
@@ -470,8 +466,16 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (row.transcodeState === 'queued') app.transcoder.kick();
     const created = await getClip(db, row.id, user.id);
     if (target && created) {
-      return reply.code(200).send(toClip(created.clip, created.owner, config.baseUrl, created.views, created.tagged, created.favorite));
+      return reply.code(200).send(toClip(created, config.baseUrl));
     }
-    return reply.code(201).send(toClip(row, user, config.baseUrl, 0, created?.tagged ?? []));
+    const item = created ?? {
+      clip: row,
+      owner: { username: user.username, displayName: user.displayName },
+      views: 0,
+      tagged: [],
+      taggedNames: [],
+      favorite: false,
+    };
+    return reply.code(201).send(toClip(item, config.baseUrl));
   });
 }

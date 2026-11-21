@@ -71,6 +71,13 @@
       "when": 1795135039466,
       "tag": "0009_clip_embed_version",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795225785598,
+      "tag": "0010_accounts_devices_feedback",
+      "breakpoints": true
     }
   ]
 }

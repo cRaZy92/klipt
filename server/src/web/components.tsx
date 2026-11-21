@@ -102,11 +102,11 @@ export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
         <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>
       </div>
       <div class="card-body">
-        <Avatar name={owner.username} />
+        <Avatar name={owner.displayName} />
         <div class="card-text">
           <div class="card-title">{e(clip.title)}</div>
           <div class="meta">
-            <span class="owner">{e(owner.username)}</span>
+            <span class="owner">{e(owner.displayName)}</span>
             {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
           </div>
           <div class="meta">

@@ -1,4 +1,4 @@
-import type { GameCount, MyStorage, SessionInfo } from '@klipt/shared';
+import type { GameCount, MyStorage } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import type { ClipWithOwner } from '../../clips/repo.js';
 import { emptyText, formatDuration, formatSize, GameFilter, Pager, ProcessingPill, relativeDate, SearchBox, viewsLabel } from '../components.js';
@@ -49,7 +49,6 @@ export function MePage(props: {
   games: GameCount[];
   game?: string;
   search?: string;
-  sessions: SessionInfo[];
   storage: MyStorage;
   baseUrl: string;
 }): JSX.Element {
@@ -76,20 +75,6 @@ export function MePage(props: {
         <ul class="rows">{props.items.map((item) => <MyClipRow item={item} baseUrl={props.baseUrl} />)}</ul>
       )}
       <Pager nextCursor={props.nextCursor} basePath="/me" game={props.game} search={props.search} />
-      <h2>Sessions</h2>
-      <ul class="rows plain">
-        {props.sessions.map((s) => (
-          <li class="row session" data-session-id={s.id}>
-            <div class="row-main">
-              <strong>{e(s.label ?? (s.kind === 'web' ? 'Web' : 'Desktop'))}</strong>
-              <span class="badge">{s.kind}</span>
-              {s.current ? <span class="badge accent">this device</span> : ''}
-              <div class="meta"><span>Last used {relativeDate(new Date(s.lastUsedAt))}</span></div>
-            </div>
-            {s.current ? '' : <button type="button" class="btn small danger" data-action="revoke-session">Revoke</button>}
-          </li>
-        ))}
-      </ul>
     </Layout>
   );
 }

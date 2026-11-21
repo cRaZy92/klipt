@@ -2,13 +2,16 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { getActivity, getAdminStats, getGameShares, getTranscodes, isInviteActive, listActiveInvites, listAdminUsers } from '../admin/queries.js';
+import { getActivity, getAdminStats, getGameShares, getTranscodes, isInviteActive, listActiveInvites, listAdminUsers, listFeedback } from '../admin/queries.js';
 import { toClip, versionQuery } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
-import { users } from '../db/schema.js';
-import { getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, shareInviter, InvalidCursorError, type Scope } from '../clips/repo.js';
+import { passwordResets, sessions, users } from '../db/schema.js';
+import { activeReset } from '../auth/routes.js';
+import { AccountPage } from './pages/account.js';
+import { ResetPage } from './pages/reset.js';
+import { displayNameOf, getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, shareInviter, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage, TranscodeSection } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
 import { GetAppPage } from './pages/getApp.js';
@@ -133,12 +136,12 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     if (!guard(req, reply)) return reply;
     const { username } = req.params as { username: string };
     const [owner] = await db
-      .select({ username: users.username })
+      .select({ username: users.username, displayName: displayNameOf(users) })
       .from(users)
       .where(eq(users.usernameKey, username.toLowerCase()));
     if (!owner) return notFound(req, reply);
     const [data, stats] = await Promise.all([load(req, 'user', owner.username), getProfileStats(db, req.user!, owner.username)]);
-    return html(reply, UserPage({ user: req.user!, username: owner.username, ...data, stats }) as string);
+    return html(reply, UserPage({ user: req.user!, username: owner.username, displayName: owner.displayName, ...data, stats }) as string);
   });
 
   // Public: the id is the secret (link-only clips are shareable too).
@@ -147,8 +150,8 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const found = /^[A-Za-z0-9_-]{12}$/.test(id) ? await getClip(db, id, req.user?.id) : null;
     if (!found) return html(reply, NotFoundPage({ user: req.user, message: "This clip doesn't exist or was deleted." }) as string, 404);
     const canDelete = !!req.user && (req.user.id === found.clip.userId || req.user.isAdmin);
-    const clip = toClip(found.clip, found.owner, config.baseUrl, found.views, found.tagged, found.favorite);
-    const viewers = req.user?.id === found.clip.userId ? (await listViewers(db, clip.id)).map((v) => v.username) : undefined;
+    const clip = toClip(found, config.baseUrl);
+    const viewers = req.user?.id === found.clip.userId ? (await listViewers(db, clip.id)).map((v) => v.displayName) : undefined;
     const signup = !req.user && config.shareSignup && (await shareInviter(db, clip.id)) !== null;
     const plan = clip.kind === 'clip' ? embedPlan(clip) : null;
     const embed =
@@ -162,24 +165,49 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     if (!guard(req, reply)) return reply;
     const user = req.user!;
     const data = await load(req, 'mine');
-    const [sessionInfos, storage] = await Promise.all([listSessions(db, user), getUserStorage(db, user.id)]);
-    return html(reply, MePage({ user, ...data, sessions: sessionInfos, storage, baseUrl: config.baseUrl }) as string);
+    const storage = await getUserStorage(db, user.id);
+    return html(reply, MePage({ user, ...data, storage, baseUrl: config.baseUrl }) as string);
+  });
+
+  app.get('/account', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    const user = req.user!;
+    const [infos, devices] = await Promise.all([
+      listSessions(db, user),
+      db.select({ id: sessions.id, appVersion: sessions.appVersion, os: sessions.os }).from(sessions).where(eq(sessions.userId, user.id)),
+    ]);
+    const list = infos.map((s) => {
+      const d = devices.find((x) => x.id === s.id);
+      return { ...s, appVersion: d?.appVersion ?? null, os: d?.os ?? null };
+    });
+    return html(reply, AccountPage({ user, sessions: list }) as string);
+  });
+
+  app.get('/reset/:code', async (req, reply) => {
+    const code = (req.params as { code: string }).code.slice(0, 100);
+    const [row] = await db
+      .select({ username: users.username })
+      .from(passwordResets)
+      .innerJoin(users, eq(users.id, passwordResets.userId))
+      .where(and(activeReset(code), isNull(users.disabledAt)));
+    return html(reply, ResetPage({ code, username: row?.username ?? null }) as string);
   });
 
   app.get('/admin', async (req, reply) => {
     if (!guard(req, reply)) return reply;
     if (!req.user!.isAdmin) return notFound(req, reply);
-    const [stats, inviteList, userList, transcodes, activity, games] = await Promise.all([
+    const [stats, inviteList, userList, transcodes, activity, games, reports] = await Promise.all([
       getAdminStats(db),
       listActiveInvites(db, config.baseUrl),
       listAdminUsers(db),
       getTranscodes(db, app.transcoder),
       getActivity(db),
       getGameShares(db),
+      listFeedback(db),
     ]);
     return html(
       reply,
-      AdminPage({ user: req.user!, stats, invites: inviteList, users: userList, transcodes, activity, games }) as string,
+      AdminPage({ user: req.user!, stats, invites: inviteList, users: userList, transcodes, activity, games, feedback: reports }) as string,
     );
   });
 

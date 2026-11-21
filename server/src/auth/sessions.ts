@@ -8,6 +8,10 @@ export type SessionRow = typeof sessions.$inferSelect;
 export interface AuthUser {
   id: string;
   username: string;
+  /** Shown to friends: the display name, or the username without one. */
+  displayName: string;
+  /** The display name as set (null: none). */
+  customName: string | null;
   isAdmin: boolean;
   sessionId: string;
 }
@@ -46,6 +50,7 @@ export async function resolveToken(db: Db, token: string): Promise<AuthUser | nu
       lastUsedAt: sessions.lastUsedAt,
       id: users.id,
       username: users.username,
+      displayName: users.displayName,
       isAdmin: users.isAdmin,
     })
     .from(sessions)
@@ -65,7 +70,14 @@ export async function resolveToken(db: Db, token: string): Promise<AuthUser | nu
       .set({ lastUsedAt: now })
       .where(and(eq(sessions.id, row.sessionId), lt(sessions.lastUsedAt, sql`${new Date(now.getTime() - LAST_USED_GRANULARITY_MS + 1)}`)));
   }
-  return { id: row.id, username: row.username, isAdmin: row.isAdmin, sessionId: row.sessionId };
+    return {
+    id: row.id,
+    username: row.username,
+    displayName: row.displayName || row.username,
+    customName: row.displayName || null,
+    isAdmin: row.isAdmin,
+    sessionId: row.sessionId,
+  };
 }
 
 export async function revokeSession(db: Db, sessionId: string): Promise<void> {

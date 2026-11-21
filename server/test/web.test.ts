@@ -134,7 +134,8 @@ describe('web pages', () => {
     expect(u.body).not.toContain('Priv');
     const me = await get('/me', a.cookie);
     expect(me.body).toContain('Priv');
-    expect(me.body).toContain('Sessions');
+    // Sessions live on the Account page now.
+    expect((await get('/account', a.cookie)).body).toContain('Signed in on');
     expect((await get('/u/nobody', b.cookie)).statusCode).toBe(404);
   });
 

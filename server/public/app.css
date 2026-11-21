@@ -291,6 +291,29 @@ code { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; f
 }
 .form input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .form .btn.primary { height: 2.6rem; margin-top: 4px; }
+.form textarea {
+  font: inherit; padding: 10px 12px; color: var(--text); resize: vertical; min-height: 6rem;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg);
+  transition: border-color .15s, box-shadow .15s;
+}
+.form textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.form .choice { display: flex; gap: 18px; }
+.form .choice label { display: flex; align-items: center; gap: 6px; color: var(--text); font-weight: 500; }
+.form .choice input { height: auto; }
+
+.account-page { max-width: 40rem; }
+.account-page .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin: 0 0 20px; }
+.account-page .panel h2 { margin-top: 0; }
+.account-page .panel > .muted { margin: -4px 0 14px; }
+.account-page .form .btn.primary { justify-self: start; padding: 0 1.2rem; }
+.profile-head .handle { margin: 2px 0 0; }
+.user-row .device { color: var(--text-faint); }
+.feedback-row.resolved { opacity: .6; }
+.feedback-row .badge { margin-left: 0; }
+.feedback-message { white-space: pre-wrap; word-break: break-word; margin: 8px 0 4px; }
+.sysinfo { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 8px 0 0; font-size: .85rem; }
+.sysinfo dt { color: var(--text-muted); }
+.sysinfo dd { margin: 0; word-break: break-word; }
 .error { color: var(--danger-text); background: var(--danger-soft); padding: 8px 12px; border-radius: var(--radius-sm); margin: 0; font-size: .9rem; }
 
 .toast {

@@ -1,4 +1,4 @@
-import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -6,6 +6,8 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   username: text('username').notNull(),
   usernameKey: text('username_key').notNull().unique(),
+  /** The name shown to friends; null shows the username. */
+  displayName: text('display_name'),
   passwordHash: text('password_hash').notNull(),
   isAdmin: boolean('is_admin').notNull().default(false),
   disabledAt: ts('disabled_at'),
@@ -21,7 +23,40 @@ export const sessions = pgTable('sessions', {
   createdAt: ts('created_at').notNull().defaultNow(),
   lastUsedAt: ts('last_used_at').notNull().defaultNow(),
   expiresAt: ts('expires_at'),
+  /** What the desktop app reports about its PC (`POST /api/me/device`), for the admin page. */
+  appVersion: text('app_version'),
+  os: text('os'),
+  gpu: text('gpu'),
 });
+
+/** A one-time link an admin makes so a user can set a new password. */
+export const passwordResets = pgTable('password_resets', {
+  code: text('code').primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdBy: uuid('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  expiresAt: ts('expires_at').notNull(),
+  usedAt: ts('used_at'),
+});
+
+/** A problem report or a feature idea, from the app (with logs and system info) or the website. */
+export const feedback = pgTable(
+  'feedback',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['bug', 'idea'] }).notNull(),
+    message: text('message').notNull(),
+    source: text('source', { enum: ['desktop', 'web'] }).notNull(),
+    /** Version, OS, CPU, GPU, recorder… as label → value. */
+    system: jsonb('system').$type<Record<string, string>>(),
+    /** The end of the app's log. */
+    logs: text('logs'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    resolvedAt: ts('resolved_at'),
+  },
+  (t) => [index('feedback_created_idx').on(t.createdAt.desc())],
+);
 
 export const invites = pgTable('invites', {
   code: text('code').primaryKey(),

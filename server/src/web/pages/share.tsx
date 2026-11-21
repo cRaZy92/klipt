@@ -22,7 +22,7 @@ export function shareHead(clip: Clip, embed: ShareEmbed | null = null): string {
       meta('property', 'og:site_name', 'Klipt'),
       meta('property', 'og:type', 'website'),
       meta('property', 'og:title', clip.title),
-      meta('property', 'og:description', clip.gameName ? `${clip.gameName} · screenshot by ${clip.owner.username}` : clip.owner.username),
+      meta('property', 'og:description', clip.gameName ? `${clip.gameName} · screenshot by ${clip.owner.displayName}` : clip.owner.displayName),
       meta('property', 'og:url', clip.shareUrl),
       meta('property', 'og:image', clip.videoUrl),
       meta('property', 'og:image:width', clip.width),
@@ -31,7 +31,7 @@ export function shareHead(clip: Clip, embed: ShareEmbed | null = null): string {
       meta('name', 'theme-color', '#7c5cff'),
     ].join('\n');
   }
-  const description = clip.gameName ? `${clip.gameName} · clipped by ${clip.owner.username}` : clip.owner.username;
+  const description = clip.gameName ? `${clip.gameName} · clipped by ${clip.owner.displayName}` : clip.owner.displayName;
   const video = embed ?? { url: clip.videoUrl, width: clip.width, height: clip.height };
   return [
     '<meta name="robots" content="noindex" />',
@@ -97,7 +97,7 @@ function People(props: { clip: Clip; viewers?: string[] }): JSX.Element {
       {clip.tagged.length > 0 ? (
         <p class="meta">
           <span data-role="tagged">
-            With {clip.tagged.map((name, i) => `${i > 0 ? ', ' : ''}<a href="/u/${encodeURIComponent(name)}">${e(name)}</a>`).join('')}
+            With {clip.tagged.map((name, i) => `${i > 0 ? ', ' : ''}<a href="/u/${encodeURIComponent(name)}">${e(clip.taggedNames[i] ?? name)}</a>`).join('')}
           </span>
           {owner ? tag('Edit') : ''}
         </p>
@@ -145,9 +145,9 @@ export function SharePage(props: {
           {clip.gameName ? <p class="share-game">{e(clip.gameName)}</p> : ''}
           <h1>{e(clip.title)}</h1>
           <a class="share-owner" href={`/u/${encodeURIComponent(clip.owner.username)}`}>
-            <Avatar name={clip.owner.username} size="md" />
+            <Avatar name={clip.owner.displayName} size="md" />
             <span>
-              <strong>{e(clip.owner.username)}</strong>
+              <strong>{e(clip.owner.displayName)}</strong>
               <span class="meta">
                 <span>{skDate(clip.createdAt)}</span>
                 <span data-role="views">{viewsLabel(clip.views)}</span>

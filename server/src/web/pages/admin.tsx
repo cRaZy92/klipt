@@ -1,4 +1,4 @@
-import type { AdminStats, AdminTranscodes, AdminUser, Invite, TranscodeJob } from '@klipt/shared';
+import type { AdminStats, AdminTranscodes, AdminUser, FeedbackItem, Invite, TranscodeJob } from '@klipt/shared';
 import type { GameShare, WeekActivity } from '../../admin/queries.js';
 import type { AuthUser } from '../../auth/sessions.js';
 import { formatDuration, formatGB, formatSize, relativeDate, skDate } from '../components.js';
@@ -222,8 +222,10 @@ export function AdminPage(props: {
   transcodes: AdminTranscodes;
   activity: WeekActivity[];
   games: GameShare[];
+  feedback: FeedbackItem[];
 }): JSX.Element {
   const { stats } = props;
+  const openReports = props.feedback.filter((f) => !f.resolvedAt).length;
   const thisWeek = props.activity.at(-1)?.clips ?? 0;
   const users = [...props.users].sort((a, b) => b.storageBytes - a.storageBytes);
   const maxBytes = Math.max(1, ...users.map((u) => u.storageBytes));
@@ -261,21 +263,45 @@ export function AdminPage(props: {
         ))}
       </ul>
 
+      <h2 id="feedback">
+        Reports and ideas {openReports > 0 ? <span class="badge accent">{openReports} open</span> : ''}
+      </h2>
+      <FeedbackSection items={props.feedback} />
+
       <h2>Users</h2>
       <ul class="rows plain">
         {users.map((u) => (
           <li class="row user-row" data-user-id={u.id}>
-            <Avatar name={u.username} size="md" />
+            <Avatar name={u.displayName} size="md" />
             <div class="row-main">
-              <a href={`/u/${encodeURIComponent(u.username)}`}><strong>{e(u.username)}</strong></a>
+              <a href={`/u/${encodeURIComponent(u.username)}`}><strong>{e(u.displayName)}</strong></a>
+              {u.displayName !== u.username ? <span class="muted"> @{e(u.username)}</span> : ''}
               {u.isAdmin ? <span class="badge accent">admin</span> : ''}
               {u.disabled ? <span class="badge">disabled</span> : ''}
-              <div class="meta"><span>{u.clipCount === 1 ? '1 clip' : `${u.clipCount} clips`}</span><span>joined {relativeDate(new Date(u.createdAt))}</span></div>
+              <div class="meta">
+                <span>{u.clipCount === 1 ? '1 clip' : `${u.clipCount} clips`}</span>
+                <span>joined {relativeDate(new Date(u.createdAt))}</span>
+                <span>{u.lastSeenAt ? `seen ${relativeDate(new Date(u.lastSeenAt))}` : 'never seen'}</span>
+              </div>
+              <div class="meta device" data-role="device">
+                {u.app ? (
+                  <>
+                    <span>{u.app.version ? `Klipt ${e(u.app.version)}` : 'Klipt app'}</span>
+                    {u.app.os ? <span>{e(u.app.os)}</span> : ''}
+                    {u.app.gpu ? <span>{e(u.app.gpu)}</span> : ''}
+                  </>
+                ) : (
+                  <span>No app signed in</span>
+                )}
+              </div>
             </div>
             <div class="usage" title="Storage on the server">
               <span class="usage-track"><span class="usage-bar" style={`--v:${u.storageBytes / maxBytes}`}></span></span>
               <span class="usage-value">{formatSize(u.storageBytes)}</span>
             </div>
+            <button type="button" class="btn small" data-action="reset-password" title="Make a one-time link to set a new password">
+              Password link
+            </button>
             {u.id === props.user.id ? (
               <span class="btn-slot"></span>
             ) : (
@@ -287,5 +313,56 @@ export function AdminPage(props: {
         ))}
       </ul>
     </Layout>
+  );
+}
+
+/** Problem reports and ideas from friends: open ones first, each with what it was sent with. */
+function FeedbackSection(props: { items: FeedbackItem[] }): JSX.Element {
+  if (props.items.length === 0) return <p class="empty">Nothing yet. Friends can send problems and ideas from the app's Settings or their Account page.</p>;
+  return (
+    <ul class="rows plain feedback-list">
+      {props.items.map((f) => (
+        <li class={`row feedback-row${f.resolvedAt ? ' resolved' : ''}`} data-feedback-id={f.id}>
+          <div class="row-main">
+            <div>
+              <span class={`badge ${f.kind === 'bug' ? 'job-failed' : 'accent'}`}>{f.kind === 'bug' ? 'Problem' : 'Idea'}</span>
+              <strong> {e(f.user.displayName)}</strong>
+              <span class="meta">
+                <span>{relativeDate(new Date(f.createdAt))}</span>
+                <span>{f.source === 'desktop' ? 'from the app' : 'from the website'}</span>
+                {f.resolvedAt ? <span>resolved</span> : ''}
+              </span>
+            </div>
+            <p class="feedback-message">{e(f.message)}</p>
+            {f.system ? (
+              <details>
+                <summary>System info</summary>
+                <dl class="sysinfo">
+                  {Object.entries(f.system).map(([k, v]) => (
+                    <>
+                      <dt>{e(k)}</dt>
+                      <dd>{e(v)}</dd>
+                    </>
+                  ))}
+                </dl>
+              </details>
+            ) : (
+              ''
+            )}
+          </div>
+          {f.hasLogs ? (
+            <a class="btn small" href={`/api/admin/feedback/${e(f.id)}/logs`} target="_blank" rel="noopener">
+              Open log
+            </a>
+          ) : (
+            ''
+          )}
+          <button type="button" class="btn small" data-action="resolve-feedback" data-resolved={String(!!f.resolvedAt)}>
+            {f.resolvedAt ? 'Reopen' : 'Resolve'}
+          </button>
+          <button type="button" class="btn small danger" data-action="delete-feedback">Delete</button>
+        </li>
+      ))}
+    </ul>
   );
 }

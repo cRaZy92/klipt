@@ -8,6 +8,7 @@ import { Avatar, Layout } from '../layout.js';
 export function UserPage(props: {
   user: AuthUser;
   username: string;
+  displayName: string;
   items: ClipWithOwner[];
   nextCursor: string | null;
   games: GameCount[];
@@ -18,10 +19,13 @@ export function UserPage(props: {
   const { stats } = props;
   const base = `/u/${encodeURIComponent(props.username)}`;
   return (
-    <Layout title={props.username} user={props.user}>
+    <Layout title={props.displayName} user={props.user}>
       <div class="profile-head">
-        <Avatar name={props.username} size="lg" />
-        <h1>{e(props.username)}</h1>
+        <Avatar name={props.displayName} size="lg" />
+        <div>
+          <h1>{e(props.displayName)}</h1>
+          {props.displayName !== props.username ? <p class="muted handle">@{e(props.username)}</p> : ''}
+        </div>
       </div>
       {stats.clips > 0 ? (
         <div class="stats profile-stats">

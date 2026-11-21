@@ -43,6 +43,10 @@
     not_found: 'That no longer exists. Reload the page.',
     cannot_disable_self: "You can't disable your own account.",
     invalid_request: "That didn't work. Reload the page and try again.",
+    wrong_password: "That isn't your current password.",
+    invalid_display_name: 'Names are up to 32 characters.',
+    invalid_reset: 'This password link was used already or has expired. Ask your admin for a new one.',
+    password_mismatch: "The two new passwords aren't the same.",
   };
   function friendly(err) {
     if (err.status === 429) return MESSAGES.rate_limited;
@@ -79,7 +83,35 @@
     errEl.hidden = true;
     btn.disabled = true;
     try {
-      if (form.dataset.form === 'login') {
+      var kind = form.dataset.form;
+      if ((kind === 'password' || kind === 'reset') && data.newPassword !== data.confirmPassword) {
+        throw new Error('password_mismatch');
+      }
+      if (kind === 'profile') {
+        var me = await api('PATCH', '/api/me', { displayName: data.displayName });
+        document.querySelectorAll('.topbar .who span').forEach(function (el) { el.textContent = me.displayName; });
+        form.querySelector('[name=displayName]').value = me.customName || '';
+        toast('Name saved');
+        btn.disabled = false;
+        return;
+      }
+      if (kind === 'password') {
+        await api('POST', '/api/me/password', { currentPassword: data.currentPassword, newPassword: data.newPassword });
+        form.reset();
+        toast('Password changed. Other devices are signed out.');
+        btn.disabled = false;
+        return;
+      }
+      if (kind === 'feedback') {
+        await api('POST', '/api/feedback', { kind: data.kind, message: data.message, source: 'web' });
+        form.reset();
+        toast('Sent. Thanks!');
+        btn.disabled = false;
+        return;
+      }
+      if (kind === 'reset') {
+        await api('POST', '/api/password-reset', { code: data.code, newPassword: data.newPassword });
+      } else if (kind === 'login') {
         await api('POST', '/api/auth/login', { username: data.username, password: data.password, client: 'web' });
       } else {
         // From an admin's invite link, or from a clip's share page (its owner invites).
@@ -164,6 +196,21 @@
         await api('POST', '/api/admin/transcodes/' + encodeURIComponent(clipRow.dataset.clipId) + '/retry');
         await refreshTranscodes();
         toast('Back in the queue');
+      } else if (action === 'reset-password') {
+        var ru = btn.closest('[data-user-id]');
+        var reset = await api('POST', '/api/admin/users/' + ru.dataset.userId + '/password-reset');
+        await copy(reset.url);
+        toast('Password link copied. Send it to them; it works once, for a day.');
+      } else if (action === 'resolve-feedback') {
+        var fr = btn.closest('[data-feedback-id]');
+        var resolve = btn.dataset.resolved !== 'true';
+        await api('PATCH', '/api/admin/feedback/' + fr.dataset.feedbackId, { resolved: resolve });
+        location.reload();
+      } else if (action === 'delete-feedback') {
+        var fd = btn.closest('[data-feedback-id]');
+        if (!confirm('Delete this report?')) return;
+        await api('DELETE', '/api/admin/feedback/' + fd.dataset.feedbackId);
+        fd.remove();
       } else if (action === 'toggle-user') {
         var u = btn.closest('[data-user-id]');
         var disable = btn.dataset.disabled !== 'true';

@@ -8,17 +8,26 @@ export type ClipRow = typeof clips.$inferSelect;
 export type Scope = 'feed' | 'mine' | 'user';
 export interface ClipWithOwner {
   clip: ClipRow;
-  owner: { username: string };
+  owner: { username: string; displayName: string };
   /** Friends who watched it plus logged-out plays. */
   views: number;
-  /** Friends in the clip, by name. */
+  /** Friends in the clip, by username. */
   tagged: string[];
+  /** Their display names, in the same order. */
+  taggedNames: string[];
   /** Starred by the viewer. */
   favorite: boolean;
 }
 
+/** The name a user shows to friends: their display name, or their username without one. */
+export const displayNameOf = (t: { displayName: unknown; username: unknown }) =>
+  sql<string>`coalesce(nullif(${t.displayName}, ''), ${t.username})`;
+const ownerExpr = { username: users.username, displayName: displayNameOf(users) };
+
 /** The usernames tagged in a clip, alphabetically. */
 const taggedExpr = sql<string[]>`coalesce((select array_agg(tu.username order by tu.username_key) from ${clipTags} ct join ${users} tu on tu.id = ct.user_id where ct.clip_id = ${clips.id}), '{}')`;
+/** Their display names, in the same order. */
+const taggedNamesExpr = sql<string[]>`coalesce((select array_agg(coalesce(nullif(tu.display_name, ''), tu.username) order by tu.username_key) from ${clipTags} ct join ${users} tu on tu.id = ct.user_id where ct.clip_id = ${clips.id}), '{}')`;
 
 /** Whether `userId` starred the clip (false for a logged-out viewer). */
 function favoriteExpr(userId: string | null | undefined): SQL<boolean> {
@@ -79,7 +88,7 @@ export function searchCondition(text: string | undefined): SQL | undefined {
   return and(
     ...words.map((word) => {
       const pattern = `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-      return or(ilike(clips.title, pattern), ilike(clips.gameName, pattern), ilike(users.username, pattern));
+      return or(ilike(clips.title, pattern), ilike(clips.gameName, pattern), ilike(users.username, pattern), ilike(users.displayName, pattern));
     }),
   );
 }
@@ -111,13 +120,13 @@ export async function listClips(
     conds.push(or(lt(clips.createdAt, c.createdAt), and(eq(clips.createdAt, c.createdAt), lt(clips.id, c.id))));
   }
   const rows = await db
-    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr, tagged: taggedExpr, favorite: favoriteExpr(viewer.id) })
+    .select({ clip: clips, owner: ownerExpr, views: viewsExpr, tagged: taggedExpr, taggedNames: taggedNamesExpr, favorite: favoriteExpr(viewer.id) })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(and(...conds))
     .orderBy(desc(clips.createdAt), desc(clips.id))
     .limit(limit + 1);
-  const items = rows.slice(0, limit).map((r) => ({ ...r, views: Number(r.views), tagged: r.tagged ?? [], favorite: !!r.favorite }));
+  const items = rows.slice(0, limit).map((r) => ({ ...r, views: Number(r.views), tagged: r.tagged ?? [], taggedNames: r.taggedNames ?? [], favorite: !!r.favorite }));
   const last = items[items.length - 1];
   const nextCursor = rows.length > limit && last ? encodeCursor(last.clip.createdAt, last.clip.id) : null;
   return { items, nextCursor };
@@ -196,14 +205,14 @@ export async function recordView(db: Db, clipId: string, viewerId: string | null
 }
 
 /** The friends who watched `clipId`, first viewer first. */
-export async function listViewers(db: Db, clipId: string): Promise<{ username: string; viewedAt: string }[]> {
+export async function listViewers(db: Db, clipId: string): Promise<{ username: string; displayName: string; viewedAt: string }[]> {
   const rows = await db
-    .select({ username: users.username, viewedAt: clipViews.viewedAt })
+    .select({ username: users.username, displayName: displayNameOf(users), viewedAt: clipViews.viewedAt })
     .from(clipViews)
     .innerJoin(users, eq(users.id, clipViews.userId))
     .where(eq(clipViews.clipId, clipId))
     .orderBy(clipViews.viewedAt, users.username);
-  return rows.map((r) => ({ username: r.username, viewedAt: r.viewedAt.toISOString() }));
+  return rows.map((r) => ({ username: r.username, displayName: r.displayName, viewedAt: r.viewedAt.toISOString() }));
 }
 
 export class UnknownUserError extends Error {
@@ -235,18 +244,18 @@ export async function setTags(db: Pick<Db, 'delete' | 'insert'>, clipId: string,
 }
 
 /** Active users, for picking friends to tag. */
-export async function listUsernames(db: Db): Promise<{ username: string }[]> {
-  return db.select({ username: users.username }).from(users).where(isNull(users.disabledAt)).orderBy(asc(users.usernameKey));
+export async function listUsernames(db: Db): Promise<{ username: string; displayName: string }[]> {
+  return db.select({ username: users.username, displayName: displayNameOf(users) }).from(users).where(isNull(users.disabledAt)).orderBy(asc(users.usernameKey));
 }
 
 /** A clip; `favorite` says whether `viewerId` starred it. */
 export async function getClip(db: Db, id: string, viewerId?: string | null): Promise<ClipWithOwner | null> {
   const [row] = await db
-    .select({ clip: clips, owner: { username: users.username }, views: viewsExpr, tagged: taggedExpr, favorite: favoriteExpr(viewerId) })
+    .select({ clip: clips, owner: ownerExpr, views: viewsExpr, tagged: taggedExpr, taggedNames: taggedNamesExpr, favorite: favoriteExpr(viewerId) })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(eq(clips.id, id));
-  return row ? { ...row, views: Number(row.views), tagged: row.tagged ?? [], favorite: !!row.favorite } : null;
+  return row ? { ...row, views: Number(row.views), tagged: row.tagged ?? [], taggedNames: row.taggedNames ?? [], favorite: !!row.favorite } : null;
 }
 
 /**

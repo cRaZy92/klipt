@@ -4,7 +4,7 @@ import type { AuthUser } from '../auth/sessions.js';
 import { esc as e } from './escape.js';
 
 /** The top bar's sections; the page passes its own so the bar can mark it. */
-export type NavSection = 'feed' | 'me' | 'get-app' | 'admin';
+export type NavSection = 'feed' | 'me' | 'get-app' | 'admin' | 'account';
 
 /** The app icon: a play triangle between two clip brackets (desktop/src-tauri/icons/source.svg). */
 export function LogoMark(props: { size?: number }): JSX.Element {
@@ -80,8 +80,16 @@ export function Layout(props: {
                 </nav>
                 <div class="account">
                   <a class="who" href={`/u/${encodeURIComponent(user.username)}`} title="Your profile">
-                    <Avatar name={user.username} />
-                    <span>{e(user.username)}</span>
+                    <Avatar name={user.displayName} />
+                    <span>{e(user.displayName)}</span>
+                  </a>
+                  <a
+                    class="btn ghost small"
+                    href="/account"
+                    aria-current={props.nav === 'account' ? 'page' : undefined}
+                    title="Name, password, devices and feedback"
+                  >
+                    Account
                   </a>
                   <button type="button" class="btn ghost small" data-action="logout">Log out</button>
                 </div>

@@ -15,7 +15,7 @@ export function GetAppPage(props: { user: AuthUser | null; server: string; next:
   return (
     <Layout title="Get the app" user={user} nav="get-app">
       <div class="guide">
-        <h1>{welcome && user ? `Welcome, ${e(user.username)}!` : 'Get the Klipt app'}</h1>
+        <h1>{welcome && user ? `Welcome, ${e(user.displayName)}!` : 'Get the Klipt app'}</h1>
         <p class="lead muted">
           The Klipt app records your game in the background. Press a shortcut after a great moment and it saves the
           last 30 seconds, ready to upload and share here.

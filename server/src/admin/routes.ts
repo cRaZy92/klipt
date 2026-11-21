@@ -2,13 +2,15 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import type { AdminStats, AdminTranscodes, AdminUser, Invite } from '@klipt/shared';
-import { clips, invites, users } from '../db/schema.js';
-import { getAdminStats, getTranscodes, listActiveInvites, listAdminUsers, toInvite } from './queries.js';
+import type { AdminStats, AdminTranscodes, AdminUser, FeedbackItem, Invite, PasswordReset } from '@klipt/shared';
+import { clips, feedback, invites, passwordResets, users } from '../db/schema.js';
+import { getAdminStats, getTranscodes, listActiveInvites, listAdminUsers, listFeedback, toInvite } from './queries.js';
 import { requireAdmin } from '../auth/plugin.js';
 import { revokeAllForUser } from '../auth/sessions.js';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RESET_TTL_MS = 24 * 60 * 60 * 1000;
+const resolveBody = z.object({ resolved: z.boolean() });
 const patchBody = z.object({ disabled: z.boolean() });
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
@@ -53,6 +55,59 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       return true;
     });
     if (!found) return reply.code(404).send({ error: 'not_found' });
+    return reply.code(204).send();
+  });
+
+  // A one-time link for a user who forgot their password (valid a day; a new one replaces it).
+  app.post('/api/admin/users/:id/password-reset', opts, async (req, reply): Promise<PasswordReset | undefined> => {
+    const { id } = req.params as { id: string };
+    if (!z.uuid().safeParse(id).success) return reply.code(404).send({ error: 'not_found' });
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, id));
+    if (!user) return reply.code(404).send({ error: 'not_found' });
+    const code = nanoid(24);
+    const expiresAt = new Date(Date.now() + RESET_TTL_MS);
+    await db.transaction(async (tx) => {
+      await tx.update(passwordResets).set({ usedAt: new Date() }).where(and(eq(passwordResets.userId, id), isNull(passwordResets.usedAt)));
+      await tx.insert(passwordResets).values({ code, userId: id, createdBy: req.user!.id, expiresAt });
+    });
+    return { url: `${config.baseUrl}/reset/${code}`, expiresAt: expiresAt.toISOString() };
+  });
+
+  app.get('/api/admin/feedback', opts, async (): Promise<FeedbackItem[]> => listFeedback(db));
+
+  // The log a report came with, as plain text (opened in a new tab or saved).
+  app.get('/api/admin/feedback/:id/logs', opts, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!z.uuid().safeParse(id).success) return reply.code(404).send({ error: 'not_found' });
+    const [row] = await db.select({ logs: feedback.logs, createdAt: feedback.createdAt }).from(feedback).where(eq(feedback.id, id));
+    if (!row?.logs) return reply.code(404).send({ error: 'not_found' });
+    const name = `klipt-log-${row.createdAt.toISOString().slice(0, 10)}-${id.slice(0, 8)}.txt`;
+    return reply
+      .header('content-type', 'text/plain; charset=utf-8')
+      .header('content-disposition', `inline; filename="${name}"`)
+      .header('cache-control', 'private, no-store')
+      .header('x-content-type-options', 'nosniff')
+      .send(row.logs);
+  });
+
+  app.patch('/api/admin/feedback/:id', opts, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = resolveBody.safeParse(req.body);
+    if (!parsed.success || !z.uuid().safeParse(id).success) return reply.code(400).send({ error: 'invalid_request' });
+    const res = await db
+      .update(feedback)
+      .set({ resolvedAt: parsed.data.resolved ? new Date() : null })
+      .where(eq(feedback.id, id))
+      .returning({ id: feedback.id });
+    if (res.length === 0) return reply.code(404).send({ error: 'not_found' });
+    return reply.code(204).send();
+  });
+
+  app.delete('/api/admin/feedback/:id', opts, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!z.uuid().safeParse(id).success) return reply.code(404).send({ error: 'not_found' });
+    const res = await db.delete(feedback).where(eq(feedback.id, id)).returning({ id: feedback.id });
+    if (res.length === 0) return reply.code(404).send({ error: 'not_found' });
     return reply.code(204).send();
   });
 

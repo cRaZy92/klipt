@@ -5,6 +5,7 @@ import type { Db } from './db/client.js';
 import { registerAuth } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
 import { adminRoutes } from './admin/routes.js';
+import { feedbackRoutes } from './feedback/routes.js';
 import { mountTus } from './uploads/tus.js';
 import { clipRoutes } from './clips/routes.js';
 import { webRoutes } from './web/routes.js';
@@ -84,6 +85,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await authRoutes(app);
   await adminRoutes(app);
+  await feedbackRoutes(app);
   await mountTus(app, { db: deps.db, config: deps.config });
   await clipRoutes(app);
   await webRoutes(app);

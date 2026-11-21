@@ -1,8 +1,9 @@
 import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
-import type { AdminStats, AdminTranscodes, AdminUser, Invite, TranscodeJob } from '@klipt/shared';
+import type { AdminStats, AdminTranscodes, AdminUser, FeedbackItem, Invite, TranscodeJob } from '@klipt/shared';
 import { transcodeCounts, type Transcoder } from '../clips/transcoder.js';
 import type { Db } from '../db/client.js';
-import { clips, invites, users } from '../db/schema.js';
+import { clips, feedback, invites, sessions, users } from '../db/schema.js';
+import { displayNameOf } from '../clips/repo.js';
 
 /** An invite that is unused, not revoked and not expired. Single source of truth for invite validity. */
 export const activeInvite = (now: Date = new Date()) =>
@@ -32,8 +33,14 @@ export async function listAdminUsers(db: Db): Promise<AdminUser[]> {
     .select({
       id: users.id,
       username: users.username,
+      displayName: displayNameOf(users),
       isAdmin: users.isAdmin,
       disabledAt: users.disabledAt,
+      lastSeenAt: sql<string | null>`(select max(s.last_used_at) from ${sessions} s where s.user_id = ${users.id})`,
+      app: sql<{ version: string | null; os: string | null; gpu: string | null; lastUsedAt: string } | null>`(
+        select json_build_object('version', s.app_version, 'os', s.os, 'gpu', s.gpu, 'lastUsedAt', s.last_used_at)
+        from ${sessions} s where s.user_id = ${users.id} and s.kind = 'desktop'
+        order by (s.app_version is not null) desc, s.last_used_at desc limit 1)`,
       createdAt: users.createdAt,
       clipCount: sql<number>`count(${clips.id})::int`,
       storageBytes: sql<number>`coalesce(sum(${clips.sizeBytes}), 0)::float8`,
@@ -45,6 +52,9 @@ export async function listAdminUsers(db: Db): Promise<AdminUser[]> {
   return rows.map((u) => ({
     id: u.id,
     username: u.username,
+    displayName: u.displayName,
+    lastSeenAt: u.lastSeenAt ? new Date(u.lastSeenAt).toISOString() : null,
+    app: u.app ? { ...u.app, lastUsedAt: new Date(u.app.lastUsedAt).toISOString() } : null,
     isAdmin: u.isAdmin,
     disabled: u.disabledAt !== null,
     clipCount: u.clipCount,
@@ -158,4 +168,36 @@ export async function getGameShares(db: Db): Promise<GameShare[]> {
   const top: GameShare[] = rows.slice(0, TOP_GAMES).map((r) => ({ gameName: r.gameName, clips: Number(r.clips) }));
   const rest = rows.slice(TOP_GAMES).reduce((n, r) => n + Number(r.clips), 0);
   return rest > 0 ? [...top, { gameName: null, clips: rest }] : top;
+}
+
+/** Problem reports and ideas, newest first (open ones before resolved ones). */
+export async function listFeedback(db: Db, limit = 100): Promise<FeedbackItem[]> {
+  const rows = await db
+    .select({
+      id: feedback.id,
+      kind: feedback.kind,
+      message: feedback.message,
+      source: feedback.source,
+      system: feedback.system,
+      hasLogs: sql<boolean>`(${feedback.logs} is not null and ${feedback.logs} <> '')`,
+      createdAt: feedback.createdAt,
+      resolvedAt: feedback.resolvedAt,
+      username: users.username,
+      displayName: displayNameOf(users),
+    })
+    .from(feedback)
+    .innerJoin(users, eq(users.id, feedback.userId))
+    .orderBy(sql`${feedback.resolvedAt} is not null`, desc(feedback.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    message: r.message,
+    source: r.source,
+    system: r.system ?? null,
+    hasLogs: !!r.hasLogs,
+    createdAt: r.createdAt.toISOString(),
+    resolvedAt: r.resolvedAt?.toISOString() ?? null,
+    user: { username: r.username, displayName: r.displayName },
+  }));
 }

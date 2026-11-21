@@ -12,7 +12,59 @@ export interface LoginRequest {
 export interface Me {
   id: string;
   username: string;
+  /** The name friends see: the display name, or the username when none is set. */
+  displayName: string;
+  /** The display name as set, null when none is (`PATCH /api/me`). */
+  customName: string | null;
   isAdmin: boolean;
+}
+
+/** `PATCH /api/me`: a blank or null display name clears it. */
+export interface UpdateMeRequest {
+  displayName?: string | null;
+}
+
+/** `POST /api/me/password`: other sessions are signed out. */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/** `POST /api/me/device`: what the desktop app reports about its PC, shown to admins. */
+export interface DeviceReport {
+  appVersion: string;
+  os: string;
+  gpu?: string | null;
+}
+
+/** `POST /api/feedback`: a problem report or a feature idea. */
+export interface FeedbackRequest {
+  kind: 'bug' | 'idea';
+  message: string;
+  source: 'desktop' | 'web';
+  /** Version, OS, CPU, GPU… as label → value. */
+  system?: Record<string, string>;
+  /** The end of the app's log. */
+  logs?: string;
+}
+
+/** A report on the admin page. */
+export interface FeedbackItem {
+  id: string;
+  kind: 'bug' | 'idea';
+  message: string;
+  source: 'desktop' | 'web';
+  system: Record<string, string> | null;
+  hasLogs: boolean;
+  createdAt: string;
+  resolvedAt: string | null;
+  user: { username: string; displayName: string };
+}
+
+/** `POST /api/admin/users/:id/password-reset`: a one-time link for the user to set a new password. */
+export interface PasswordReset {
+  url: string;
+  expiresAt: string;
 }
 
 /** Web login returns `Me`; desktop login returns `DesktopLoginResponse`. */
@@ -46,6 +98,11 @@ export interface RegisterRequest {
 export interface AdminUser {
   id: string;
   username: string;
+  displayName: string;
+  /** The last time any of their sessions was used. */
+  lastSeenAt: string | null;
+  /** Their most recently used desktop app: version, OS and GPU it reported. */
+  app: { version: string | null; os: string | null; gpu: string | null; lastUsedAt: string } | null;
   isAdmin: boolean;
   disabled: boolean;
   clipCount: number;
@@ -123,6 +180,8 @@ export interface Clip {
   views: number;
   /** Friends in the clip, by username (alphabetical). */
   tagged: string[];
+  /** Their display names, in the same order as `tagged`. */
+  taggedNames: string[];
   /** You starred it (`PUT`/`DELETE /api/clips/:id/favorite`); list only those with `favorites=1`. */
   favorite: boolean;
   /** A video clip, or a screenshot whose `videoUrl` is the PNG. */
@@ -133,7 +192,7 @@ export interface Clip {
    */
   processing: 'queued' | 'running' | null;
   createdAt: string;
-  owner: { username: string };
+  owner: { username: string; displayName: string };
   shareUrl: string;
   videoUrl: string;
   thumbnailUrl: string;
@@ -160,5 +219,6 @@ export interface UpdateClipRequest {
 /** `GET /api/clips/:id/viewers` (owner only): friends who watched the clip, first viewer first. */
 export interface ClipViewer {
   username: string;
+  displayName: string;
   viewedAt: string;
 }

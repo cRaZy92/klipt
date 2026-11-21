@@ -36,7 +36,7 @@ fn failed(data_dir: &Path, saved: &Auth, e: crate::upload::ApiError) -> AppError
     let e = AppError::from(e);
     if matches!(e, AppError::Unauthorized) {
         if let Err(e) = clear_auth_if_current(data_dir, &saved.token) {
-            eprintln!("klipt: can't forget the expired login: {e}");
+            crate::elog!("klipt: can't forget the expired login: {e}");
         }
     }
     e
@@ -91,18 +91,18 @@ async fn forget_deleted_uploads(app: &AppHandle, client: &ApiClient, saved: &Aut
         uploads.iter().filter_map(|u| u.get("id").and_then(Value::as_str)).collect();
     let linked = match crate::commands::lock(&app.state::<AppState>().library).server_clip_ids() {
         Ok(ids) => ids,
-        Err(e) => return eprintln!("klipt: can't read uploaded clips: {e}"),
+        Err(e) => return crate::elog!("klipt: can't read uploaded clips: {e}"),
     };
     for id in linked.iter().filter(|id| !listed.contains(id.as_str())) {
         let Ok(id) = checked_id(id) else { continue };
         match client.get_json(&saved.token, &format!("/api/clips/{id}"), &[]).await {
             Err(crate::upload::ApiError::Server { status: 404, .. }) => {
                 if let Err(e) = crate::commands::lock(&app.state::<AppState>().library).unlink_server_clip(id) {
-                    eprintln!("klipt: can't unlink deleted upload {id}: {e}");
+                    crate::elog!("klipt: can't unlink deleted upload {id}: {e}");
                 }
             }
             Ok(_) => {}
-            Err(e) => eprintln!("klipt: can't check upload {id}: {e}"),
+            Err(e) => crate::elog!("klipt: can't check upload {id}: {e}"),
         }
     }
 }
@@ -159,7 +159,7 @@ pub async fn set_server_favorite(app: AppHandle, id: String, favorite: bool) -> 
     done.map_err(|e| failed(&data_dir, &saved, e))?;
     let server = ServerFields { favorite: Some(favorite), ..Default::default() };
     if let Err(e) = crate::commands::lock(&app.state::<AppState>().library).apply_server(id, &server) {
-        eprintln!("klipt: can't save the star of upload {id} locally: {e}");
+        crate::elog!("klipt: can't save the star of upload {id} locally: {e}");
     }
     Ok(())
 }
@@ -185,7 +185,7 @@ fn apply_uploads(app: &AppHandle, uploads: &[Value]) {
     for upload in uploads {
         let Some(id) = upload.get("id").and_then(Value::as_str) else { continue };
         if let Err(e) = library.apply_server(id, &server_fields(upload)) {
-            eprintln!("klipt: can't copy the server's changes of {id}: {e}");
+            crate::elog!("klipt: can't copy the server's changes of {id}: {e}");
         }
     }
 }
@@ -204,7 +204,7 @@ pub fn spawn_push(app: AppHandle) {
 async fn push_pending_with(app: &AppHandle, client: &ApiClient, saved: &Auth) {
     let pending = match crate::commands::lock(&app.state::<AppState>().library).pending_syncs() {
         Ok(p) => p,
-        Err(e) => return eprintln!("klipt: can't read edits to sync: {e}"),
+        Err(e) => return crate::elog!("klipt: can't read edits to sync: {e}"),
     };
     for (clip, fields) in pending {
         let Some(Ok(id)) = clip.server_clip_id.as_deref().map(checked_id) else { continue };
@@ -231,12 +231,12 @@ async fn push_pending_with(app: &AppHandle, client: &ApiClient, saved: &Auth) {
             Ok(()) => library.clear_sync_pending(&clip, &fields),
             Err(crate::upload::ApiError::Server { status: 404, .. }) => library.unlink_server_clip(id),
             Err(e) => {
-                eprintln!("klipt: can't sync the edits of {id} yet: {e}");
+                crate::elog!("klipt: can't sync the edits of {id} yet: {e}");
                 continue;
             }
         };
         if let Err(e) = done {
-            eprintln!("klipt: can't save the sync of {id}: {e}");
+            crate::elog!("klipt: can't save the sync of {id}: {e}");
         }
     }
 }
@@ -248,7 +248,7 @@ pub async fn record_view(app: AppHandle, id: String) -> Result<()> {
     let id = checked_id(&id)?;
     let (saved, client, _) = login(&app, LIST_TIMEOUT)?;
     if let Err(e) = client.post_empty(&saved.token, &format!("/api/clips/{id}/view")).await {
-        eprintln!("klipt: can't count the view of {id}: {e}");
+        crate::elog!("klipt: can't count the view of {id}: {e}");
     }
     Ok(())
 }
@@ -324,7 +324,7 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
         library.mark_uploaded(&clip.id, &id, &info.share_url, &info.visibility)?;
         if let Some(stale) = stale {
             if let Err(e) = library.remove(&stale, false) {
-                eprintln!("klipt: can't drop the old entry of a downloaded clip: {e}");
+                crate::elog!("klipt: can't drop the old entry of a downloaded clip: {e}");
             }
         }
         let thumb = library.thumb_path(&clip.id);
@@ -333,7 +333,7 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
     if let Some(tools) = state.tools.as_ref() {
         let at = crate::recorder::thumbnail_at_ms(clip.duration_ms);
         if let Err(e) = crate::ffmpeg::thumbnail(tools, &clip.path, &thumb, at) {
-            eprintln!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
+            crate::elog!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
         }
     }
     Ok(ClipView { file_missing: !clip.path.is_file(), thumb_path: thumb.is_file().then_some(thumb), clip })

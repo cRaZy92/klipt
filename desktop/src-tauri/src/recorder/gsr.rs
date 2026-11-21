@@ -161,7 +161,7 @@ pub(crate) fn kscreen_primary() -> Option<String> {
     match stdout_within(Command::new("kscreen-doctor").arg("-j"), KSCREEN_TIMEOUT) {
         Ok(text) => parse_kscreen_primary(&text),
         Err(e) => {
-            eprintln!("klipt: kscreen-doctor didn't answer ({e}); using the first monitor");
+            crate::elog!("klipt: kscreen-doctor didn't answer ({e}); using the first monitor");
             None
         }
     }
@@ -310,7 +310,7 @@ fn spawn_child(
     encoder_failed: &Arc<AtomicBool>,
 ) -> std::io::Result<Child> {
     encoder_failed.store(false, Ordering::SeqCst);
-    eprintln!("klipt: starting {} {}", program.display(), args.join(" "));
+    crate::elog!("klipt: starting {} {}", program.display(), args.join(" "));
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // If Klipt dies without stopping it, gsr must not keep recording on its own. (The signal
@@ -326,7 +326,7 @@ fn spawn_child(
             for line in BufReader::new(stdout).lines().map_while(|l| l.ok()) {
                 match classify_stdout_line(&line, &recordings_dir) {
                     Some(event) => send(&tx, event),
-                    None => eprintln!("gsr: {line}"),
+                    None => crate::elog!("gsr: {line}"),
                 }
             }
         });
@@ -341,7 +341,7 @@ fn spawn_child(
                 if is_full_recording_started(&line) {
                     send(&tx, RecorderEvent::FullRecordingStarted);
                 }
-                eprintln!("gsr: {line}");
+                crate::elog!("gsr: {line}");
             }
         });
     }
@@ -369,7 +369,7 @@ fn wait_loop(
             Ok(None) => continue,
             Ok(Some(status)) => status.code(),
             Err(e) => {
-                eprintln!("klipt: can't check on gpu-screen-recorder: {e}");
+                crate::elog!("klipt: can't check on gpu-screen-recorder: {e}");
                 None
             }
         };
@@ -382,7 +382,7 @@ fn wait_loop(
         }
         if kms_quick_failure && shared.encoder_failed.load(Ordering::SeqCst) && encoder_retries < ENCODER_RETRIES {
             encoder_retries += 1;
-            eprintln!(
+            crate::elog!(
                 "klipt: gpu-screen-recorder's encoder failed to start ({code:?}); retrying in {ENCODER_RETRY_DELAY:?} ({encoder_retries}/{ENCODER_RETRIES})"
             );
             *slot = None;
@@ -403,7 +403,7 @@ fn wait_loop(
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("klipt: can't restart gpu-screen-recorder: {e}");
+                    crate::elog!("klipt: can't restart gpu-screen-recorder: {e}");
                     drop(slot);
                     send(&tx, RecorderEvent::Exited { code });
                     return;
@@ -411,7 +411,7 @@ fn wait_loop(
             }
         }
         if kms_quick_failure && !shared.encoder_failed.load(Ordering::SeqCst) {
-            eprintln!("klipt: gpu-screen-recorder KMS capture exited with {code:?}; retrying with the desktop portal");
+            crate::elog!("klipt: gpu-screen-recorder KMS capture exited with {code:?}; retrying with the desktop portal");
             match spawn_child(&program, &retry_args, &recordings_dir, &tx, &shared.encoder_failed) {
                 Ok(new_child) => {
                     *slot = Some(new_child);
@@ -419,7 +419,7 @@ fn wait_loop(
                     spawned_at = Instant::now();
                     continue;
                 }
-                Err(e) => eprintln!("klipt: can't start gpu-screen-recorder with the portal: {e}"),
+                Err(e) => crate::elog!("klipt: can't start gpu-screen-recorder with the portal: {e}"),
             }
         }
         *slot = None;
@@ -444,7 +444,7 @@ impl RecorderBackend for GsrBackend {
             None => match self.list_displays() {
                 Ok(displays) => automatic_monitor(&displays).map_or(Target::Portal, |id| Target::Monitor(id.into())),
                 Err(e) => {
-                    eprintln!("klipt: can't list monitors ({e}); using the desktop portal");
+                    crate::elog!("klipt: can't list monitors ({e}); using the desktop portal");
                     Target::Portal
                 }
             },
@@ -490,7 +490,7 @@ impl RecorderBackend for GsrBackend {
         if let Some(child) = lock(&run.shared.child).as_mut() {
             if let Ok(None) = child.try_wait() {
                 if let Err(e) = kill(Pid::from_raw(child.id() as i32), Signal::SIGINT) {
-                    eprintln!("klipt: can't stop gpu-screen-recorder: {e}");
+                    crate::elog!("klipt: can't stop gpu-screen-recorder: {e}");
                 }
             }
         }
@@ -499,7 +499,7 @@ impl RecorderBackend for GsrBackend {
             thread::sleep(POLL / 2);
         }
         if let Some(child) = lock(&run.shared.child).as_mut() {
-            eprintln!("klipt: gpu-screen-recorder didn't stop within {STOP_TIMEOUT:?}; killing it");
+            crate::elog!("klipt: gpu-screen-recorder didn't stop within {STOP_TIMEOUT:?}; killing it");
             let _ = child.kill();
         }
         let _ = run.waiter.join();

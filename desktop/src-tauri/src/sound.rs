@@ -10,11 +10,11 @@ pub const SAVED_WAV: &[u8] = include_bytes!("../assets/saved.wav");
 pub fn play_saved() {
     let spawned = std::thread::Builder::new().name("klipt-sound".into()).spawn(|| {
         if let Err(e) = play_blocking(SAVED_WAV) {
-            eprintln!("klipt: can't play the save sound: {e}");
+            crate::elog!("klipt: can't play the save sound: {e}");
         }
     });
     if let Err(e) = spawned {
-        eprintln!("klipt: can't start the sound thread: {e}");
+        crate::elog!("klipt: can't start the sound thread: {e}");
     }
 }
 

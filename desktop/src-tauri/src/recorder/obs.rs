@@ -181,7 +181,7 @@ impl Helper {
 
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(|l| l.ok()) {
-                eprintln!("klipt-recorder: {line}");
+                crate::elog!("klipt-recorder: {line}");
             }
         });
 
@@ -190,7 +190,7 @@ impl Helper {
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(|l| l.ok()) {
                 let Some(event) = parse_event_line(&line) else {
-                    eprintln!("klipt: unexpected line from klipt-recorder: {line}");
+                    crate::elog!("klipt: unexpected line from klipt-recorder: {line}");
                     continue;
                 };
                 match event {
@@ -203,7 +203,7 @@ impl Helper {
                     }
                     event => {
                         if let HelperEvent::Error { code, message } = &event {
-                            eprintln!("klipt: klipt-recorder error {code}: {message}");
+                            crate::elog!("klipt: klipt-recorder error {code}: {message}");
                         }
                         if let Some(event) = session_event(event) {
                             send(&events, event);
@@ -224,7 +224,7 @@ impl Helper {
                     Ok(None) => continue,
                     Ok(Some(status)) => status.code(),
                     Err(e) => {
-                        eprintln!("klipt: can't check on klipt-recorder: {e}");
+                        crate::elog!("klipt: can't check on klipt-recorder: {e}");
                         None
                     }
                 };
@@ -289,17 +289,17 @@ impl Helper {
             match self.command(r#"{"cmd":"stop"}"#) {
                 Ok(()) => {
                     if self.wait_for(STOP_TIMEOUT, |e| matches!(e, HelperEvent::Stopped)).is_none() {
-                        eprintln!("klipt: klipt-recorder didn't confirm the stop within {STOP_TIMEOUT:?}");
+                        crate::elog!("klipt: klipt-recorder didn't confirm the stop within {STOP_TIMEOUT:?}");
                     }
                 }
-                Err(e) => eprintln!("klipt: {e}"),
+                Err(e) => crate::elog!("klipt: {e}"),
             }
             let deadline = Instant::now() + EXIT_TIMEOUT;
             while self.is_alive() && Instant::now() < deadline {
                 thread::sleep(POLL / 2);
             }
             if let Some(child) = lock(&self.child).as_mut() {
-                eprintln!("klipt: killing klipt-recorder (pid {})", child.id());
+                crate::elog!("klipt: killing klipt-recorder (pid {})", child.id());
                 let _ = child.kill();
             }
         }
@@ -339,7 +339,7 @@ impl RecorderBackend for ObsBackend {
             Some(size) => size,
             None => {
                 let displays = helper.list_displays().unwrap_or_else(|e| {
-                    eprintln!("klipt: {e}");
+                    crate::elog!("klipt: {e}");
                     vec![]
                 });
                 output_size(cfg, &displays)

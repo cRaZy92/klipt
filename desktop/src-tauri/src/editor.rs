@@ -127,7 +127,7 @@ pub fn prepare_audio_progress(
         match demux_cached_progress(tools, input, track, &out, duration_ms, &mut |f| progress(at, of, f)) {
             Ok(_) => Some(out),
             Err(e) => {
-                eprintln!("klipt: clip {id} has no readable {what} track, editing without it: {e}");
+                crate::elog!("klipt: clip {id} has no readable {what} track, editing without it: {e}");
                 None
             }
         }
@@ -212,13 +212,13 @@ pub fn remove_edit_cache(cache_dir: &Path, id: &str) {
     }
     for file in files {
         if let Err(e) = remove_if_present(&file) {
-            eprintln!("klipt: can't delete {}: {e}", file.display());
+            crate::elog!("klipt: can't delete {}: {e}", file.display());
         }
     }
     let strip = crate::filmstrip::strip_dir(cache_dir, id);
     if let Err(e) = fs::remove_dir_all(&strip) {
         if e.kind() != io::ErrorKind::NotFound {
-            eprintln!("klipt: can't delete {}: {e}", strip.display());
+            crate::elog!("klipt: can't delete {}: {e}", strip.display());
         }
     }
 }

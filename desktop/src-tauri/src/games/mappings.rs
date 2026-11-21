@@ -30,7 +30,7 @@ pub fn set(dir: &Path, exe_name: &str, game_name: &str) -> Result<()> {
             Ok(map) => map,
             Err(e) => {
                 // Writing now would replace every mapping in it with just this one.
-                eprintln!("klipt: {FILE_NAME} is unreadable ({e}); moving it to {CORRUPT_NAME}");
+                crate::elog!("klipt: {FILE_NAME} is unreadable ({e}); moving it to {CORRUPT_NAME}");
                 fs::rename(&path, dir.join(CORRUPT_NAME))?;
                 HashMap::new()
             }

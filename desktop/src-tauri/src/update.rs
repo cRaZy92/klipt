@@ -74,7 +74,7 @@ mod imp {
                         super::announce(&app, Available { version, command: None });
                     }
                     Ok(None) => {}
-                    Err(e) => eprintln!("klipt: update check failed: {e}"),
+                    Err(e) => crate::elog!("klipt: update check failed: {e}"),
                 }
                 tokio::time::sleep(CHECK_EVERY).await;
             }
@@ -97,7 +97,7 @@ mod imp {
         if let Err(e) =
             tauri::async_runtime::spawn_blocking(move || jobs_app.state::<crate::filmstrip::Jobs>().stop_all()).await
         {
-            eprintln!("klipt: can't stop the filmstrip job before the update: {e}");
+            crate::elog!("klipt: can't stop the filmstrip job before the update: {e}");
         }
         update
             .download_and_install(|_, _| {}, || {})
@@ -135,7 +135,7 @@ mod imp {
                         super::announce(&app, Available { version, command });
                     }
                     Ok(None) => {}
-                    Err(e) => eprintln!("klipt: update check failed: {e}"),
+                    Err(e) => crate::elog!("klipt: update check failed: {e}"),
                 }
                 tokio::time::sleep(CHECK_EVERY).await;
             }

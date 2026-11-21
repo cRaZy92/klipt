@@ -54,13 +54,13 @@ pub fn take_in_background(app: &AppHandle) {
                 let _ = app.emit(crate::recorder::events::CLIP_SAVED, view);
             }
             Err(e) => {
-                eprintln!("klipt: screenshot failed: {e}");
+                crate::elog!("klipt: screenshot failed: {e}");
                 crate::feedback::notify(&app, "Screenshot not saved", Some(&e.user_message()));
             }
         }
     });
     if let Err(e) = spawned {
-        eprintln!("klipt: can't start the screenshot thread: {e}");
+        crate::elog!("klipt: can't start the screenshot thread: {e}");
     }
 }
 
@@ -101,7 +101,7 @@ pub fn take(app: &AppHandle) -> Result<ClipView> {
     };
     if let Some(tools) = tools {
         if let Err(e) = crate::ffmpeg::thumbnail(&tools, &clip.path, &thumb, 0) {
-            eprintln!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
+            crate::elog!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
         }
     }
     Ok(ClipView { file_missing: false, thumb_path: thumb.is_file().then_some(thumb), clip })

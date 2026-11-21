@@ -52,7 +52,7 @@ impl HotkeyService for PluginHotkey {
     fn bind(&mut self, keys: &Keys) -> Result<BoundKey> {
         for old in std::mem::take(&mut self.current) {
             if let Err(e) = self.app.global_shortcut().unregister(old.as_str()) {
-                eprintln!("klipt: can't unregister the old shortcut {old}: {e}");
+                crate::elog!("klipt: can't unregister the old shortcut {old}: {e}");
             }
         }
         let display = self.register(&keys.save, Action::SaveClip)?;

@@ -179,7 +179,7 @@ impl Settings {
             Ok(bytes) => bytes,
             Err(e) => {
                 if e.kind() != std::io::ErrorKind::NotFound {
-                    eprintln!("klipt: can't read {}: {e}; using default settings", path.display());
+                    crate::elog!("klipt: can't read {}: {e}; using default settings", path.display());
                 }
                 return Settings::default();
             }
@@ -187,9 +187,9 @@ impl Settings {
         match serde_json::from_slice::<Settings>(&bytes) {
             Ok(settings) => settings.with_invalid_fields_reset(),
             Err(e) => {
-                eprintln!("klipt: {} is corrupt ({e}); moved to {BACKUP_NAME}, using default settings", path.display());
+                crate::elog!("klipt: {} is corrupt ({e}); moved to {BACKUP_NAME}, using default settings", path.display());
                 if let Err(e) = fs::rename(&path, dir.join(BACKUP_NAME)) {
-                    eprintln!("klipt: can't back up {}: {e}", path.display());
+                    crate::elog!("klipt: can't back up {}: {e}", path.display());
                 }
                 Settings::default()
             }

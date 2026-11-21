@@ -474,7 +474,7 @@ impl Library {
         }
         self.conn.execute("DELETE FROM clips WHERE id = ?1", [id])?;
         if let Err(e) = remove_if_present(&self.thumb_path(id)) {
-            eprintln!("klipt: can't delete the thumbnail of clip {id}: {e}");
+            crate::elog!("klipt: can't delete the thumbnail of clip {id}: {e}");
         }
         Ok(())
     }
@@ -491,7 +491,7 @@ impl Library {
 fn migrate(conn: &Connection) -> Result<()> {
     let version: usize = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version > MIGRATIONS.len() {
-        eprintln!("klipt: library.db is from a newer Klipt (schema {version}); opening it anyway");
+        crate::elog!("klipt: library.db is from a newer Klipt (schema {version}); opening it anyway");
     }
     for (index, sql) in MIGRATIONS.iter().enumerate().skip(version) {
         let tx = conn.unchecked_transaction()?;

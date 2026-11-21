@@ -61,7 +61,7 @@ pub fn mark_opened(dir: &Path) {
         fs::OpenOptions::new().write(true).create(true).truncate(false).open(&marker)?.set_modified(SystemTime::now())
     });
     if let Err(e) = result {
-        eprintln!("klipt: can't mark {} opened: {e}", marker.display());
+        crate::elog!("klipt: can't mark {} opened: {e}", marker.display());
     }
 }
 
@@ -118,7 +118,7 @@ pub fn evict(cache_dir: &Path, cap_bytes: u64, keep_id: &str) {
     for id in choose_evictions(&list_strips(cache_dir), cap_bytes, keep_id) {
         let dir = strip_dir(cache_dir, &id);
         if let Err(e) = fs::remove_dir_all(&dir) {
-            eprintln!("klipt: can't delete {}: {e}", dir.display());
+            crate::elog!("klipt: can't delete {}: {e}", dir.display());
         }
     }
 }
@@ -301,7 +301,7 @@ impl Jobs {
         tauri::async_runtime::spawn_blocking(move || {
             if let Some(previous) = previous {
                 if !previous.done.wait() {
-                    eprintln!("klipt: the previous filmstrip job didn't stop in time");
+                    crate::elog!("klipt: the previous filmstrip job didn't stop in time");
                 }
             }
             // Signals even if `run` panics.
@@ -328,7 +328,7 @@ impl Jobs {
             _ => return,
         };
         if !done.wait() {
-            eprintln!("klipt: the filmstrip job of clip {id} didn't stop in time");
+            crate::elog!("klipt: the filmstrip job of clip {id} didn't stop in time");
         }
     }
 

@@ -408,7 +408,7 @@ impl Supervisor {
                 self.full = Some(FullRecording { phase, game, started_at_ms: None });
             }
             Err(e) => {
-                eprintln!("klipt: can't start a full recording: {e}");
+                crate::elog!("klipt: can't start a full recording: {e}");
                 let had = self.full.take().is_some();
                 if matches!(e, AppError::RecorderStarting) {
                     self.emit(SupervisorEvent::Error { code: e.code().into(), message: e.user_message() });
@@ -432,7 +432,7 @@ impl Supervisor {
                 }
             }
             Err(e) => {
-                eprintln!("klipt: can't stop the full recording: {e}");
+                crate::elog!("klipt: can't stop the full recording: {e}");
                 self.end_full("save_failed");
             }
         }
@@ -510,7 +510,7 @@ impl Supervisor {
         match self.backend.start(&self.cfg) {
             Ok(()) => self.state = State::Running { since: self.now() },
             Err(e) => {
-                eprintln!("klipt: can't start recording: {e}");
+                crate::elog!("klipt: can't start recording: {e}");
                 if matches!(e, AppError::RecorderMissing(_)) {
                     // Retrying can't bring back a missing program: that error is the final word,
                     // said once (e.g. "install GPU Screen Recorder").
@@ -533,7 +533,7 @@ impl Supervisor {
         if matches!(self.state, State::Running { .. }) {
             self.generation += 1;
             if let Err(e) = self.backend.stop() {
-                eprintln!("klipt: can't stop recording: {e}");
+                crate::elog!("klipt: can't stop recording: {e}");
             }
         }
         if !matches!(self.state, State::Failed) {
@@ -550,7 +550,7 @@ impl Supervisor {
         match RESTART_BACKOFF.get(self.restarts) {
             Some(delay) => {
                 self.restarts += 1;
-                eprintln!("klipt: restarting the recorder in {delay:?} (attempt {})", self.restarts);
+                crate::elog!("klipt: restarting the recorder in {delay:?} (attempt {})", self.restarts);
                 self.state = State::RestartPending { at: self.now() + *delay };
                 match cause {
                     Some((code, message)) => {
@@ -560,7 +560,7 @@ impl Supervisor {
                 }
             }
             None => {
-                eprintln!("klipt: the recorder keeps failing; giving up");
+                crate::elog!("klipt: the recorder keeps failing; giving up");
                 self.state = State::Failed;
                 let message = match cause {
                     Some((_, message)) => format!(
@@ -609,14 +609,14 @@ impl Supervisor {
         let now = self.now();
         match self.full.as_ref().map(|f| f.phase) {
             Some(FullPhase::Stopping { deadline }) if deadline <= now => {
-                eprintln!("klipt: the full recording didn't produce a file within {FULL_RECORDING_STOP_TIMEOUT:?}");
+                crate::elog!("klipt: the full recording didn't produce a file within {FULL_RECORDING_STOP_TIMEOUT:?}");
                 self.full_timed_out("save_failed");
                 if self.done {
                     return;
                 }
             }
             Some(FullPhase::Starting { deadline }) if deadline <= now => {
-                eprintln!("klipt: the full recording didn't start within {FULL_RECORDING_START_TIMEOUT:?}");
+                crate::elog!("klipt: the full recording didn't start within {FULL_RECORDING_START_TIMEOUT:?}");
                 self.full_timed_out("full_recording_failed");
             }
             Some(FullPhase::WaitingForBackend { start_at: Some(at) }) if at <= now && self.is_recording() => {
@@ -627,7 +627,7 @@ impl Supervisor {
             _ => {}
         }
         if self.pending_save.as_ref().is_some_and(|p| p.deadline <= now) {
-            eprintln!("klipt: the save didn't produce a file within {SAVE_TIMEOUT:?}");
+            crate::elog!("klipt: the save didn't produce a file within {SAVE_TIMEOUT:?}");
             self.fail_pending_save();
         }
         if let State::RestartPending { at } = self.state {
@@ -662,7 +662,7 @@ impl Supervisor {
                 self.emit(SupervisorEvent::Error { code: e.code().into(), message: e.user_message() });
             }
             Err(e) => {
-                eprintln!("klipt: can't save: {e}");
+                crate::elog!("klipt: can't save: {e}");
                 self.emit_error("save_failed");
             }
         }
@@ -696,7 +696,7 @@ impl Supervisor {
                 match (self.deps.process_clip)(saved) {
                     Ok(view) => self.emit(SupervisorEvent::ClipSaved(view)),
                     Err(e) => {
-                        eprintln!("klipt: can't add the saved clip to the library: {e}");
+                        crate::elog!("klipt: can't add the saved clip to the library: {e}");
                         self.emit_error("save_failed");
                     }
                 }
@@ -709,7 +709,7 @@ impl Supervisor {
                     full.started_at_ms = Some(started_at_ms);
                     self.emit(SupervisorEvent::FullRecordingStarted { started_at_ms });
                 }
-                _ => eprintln!("klipt: a full recording started that wasn't asked for"),
+                _ => crate::elog!("klipt: a full recording started that wasn't asked for"),
             },
             RecorderEvent::FullRecordingSaved { path, duration_ms } => {
                 let game = match self.full.take() {
@@ -728,14 +728,14 @@ impl Supervisor {
                 match (self.deps.process_clip)(saved) {
                     Ok(view) => self.emit(SupervisorEvent::ClipSaved(view)),
                     Err(e) => {
-                        eprintln!("klipt: can't add the recording to the library: {e}");
+                        crate::elog!("klipt: can't add the recording to the library: {e}");
                         self.emit_error("save_failed");
                     }
                 }
                 self.after_full();
             }
             RecorderEvent::Error { code, message } => {
-                eprintln!("klipt: recorder error {code}: {message}");
+                crate::elog!("klipt: recorder error {code}: {message}");
                 if code == "recording_failed" {
                     // klipt-recorder: the full recording couldn't start or be finished.
                     let starting = self.full.as_ref().is_some_and(|f| matches!(f.phase, FullPhase::Starting { .. }));
@@ -749,7 +749,7 @@ impl Supervisor {
                     self.lose_full();
                     self.generation += 1;
                     if let Err(e) = self.backend.stop() {
-                        eprintln!("klipt: can't stop recording: {e}");
+                        crate::elog!("klipt: can't stop recording: {e}");
                     }
                     let message = friendly_message(&code);
                     self.on_failure(Some((code, message)));
@@ -761,7 +761,7 @@ impl Supervisor {
             }
             RecorderEvent::Exited { code } => {
                 let State::Running { since } = self.state else { return };
-                eprintln!("klipt: the recorder exited unexpectedly ({code:?})");
+                crate::elog!("klipt: the recorder exited unexpectedly ({code:?})");
                 self.lose_full();
                 if self.now().saturating_sub(since) >= STABLE_RUN {
                     self.restarts = 0;

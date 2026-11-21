@@ -183,7 +183,7 @@ pub fn process_saved_clip(library: &Mutex<Library>, tools: Option<&Tools>, saved
         Some(tools) => match ffmpeg::probe(tools, &saved.path) {
             Ok(p) => Some(p),
             Err(e) => {
-                eprintln!("klipt: can't probe {}: {e}", saved.path.display());
+                crate::elog!("klipt: can't probe {}: {e}", saved.path.display());
                 None
             }
         },
@@ -220,7 +220,7 @@ pub fn process_saved_clip(library: &Mutex<Library>, tools: Option<&Tools>, saved
     };
     if let Some(tools) = tools {
         if let Err(e) = ffmpeg::thumbnail(tools, &clip.path, &thumb, thumbnail_at_ms(duration_ms)) {
-            eprintln!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
+            crate::elog!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
         }
     }
     Ok(ClipView { file_missing: !clip.path.is_file(), thumb_path: thumb.is_file().then_some(thumb), clip })
@@ -276,7 +276,7 @@ pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) ->
                 SupervisorEvent::FullRecordingStopped => sink_app.emit(events::FULL_RECORDING_STOPPED, ()),
             };
             if let Err(e) = sent {
-                eprintln!("klipt: can't send a recorder event to the UI: {e}");
+                crate::elog!("klipt: can't send a recorder event to the UI: {e}");
             }
         }),
     };

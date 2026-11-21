@@ -15,6 +15,7 @@ pub mod import;
 #[cfg(target_os = "linux")]
 mod autostart_linux;
 pub mod library;
+pub mod logging;
 pub mod media_server;
 pub mod mp4_mute;
 pub mod update;
@@ -53,6 +54,15 @@ pub fn run() {
     builder
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
+            match logging::init(&data_dir.join("logs")) {
+                Ok(()) => crate::elog!(
+                    "klipt: Klipt {} starting on {} ({})",
+                    app.package_info().version,
+                    std::env::consts::OS,
+                    std::env::consts::ARCH
+                ),
+                Err(e) => crate::elog!("klipt: can't write the log file: {e}"),
+            }
             let state = state::AppState::init(data_dir.clone())?;
             if let Some(notice) = &state.startup_notice {
                 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
@@ -63,7 +73,7 @@ pub fn run() {
             // load in the UI through the asset protocol.
             commands::allow_clip_folder(app.handle(), &settings.output_dir);
             if let Err(e) = app.asset_protocol_scope().allow_directory(data_dir.join("thumbs"), false) {
-                eprintln!("klipt: can't allow thumbnails in the asset scope: {e}");
+                crate::elog!("klipt: can't allow thumbnails in the asset scope: {e}");
             }
             app.manage(media_server::MediaServer::start()?);
             app.manage(state);
@@ -199,6 +209,6 @@ pub fn apply_autostart(app: &AppHandle, enabled: bool) {
     #[cfg(target_os = "linux")]
     let _ = app;
     if let Err(e) = result {
-        eprintln!("klipt: can't {} starting with the OS: {e}", if enabled { "turn on" } else { "turn off" });
+        crate::elog!("klipt: can't {} starting with the OS: {e}", if enabled { "turn on" } else { "turn off" });
     }
 }

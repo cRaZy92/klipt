@@ -168,16 +168,16 @@ fn apply(
     full_recording: bool,
 ) {
     if let Err(e) = Image::from_bytes(status.icon()).and_then(|image| icon.set_icon(Some(image))) {
-        eprintln!("klipt: can't change the tray icon: {e}");
+        crate::elog!("klipt: can't change the tray icon: {e}");
     }
     if let Err(e) = icon.set_tooltip(Some(tooltip_for(status, full_recording))) {
-        eprintln!("klipt: can't change the tray tooltip: {e}");
+        crate::elog!("klipt: can't change the tray tooltip: {e}");
     }
     if let Err(e) = pause_item.set_text(status.pause_label()) {
-        eprintln!("klipt: can't change the tray menu: {e}");
+        crate::elog!("klipt: can't change the tray menu: {e}");
     }
     if let Err(e) = record_item.set_text(full_recording_label(full_recording)) {
-        eprintln!("klipt: can't change the tray menu: {e}");
+        crate::elog!("klipt: can't change the tray menu: {e}");
     }
 }
 
@@ -204,7 +204,7 @@ pub fn create(app: &AppHandle) -> Result<(), tauri::Error> {
         if let Err(e) =
             main.run_on_main_thread(move || apply(&icon, &pause_item, &record_item, status, full_recording))
         {
-            eprintln!("klipt: can't update the tray: {e}");
+            crate::elog!("klipt: can't update the tray: {e}");
         }
     };
     app.manage(Tray::new(status, Box::new(post)));
@@ -252,14 +252,14 @@ pub fn show_main_window(app: &AppHandle) {
         None => match create_main_window(app) {
             Ok(window) => window,
             Err(e) => {
-                eprintln!("klipt: can't open the window: {e}");
+                crate::elog!("klipt: can't open the window: {e}");
                 return;
             }
         },
     };
     let shown = window.unminimize().and_then(|()| window.show()).and_then(|()| window.set_focus());
     if let Err(e) = shown {
-        eprintln!("klipt: can't show the window: {e}");
+        crate::elog!("klipt: can't show the window: {e}");
     }
 }
 
@@ -294,7 +294,7 @@ pub struct WindowRelease(AtomicU64);
 pub fn hide_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         if let Err(e) = window.hide() {
-            eprintln!("klipt: can't hide the window: {e}");
+            crate::elog!("klipt: can't hide the window: {e}");
         }
     }
     let Some(release) = app.try_state::<WindowRelease>() else { return };
@@ -330,7 +330,7 @@ pub async fn release_window(app: AppHandle) {
         let _ = window.with_webview(|webview| webview.inner().terminate_web_process());
     }
     if let Err(e) = window.destroy() {
-        eprintln!("klipt: can't close the hidden window: {e}");
+        crate::elog!("klipt: can't close the hidden window: {e}");
     }
 }
 

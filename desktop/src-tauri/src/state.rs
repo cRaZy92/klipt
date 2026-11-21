@@ -32,7 +32,7 @@ impl AppState {
         let (library, startup_notice) = match Library::open(&library_path) {
             Ok(library) => (library, None),
             Err(e) if is_corrupt(&e) => {
-                eprintln!("klipt: {LIBRARY_FILE} is damaged ({e}); starting a new library");
+                crate::elog!("klipt: {LIBRARY_FILE} is damaged ({e}); starting a new library");
                 let kept = set_aside(&library_path)?;
                 let notice = format!(
                     "Klipt's clip library was damaged, so Klipt started a new, empty one. Your video files \
@@ -46,7 +46,7 @@ impl AppState {
         let tools = match ffmpeg::locate() {
             Ok(tools) => Some(tools),
             Err(e) => {
-                eprintln!("klipt: {e}");
+                crate::elog!("klipt: {e}");
                 None
             }
         };

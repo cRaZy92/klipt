@@ -118,7 +118,7 @@ pub async fn upload_with(
     let resume = resume.filter(|(url, _)| {
         let ok = client.same_origin(url);
         if !ok {
-            eprintln!("klipt: not resuming an upload on another server; starting over");
+            crate::elog!("klipt: not resuming an upload on another server; starting over");
         }
         ok
     });

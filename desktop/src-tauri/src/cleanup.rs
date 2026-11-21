@@ -42,7 +42,7 @@ pub fn clean(library: &Mutex<Library>, settings: &Settings, now_ms: i64, busy: i
     let candidates = match lock(library).cleanup_candidates(before) {
         Ok(clips) => clips,
         Err(e) => {
-            eprintln!("klipt: cleanup can't list old clips: {e}");
+            crate::elog!("klipt: cleanup can't list old clips: {e}");
             return report;
         }
     };
@@ -60,11 +60,11 @@ pub fn clean(library: &Mutex<Library>, settings: &Settings, now_ms: i64, busy: i
                 report.freed_bytes += size;
             }
             // Usually the file is open in a player; the next run tries again.
-            Err(e) => eprintln!("klipt: cleanup can't delete {}: {e}", clip.path.display()),
+            Err(e) => crate::elog!("klipt: cleanup can't delete {}: {e}", clip.path.display()),
         }
     }
     if report.deleted > 0 {
-        eprintln!("klipt: cleanup deleted {} old clips ({} bytes)", report.deleted, report.freed_bytes);
+        crate::elog!("klipt: cleanup deleted {} old clips ({} bytes)", report.deleted, report.freed_bytes);
     }
     report
 }
@@ -93,7 +93,7 @@ pub fn start(app: &AppHandle) {
         loop {
             let handle = app.clone();
             if let Err(e) = tauri::async_runtime::spawn_blocking(move || run_now(&handle)).await {
-                eprintln!("klipt: cleanup failed: {e}");
+                crate::elog!("klipt: cleanup failed: {e}");
             }
             tokio::time::sleep(RUN_EVERY).await;
         }

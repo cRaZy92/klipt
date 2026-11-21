@@ -73,7 +73,7 @@ fn load(path: &Path) -> Option<Seen> {
 fn save(path: &Path, seen: &Seen) {
     let result = serde_json::to_vec(seen).map_err(std::io::Error::other).and_then(|bytes| fs::write(path, bytes));
     if let Err(e) = result {
-        eprintln!("klipt: can't remember which feed clips were seen: {e}");
+        crate::elog!("klipt: can't remember which feed clips were seen: {e}");
     }
 }
 
@@ -118,7 +118,7 @@ async fn check(app: &AppHandle) {
     let page = match client.get_json(&saved.token, "/api/clips", &query).await {
         Ok(page) => page,
         Err(e) => {
-            eprintln!("klipt: can't check the feed for new clips: {e}");
+            crate::elog!("klipt: can't check the feed for new clips: {e}");
             return;
         }
     };

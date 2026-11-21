@@ -63,7 +63,7 @@ impl MediaServer {
                     open.fetch_sub(1, Ordering::SeqCst);
                 });
                 if spawned.is_err() {
-                    eprintln!("klipt: can't start a media connection thread");
+                    crate::elog!("klipt: can't start a media connection thread");
                 }
             }
         })?;
@@ -92,7 +92,7 @@ impl MediaServer {
         let video_only = video_only.then(|| {
             let offsets = File::open(path).and_then(|mut f| crate::mp4_mute::audio_handler_offsets(&mut f));
             Arc::from(offsets.unwrap_or_else(|e| {
-                eprintln!("klipt: can't read the tracks of {}, serving it with sound: {e}", path.display());
+                crate::elog!("klipt: can't read the tracks of {}, serving it with sound: {e}", path.display());
                 Vec::new()
             }))
         });

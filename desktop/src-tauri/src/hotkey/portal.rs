@@ -54,7 +54,7 @@ impl PortalHotkey {
         let abort = task.inner().abort_handle();
         let closed = async_runtime::block_on(async { tokio::time::timeout(CLOSE_TIMEOUT, task).await.is_ok() });
         if !closed {
-            eprintln!("klipt: the old shortcut session didn't close in time");
+            crate::elog!("klipt: the old shortcut session didn't close in time");
             abort.abort();
         }
     }
@@ -126,12 +126,12 @@ async fn run_session(
     if display.is_empty() {
         // The portal kept the shortcut without a key: KDE does this when the requested key
         // is already taken by another shortcut.
-        eprintln!("klipt: the portal bound {SHORTCUT_ID} without a key (requested {trigger})");
+        crate::elog!("klipt: the portal bound {SHORTCUT_ID} without a key (requested {trigger})");
         let _ = session.close().await;
         let _ = bound.send(Err(AppError::HotkeyTaken));
         return;
     }
-    eprintln!("klipt: save-clip shortcut bound to {display} (requested {trigger})");
+    crate::elog!("klipt: save-clip shortcut bound to {display} (requested {trigger})");
     let (screenshot, screenshot_error) = match &screenshot_trigger {
         None => (None, None),
         Some(_) if screenshot.is_empty() => {
@@ -166,7 +166,7 @@ async fn run_session(
             }
         }
     }
-    eprintln!("klipt: the GlobalShortcuts portal stopped sending shortcut presses");
+    crate::elog!("klipt: the GlobalShortcuts portal stopped sending shortcut presses");
     // Ends the press stream, so the app tells the user the shortcut is gone.
     sink.close();
     let _ = session.close().await;

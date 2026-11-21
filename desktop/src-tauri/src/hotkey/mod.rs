@@ -184,7 +184,7 @@ pub fn start_for_app(app: &tauri::AppHandle, keys: Keys) -> HotkeyHandle {
                 Some(keys)
             }
             Err(e) => {
-                eprintln!("klipt: can't bind the save-clip shortcut {:?}: {e}", keys.save);
+                crate::elog!("klipt: can't bind the save-clip shortcut {:?}: {e}", keys.save);
                 report_error(&app, &e);
                 None
             }
@@ -198,13 +198,13 @@ pub fn start_for_app(app: &tauri::AppHandle, keys: Keys) -> HotkeyHandle {
                     bound = Some(keys);
                 }
                 Err(e) => {
-                    eprintln!("klipt: can't rebind the save-clip shortcut to {:?}: {e}", keys.save);
+                    crate::elog!("klipt: can't rebind the save-clip shortcut to {:?}: {e}", keys.save);
                     // Binding replaced the old shortcut; put it back so saving keeps working.
                     if let Some(old) = &bound {
                         match service.bind(old) {
                             Ok(key) => on_bound(&app, &*service, &presses, &key),
                             Err(e) => {
-                                eprintln!("klipt: can't restore the save-clip shortcut {:?}: {e}", old.save);
+                                crate::elog!("klipt: can't restore the save-clip shortcut {:?}: {e}", old.save);
                                 bound = None;
                                 report_error(&app, &e);
                             }
@@ -216,7 +216,7 @@ pub fn start_for_app(app: &tauri::AppHandle, keys: Keys) -> HotkeyHandle {
         }
     });
     if let Err(e) = spawned {
-        eprintln!("klipt: can't start the hotkey thread: {e}");
+        crate::elog!("klipt: can't start the hotkey thread: {e}");
     }
     HotkeyHandle(tx)
 }
@@ -280,14 +280,14 @@ fn on_bound(app: &tauri::AppHandle, service: &dyn HotkeyService, presses: &Press
         }
     });
     if let Err(e) = spawned {
-        eprintln!("klipt: can't start the hotkey press thread: {e}");
+        crate::elog!("klipt: can't start the hotkey press thread: {e}");
     }
 }
 
 /// Tells the UI (`hotkey-error`) and the user (a notification) about a shortcut problem.
 fn report_error(app: &tauri::AppHandle, e: &AppError) {
     use tauri::{Emitter, Manager};
-    eprintln!("klipt: save-clip shortcut: {e}");
+    crate::elog!("klipt: save-clip shortcut: {e}");
     let message = e.user_message();
     if let Some(status) = app.try_state::<HotkeyStatusState>() {
         status.set(HotkeyStatus {

@@ -70,12 +70,12 @@ pub fn notify(app: &AppHandle, title: &str, body: Option<&str>) {
                 // Sending talks to D-Bus; don't hold up the caller (often the recorder thread).
                 std::thread::spawn(move || {
                     if let Err(e) = n.show() {
-                        eprintln!("klipt: can't show a notification: {e}");
+                        crate::elog!("klipt: can't show a notification: {e}");
                     }
                 });
                 return;
             }
-            Err(e) => eprintln!("klipt: no icon for notifications ({e}); using the default"),
+            Err(e) => crate::elog!("klipt: no icon for notifications ({e}); using the default"),
         }
     }
     let mut builder = app.notification().builder().title(title);
@@ -83,7 +83,7 @@ pub fn notify(app: &AppHandle, title: &str, body: Option<&str>) {
         builder = builder.body(body);
     }
     if let Err(e) = builder.show() {
-        eprintln!("klipt: can't show a notification: {e}");
+        crate::elog!("klipt: can't show a notification: {e}");
     }
 }
 

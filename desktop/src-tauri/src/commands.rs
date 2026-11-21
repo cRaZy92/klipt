@@ -258,7 +258,7 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
     if new.output_dir != old.output_dir {
         // Otherwise the recorder would fail later with only a generic "recording" error.
         if let Err(e) = check_writable_dir(&new.output_dir) {
-            eprintln!("klipt: can't use {} for clips: {e}", new.output_dir.display());
+            crate::elog!("klipt: can't use {} for clips: {e}", new.output_dir.display());
             return Err(AppError::InvalidSettings(vec![FieldError {
                 field: "outputDir",
                 message: "Klipt can't save clips in that folder. Pick another one.".into(),
@@ -286,7 +286,7 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
         if effects.rebind_hotkey {
             // The file still has the old shortcut: bind it again, so what works matches it.
             if let Err(e) = rebind_hotkey(&app, hotkey::Keys::from_settings(&old)).await {
-                eprintln!("klipt: can't restore the old shortcut after a failed save: {e}");
+                crate::elog!("klipt: can't restore the old shortcut after a failed save: {e}");
             }
         }
         return Err(e);
@@ -380,7 +380,7 @@ pub async fn clips_folder_size(app: AppHandle) -> Result<u64> {
 /// are written flat, and a folder like `~` must not expose everything under it.
 pub fn allow_clip_folder(app: &AppHandle, dir: &Path) {
     if let Err(e) = app.asset_protocol_scope().allow_directory(dir, false) {
-        eprintln!("klipt: can't allow {} in the asset scope: {e}", dir.display());
+        crate::elog!("klipt: can't allow {} in the asset scope: {e}", dir.display());
     }
 }
 
@@ -454,7 +454,7 @@ pub async fn logout(app: AppHandle) -> Result<()> {
     if let Some(saved) = auth::load(&data_dir) {
         if let Ok(client) = ApiClient::with_timeout(&saved.server_url, CHECK_TIMEOUT) {
             if let Err(e) = client.logout(&saved.token).await {
-                eprintln!("klipt: server logout failed (logging out locally anyway): {e}");
+                crate::elog!("klipt: server logout failed (logging out locally anyway): {e}");
             }
         }
     }
@@ -556,7 +556,7 @@ fn set_clip_game_now(app: &AppHandle, state: &AppState, id: &str, name: Option<S
     edit_synced(app, state, id, "game", |library| library.set_game(id, name.as_deref(), steam_app_id))?;
     if let (true, Some(exe), Some(name)) = (should_save_mapping(&clip, name.as_deref()), &clip.exe, &name) {
         if let Err(e) = mappings::set(&state.data_dir, exe, name) {
-            eprintln!("klipt: can't remember {exe} as {name}: {e}");
+            crate::elog!("klipt: can't remember {exe} as {name}: {e}");
         }
     }
     Ok(())
@@ -716,7 +716,7 @@ fn start_upload(
                 let copied = match copy_text(&app, &share_url) {
                     Ok(()) => true,
                     Err(e) => {
-                        eprintln!("klipt: can't copy the share link: {e}");
+                        crate::elog!("klipt: can't copy the share link: {e}");
                         false
                     }
                 };
@@ -730,12 +730,12 @@ fn start_upload(
                 })
                 .await;
                 if let Err(e) = cleanup {
-                    eprintln!("klipt: cleanup after the upload of clip {id} failed: {e}");
+                    crate::elog!("klipt: cleanup after the upload of clip {id} failed: {e}");
                 }
                 emit(&app, events::UPLOAD_DONE, serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied, "replaced": replaced }));
             }
             Err(e) => {
-                eprintln!("klipt: upload of clip {id} failed: {e}");
+                crate::elog!("klipt: upload of clip {id} failed: {e}");
                 // `stale`: the login this upload used was already replaced (another upload hit
                 // 401 first and the user logged in again, or they logged out): the UI just
                 // retries with the current login instead of asking for it again.
@@ -744,7 +744,7 @@ fn start_upload(
                     // The token is dead. The clip, its edit and the upload progress stay.
                     match clear_auth_if_current(&data_dir, &token) {
                         Ok(cleared) => stale = !cleared,
-                        Err(e) => eprintln!("klipt: can't forget the expired login: {e}"),
+                        Err(e) => crate::elog!("klipt: can't forget the expired login: {e}"),
                     }
                 }
                 emit(
@@ -774,7 +774,7 @@ fn cache_dir(app: &AppHandle) -> Result<PathBuf> {
 
 fn emit(app: &AppHandle, event: &str, payload: impl Serialize + Clone) {
     if let Err(e) = app.emit(event, payload) {
-        eprintln!("klipt: can't send {event} to the window: {e}");
+        crate::elog!("klipt: can't send {event} to the window: {e}");
     }
 }
 
@@ -851,18 +851,18 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
         let library = lock(&state.library);
         library.mark_uploaded(id, &server_clip.id, &server_clip.share_url, visibility)?;
         if let Err(e) = library.rename(id, &job.title) {
-            eprintln!("klipt: can't save the uploaded title of clip {id}: {e}");
+            crate::elog!("klipt: can't save the uploaded title of clip {id}: {e}");
         }
         // Uploads don't carry the star: it goes up with the next sync.
         if clip.favorite {
             if let Err(e) = library.mark_sync_pending(id, "favorite") {
-                eprintln!("klipt: can't queue the star of clip {id}: {e}");
+                crate::elog!("klipt: can't queue the star of clip {id}: {e}");
             }
         }
     }
     if !screenshot {
         if let Err(e) = std::fs::remove_file(&exported) {
-            eprintln!("klipt: can't delete the uploaded export {}: {e}", exported.display());
+            crate::elog!("klipt: can't delete the uploaded export {}: {e}", exported.display());
         }
     }
     Ok((server_clip.share_url, replaced))
@@ -872,7 +872,7 @@ fn set_upload_progress(app: &AppHandle, id: &str, progress: Option<(&str, u64)>)
     let state = app.state::<AppState>();
     let result = lock(&state.library).set_upload_progress(id, progress);
     if let Err(e) = result {
-        eprintln!("klipt: can't remember the upload progress of clip {id}: {e}");
+        crate::elog!("klipt: can't remember the upload progress of clip {id}: {e}");
     }
 }
 
@@ -971,13 +971,13 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
     let editor::EditorAudio { game, mic, voice, extra } = audio;
     for file in [&clip.path, &game].into_iter().chain(mic.as_ref()).chain(voice.as_ref()).chain(extra.iter().map(|(_, p)| p)) {
         if let Err(e) = scope.allow_file(file) {
-            eprintln!("klipt: can't allow {} in the asset scope: {e}", file.display());
+            crate::elog!("klipt: can't allow {} in the asset scope: {e}", file.display());
         }
     }
     let strip = filmstrip::strip_dir(&strip_cache, &clip.id);
     filmstrip::mark_opened(&strip);
     if let Err(e) = scope.allow_directory(&strip, false) {
-        eprintln!("klipt: can't allow {} in the asset scope: {e}", strip.display());
+        crate::elog!("klipt: can't allow {} in the asset scope: {e}", strip.display());
     }
     let total = filmstrip::expected_frames(duration_ms);
     let frames = filmstrip::ready_frames(&strip);
@@ -1005,7 +1005,7 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
                     filmstrip::evict(&strip_cache, cap, &id);
                 }
                 Err(e) => {
-                    eprintln!("klipt: filmstrip of clip {id} failed: {e}");
+                    crate::elog!("klipt: filmstrip of clip {id} failed: {e}");
                     // A stopped or failed run still tells the UI how far it got.
                     if let Some(frames) = latest {
                         emit(&worker_app, events::FILMSTRIP_PROGRESS, serde_json::json!({ "id": id, "frames": frames }));
@@ -1055,7 +1055,7 @@ pub async fn close_editor(app: AppHandle, id: String) {
     // `stop` waits for ffmpeg to exit, so it runs off the command thread.
     let result = tauri::async_runtime::spawn_blocking(move || app.state::<filmstrip::Jobs>().stop(&id)).await;
     if let Err(e) = result {
-        eprintln!("klipt: can't stop the filmstrip job: {e}");
+        crate::elog!("klipt: can't stop the filmstrip job: {e}");
     }
 }
 
@@ -1133,7 +1133,7 @@ pub fn save_edit(
                 // A newer redraw replaces it.
                 Ok(false) => return,
                 Ok(true) => {}
-                Err(e) => eprintln!("klipt: can't redo the thumbnail of {}: {e}", clip.path.display()),
+                Err(e) => crate::elog!("klipt: can't redo the thumbnail of {}: {e}", clip.path.display()),
             }
             emit(&app, events::THUMBNAIL_CHANGED, serde_json::json!({ "id": clip.id }));
         });
@@ -1252,7 +1252,7 @@ pub async fn export_copy(
     .and_then(|r| r);
     drop(guard);
     if let Err(e) = &result {
-        eprintln!("klipt: export copy failed: {e}");
+        crate::elog!("klipt: export copy failed: {e}");
     }
     result
 }
@@ -1515,7 +1515,7 @@ async fn server_get(app: &AppHandle, path: &str, query: Vec<(&str, String)>) -> 
             if matches!(e, AppError::Unauthorized) {
                 // The token is dead: forget it, or the next launch would look logged in again.
                 if let Err(e) = clear_auth_if_current(&data_dir, &saved.token) {
-                    eprintln!("klipt: can't forget the expired login: {e}");
+                    crate::elog!("klipt: can't forget the expired login: {e}");
                 }
             }
             Err(e)

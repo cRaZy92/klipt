@@ -549,7 +549,7 @@ pub fn import_planned(
     };
     let at_ms = if kind == ClipKind::Screenshot { 0 } else { (clip.duration_ms / 2).min(1_000) };
     if let Err(e) = crate::ffmpeg::thumbnail(tools, &clip.path, &thumb, at_ms) {
-        eprintln!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
+        crate::elog!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
     }
     let view = ClipView { file_missing: false, thumb_path: thumb.is_file().then_some(thumb), clip };
     Ok(Outcome::Imported { view: Box::new(view), converted })

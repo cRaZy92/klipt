@@ -9,6 +9,7 @@
     errorMessage,
     type Account,
     type FeedbackKind,
+    type ShortcutApp,
     type AudioDevice,
     type Display,
     type HotkeyStatus,
@@ -71,7 +72,8 @@
   } = $props();
 
   const RESTARTED = "Recording restarted with new settings — the buffer was cleared.";
-  const TAKEN = "That shortcut is already used by another app. Pick a different one.";
+  const TAKEN =
+    "That shortcut is already used by another app (often an NVIDIA, AMD, Discord or Steam overlay). Pick a different one.";
 
   const RESOLUTIONS: { value: Resolution; label: string }[] = [
     { value: "p720", label: "720p (1280 × 720)" },
@@ -170,6 +172,14 @@
     draft.micDeviceId && mics && !mics.some((m) => m.id === draft.micDeviceId) ? draft.micDeviceId : null,
   );
 
+  // Settings → Hotkey: running overlays that bring shortcuts of their own.
+  let shortcutApps = $state<ShortcutApp[]>([]);
+  function refreshShortcutApps() {
+    api.shortcutApps().then((apps) => (shortcutApps = apps)).catch(() => {});
+  }
+  const clashingApps = $derived(shortcutApps.filter((a) => a.clashes.length > 0));
+  const otherApps = $derived(shortcutApps.filter((a) => a.clashes.length === 0));
+
   // Settings → Account: the name friends see, and the password.
   // svelte-ignore state_referenced_locally
   let nameDraft = $state(account.customName ?? "");
@@ -246,6 +256,7 @@
       .then((st) => ((storage = st), (storageFailed = false)))
       .catch(() => (storageFailed = storage === undefined));
     refreshFolderSize();
+    refreshShortcutApps();
   }
 
   function refreshFolderSize() {
@@ -718,6 +729,23 @@
         <small class="help">The new shortcut takes effect when you save.</small>
       {:else if hotkeyStatusError}
         <small class="error">{hotkeyStatusError}</small>
+      {/if}
+      {#each clashingApps as app (app.name)}
+        <div class="clash" role="alert">
+          <Icon name="alert" size={16} />
+          <span>
+            <strong>{app.name}</strong> is running and also uses
+            {#each app.clashes as key, i (key)}{i > 0 ? ", " : ""}<Keys shortcut={hotkeyLabel(key)} />{/each}. Only one of
+            them gets the keys: change the shortcut here or in {app.name}.
+          </span>
+        </div>
+      {/each}
+      {#if otherApps.length}
+        <small class="help apps-hint">
+          If the shortcut does nothing in a game, another app may be taking it. Running now with shortcuts of their own:
+          {#each otherApps as app, i (app.name)}{i > 0 ? "; " : ""}<strong>{app.name}</strong>
+            ({app.shortcuts.map(hotkeyLabel).join(", ")}){/each}.
+        </small>
       {/if}
     </section>
 
@@ -1553,6 +1581,28 @@
     margin: 0;
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .clash {
+    display: flex;
+    gap: 0.55rem;
+    align-items: flex-start;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid rgba(255, 93, 108, 0.35);
+    border-radius: 10px;
+    background: var(--danger-soft);
+    color: var(--danger-text);
+    font-size: 0.88rem;
+    line-height: 1.45;
+  }
+
+  .clash :global(svg) {
+    flex: none;
+    margin-top: 0.15rem;
+  }
+
+  .apps-hint {
+    line-height: 1.5;
   }
 
   .inline-form {

@@ -146,7 +146,7 @@ impl AppError {
             AppError::NotRecording => "Klipt isn't recording right now.".into(),
             AppError::RecorderStarting => "Recording is still starting. Try again in a few seconds.".into(),
             AppError::HotkeyTaken => {
-                "That shortcut is already used by another app. Pick a different one in Settings.".into()
+                "That shortcut is already used by another app (often an NVIDIA, AMD, Discord or Steam overlay). Pick a different one in Settings.".into()
             }
             AppError::HotkeyUnavailable(_) => {
                 "Klipt couldn't set up the save-clip shortcut. You can still save clips from the tray icon.".into()

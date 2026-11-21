@@ -178,6 +178,13 @@ export interface InfoLine {
   value: string;
 }
 
+/** A running app that has its own shortcuts, and which of Klipt's it shares. */
+export interface ShortcutApp {
+  name: string;
+  shortcuts: string[];
+  clashes: string[];
+}
+
 export type FeedbackKind = "bug" | "idea";
 
 /** The name to show for a person: their display name (newer servers) or username. */
@@ -484,6 +491,8 @@ export const api = {
   sendFeedback: (kind: FeedbackKind, message: string, includeLogs: boolean) =>
     invoke<void>("send_feedback", { kind, message, includeLogs }),
   openLogsFolder: () => invoke<void>("open_logs_folder"),
+  /** Running apps with shortcuts of their own (overlays) that may take Klipt's. */
+  shortcutApps: () => invoke<ShortcutApp[]>("shortcut_apps"),
   getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
   saveClipNow: () => invoke<void>("save_clip_now"),
   /** Starts a full recording, or stops the running one (results arrive as events). */

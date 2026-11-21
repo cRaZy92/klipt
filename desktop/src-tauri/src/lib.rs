@@ -172,6 +172,7 @@ pub fn run() {
             account::system_info,
             account::send_feedback,
             account::open_logs_folder,
+            hotkey::apps::shortcut_apps,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Klipt")

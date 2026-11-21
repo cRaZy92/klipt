@@ -13,6 +13,8 @@ pub mod portal;
 #[cfg(windows)]
 pub mod windows;
 
+pub mod apps;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -588,7 +590,7 @@ mod tests {
     fn a_taken_shortcut_is_a_dedicated_error() {
         let e = classify_register_error("HotKey already registered: HotKey { mods: ALT, key: F9, id: 1 }");
         assert_eq!(e.code(), "hotkey_taken");
-        assert_eq!(e.user_message(), "That shortcut is already used by another app. Pick a different one in Settings.");
+        assert!(e.user_message().starts_with("That shortcut is already used by another app"));
         assert_eq!(classify_register_error("Unable to register hotkey: x").code(), "hotkey_taken");
         assert_eq!(classify_register_error("something else").code(), "hotkey_unavailable");
     }

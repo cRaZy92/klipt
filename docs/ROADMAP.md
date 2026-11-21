@@ -1,6 +1,6 @@
 # Klipt roadmap
 
-As of 2026-11-20. Update this file when an item is done or a plan changes.
+As of 2026-11-21. Update this file when an item is done or a plan changes.
 
 All of v1 is built for Windows and Linux, and every desktop change pushed to `main` ships itself as a
 signed Windows release. What's missing is mostly proof on real machines and with real friends, not code.
@@ -9,6 +9,7 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 2026-11-21 | Ready for a friend       | Log file on every PC; Report a problem / Suggest a feature (with system info and log) to the admin page; display names; change password (app and website) and admin password links; admin page shows last seen, app version, OS and GPU; hotkey hint for overlays that take shortcuts. Untested on Windows; server needs redeploy |
 | 2026-11-20 | Replace an online clip   | Re-uploading an uploaded clip can swap its video at the same link (`85ebbfa`). Untested in the app; server needs redeploy |
 | 2026-11-20 | Editor subtitles         | Typed subtitles (T key, own lane), burned into exports and uploads with libass. Untested in the app and on Windows |
 | 2026-11-20 | Website redesign         | The website matches the desktop app; admin charts (uploads per week, top games, compression, storage per user). Needs redeploy |
@@ -45,6 +46,8 @@ link, with no help.
       `docs/superpowers/specs/2026-11-09-klipt-capture-decision.md`.
 - [ ] **Windows checks, later.** Screenshots (exclusive-fullscreen games may come out black; DPI
       scaling), subtitles with a non-ASCII profile path, folder import.
+- [ ] **Check the 2026-11-21 additions on Windows.** The log file under `%APPDATA%\app.klipt.Klipt\logs`,
+      GPU names from the registry in a report, the overlay hint with NVIDIA/AMD software running.
 - [ ] **Friends join on their own.** The server deploys itself; nobody is pushed to install. When a
       friend with an RTX 40xx or an AMD card (the AMF encoder is still unverified) starts using it,
       note anything they get stuck on.

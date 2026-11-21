@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, errorMessage, type FeedClip } from "../lib/api";
+  import { api, errorMessage, nameOf, type FeedClip } from "../lib/api";
   import { navKey } from "../lib/clipNav";
   import { hueOf, relativeDate, viewsLabel } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
@@ -44,7 +44,7 @@
     api
       .clipViewers(id)
       .then((list) => {
-        if (clip.id === id) viewers = list.map((v) => v.username);
+        if (clip.id === id) viewers = list.map((v) => nameOf(v));
       })
       .catch(() => {});
   });
@@ -98,11 +98,11 @@
 <div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()} role="presentation">
   <div class="player" role="dialog" aria-modal="true" aria-label={clip.title}>
     <div class="player-head">
-      <Avatar name={clip.owner.username} size={38} />
+      <Avatar name={nameOf(clip.owner)} size={38} />
       <div class="text">
         <div class="title">{clip.title}</div>
         <div class="meta">
-          <span class="who">{clip.owner.username}</span>
+          <span class="who">{nameOf(clip.owner)}</span>
           {#if clip.gameName}
             <span aria-hidden="true">·</span>
             <span class="game"><span class="game-dot" style:--hue={hueOf(clip.gameName)}></span>{clip.gameName}</span>
@@ -115,7 +115,7 @@
           {/if}
         </div>
         {#if clip.tagged?.length}
-          <div class="seen-by">With {clip.tagged.join(", ")}</div>
+          <div class="seen-by">With {clip.tagged.map((u, i) => clip.taggedNames?.[i] ?? u).join(", ")}</div>
         {/if}
         {#if viewers}
           <div class="seen-by">{viewers.length > 0 ? `Seen by ${viewers.join(", ")}` : "No friends have watched it yet."}</div>
@@ -166,7 +166,7 @@
             <img src={next.thumbnailUrl} alt="" />
             <span class="next-text">
               <span class="next-title">{next.title}</span>
-              <span class="next-meta">{next.owner.username}{next.gameName ? ` · ${next.gameName}` : ""}</span>
+              <span class="next-meta">{nameOf(next.owner)}{next.gameName ? ` · ${next.gameName}` : ""}</span>
             </span>
           </button>
           <div class="up-next-actions">

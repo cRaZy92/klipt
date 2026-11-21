@@ -363,7 +363,12 @@ fn api_errors_map_to_friendly_app_errors() {
 fn auth_round_trips_and_clears() {
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(auth::load(dir.path()), None);
-    let a = Auth { server_url: "https://clips.example.com".into(), token: "t".into(), username: "adam".into() };
+    let a = Auth {
+        server_url: "https://clips.example.com".into(),
+        token: "t".into(),
+        username: "adam".into(),
+        display_name: None,
+    };
     auth::save(dir.path(), &a).unwrap();
     auth::save(dir.path(), &a).unwrap(); // overwrite works
     assert_eq!(auth::load(dir.path()), Some(a));
@@ -379,7 +384,7 @@ fn auth_round_trips_and_clears() {
 fn auth_file_is_private() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    let a = Auth { server_url: "u".into(), token: "t".into(), username: "n".into() };
+    let a = Auth { server_url: "u".into(), token: "t".into(), username: "n".into(), display_name: None };
     auth::save(dir.path(), &a).unwrap();
     let mode = std::fs::metadata(dir.path().join("auth.json")).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);

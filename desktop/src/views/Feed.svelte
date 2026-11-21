@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { api, errorCode, errorMessage, type FeedClip, type GameCount } from "../lib/api";
+  import { api, errorCode, errorMessage, nameOf, type FeedClip, type GameCount } from "../lib/api";
   import { neighbors } from "../lib/clipNav";
   import { feedNeedsRefresh, isNewClip, type FeedLoaded } from "../lib/feedRefresh";
   import { formatDuration, groupByDay, hueOf, relativeDate, viewsLabel } from "../lib/format";
@@ -351,7 +351,7 @@
                   </button>
                 {/if}
                 <div class="body">
-                  <Avatar name={clip.owner.username} size={32} />
+                  <Avatar name={nameOf(clip.owner)} size={32} />
                   <div class="text">
                     <div class="title" title={clip.title}>
                       {#if isNewClip(clip, seenBefore, me)}
@@ -360,7 +360,7 @@
                       {clip.title}
                     </div>
                     <div class="meta">
-                      <span class="who">{clip.owner.username}</span>
+                      <span class="who">{nameOf(clip.owner)}</span>
                       <span aria-hidden="true">·</span>
                       <span>{relativeDate(new Date(clip.createdAt), now)}</span>
                       {#if clip.views > 0}

@@ -166,6 +166,15 @@ export interface AudioDevice {
 export interface Account {
   serverUrl: string;
   username: string;
+  /** The name friends see: the display name, or the username without one. */
+  displayName: string;
+  /** The display name as set; null when none is. */
+  customName: string | null;
+}
+
+/** The name to show for a person: their display name (newer servers) or username. */
+export function nameOf(p: { username: string; displayName?: string | null }): string {
+  return p.displayName || p.username;
 }
 
 export interface HotkeyStatus {
@@ -301,7 +310,7 @@ export interface FeedClip {
   width: number;
   height: number;
   createdAt: string;
-  owner: { username: string };
+  owner: { username: string; displayName?: string };
   shareUrl: string;
   videoUrl: string;
   thumbnailUrl: string;
@@ -309,6 +318,8 @@ export interface FeedClip {
   views: number;
   /** Friends in the clip, by username. Missing from older servers. */
   tagged?: string[];
+  /** Their display names, in the same order (newer servers). */
+  taggedNames?: string[];
   /** A video clip or a screenshot; missing from older servers (a clip). For a screenshot
    * `videoUrl` is the picture. */
   kind?: "clip" | "screenshot";
@@ -383,6 +394,7 @@ export interface ImportProgress {
 /** A friend who watched one of your uploads. */
 export interface ClipViewer {
   username: string;
+  displayName?: string;
   viewedAt: string;
 }
 
@@ -451,6 +463,13 @@ export const api = {
   login: (serverUrl: string, username: string, password: string) =>
     invoke<Account>("login", { serverUrl, username, password }),
   logout: () => invoke<void>("logout"),
+  /** The account as the server has it now (and tells it which version runs here); null when logged out. */
+  refreshAccount: () => invoke<Account | null>("refresh_account"),
+  /** Sets the name friends see; empty clears it. */
+  updateProfile: (displayName: string) => invoke<Account>("update_profile", { displayName }),
+  /** Signs out your other devices. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    invoke<void>("change_password", { currentPassword, newPassword }),
   getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
   saveClipNow: () => invoke<void>("save_clip_now"),
   /** Starts a full recording, or stops the running one (results arrive as events). */
@@ -483,7 +502,7 @@ export const api = {
   uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = [], replace = false) =>
     invoke<void>("upload_clip", { id, title, visibility, tagged, replace }),
   /** The server's users, for tagging friends in a clip. */
-  listUsers: () => invoke<{ username: string }[]>("list_users"),
+  listUsers: () => invoke<{ username: string; displayName?: string }[]>("list_users"),
   /** One page of the feed; `search` matches title, game and uploader on the server. */
   feedClips: (
     game: string | null,

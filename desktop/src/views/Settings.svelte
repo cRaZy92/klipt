@@ -48,6 +48,7 @@
     hotkeyStatus,
     onsaved,
     onlogout,
+    onaccount,
     dirty = $bindable(false),
   }: {
     /** This is the screen shown (it's kept alive, hidden, while another one is). */
@@ -61,6 +62,8 @@
     onsaved: (settings: Settings, result: SettingsSaved) => void;
     /** Log out (the app asks about unsaved changes first). */
     onlogout: () => void;
+    /** The account changed (a new display name). */
+    onaccount: (account: Account) => void;
     /** Whether there are unsaved changes, for the app's "Discard changes?" guard. */
     dirty?: boolean;
   } = $props();
@@ -164,6 +167,60 @@
   const missingMic = $derived(
     draft.micDeviceId && mics && !mics.some((m) => m.id === draft.micDeviceId) ? draft.micDeviceId : null,
   );
+
+  // Settings → Account: the name friends see, and the password.
+  // svelte-ignore state_referenced_locally
+  let nameDraft = $state(account.customName ?? "");
+  let savingName = $state(false);
+  let nameError = $state<string | null>(null);
+  const nameChanged = $derived(nameDraft.trim() !== (account.customName ?? ""));
+
+  async function saveName(e: SubmitEvent) {
+    e.preventDefault();
+    savingName = true;
+    nameError = null;
+    try {
+      const next = await api.updateProfile(nameDraft);
+      nameDraft = next.customName ?? "";
+      onaccount(next);
+      toast(next.customName ? `Friends now see you as ${next.displayName}` : "Friends see your username again", "success");
+    } catch (err) {
+      nameError = errorMessage(err);
+    } finally {
+      savingName = false;
+    }
+  }
+
+  let pw = $state({ current: "", next: "", again: "" });
+  let changingPassword = $state(false);
+  let passwordError = $state<string | null>(null);
+
+  async function changePassword(e: SubmitEvent) {
+    e.preventDefault();
+    passwordError = null;
+    if (!pw.current || !pw.next) {
+      passwordError = "Fill in your current and new password.";
+      return;
+    }
+    if (pw.next.length < 8) {
+      passwordError = "The new password needs at least 8 characters.";
+      return;
+    }
+    if (pw.next !== pw.again) {
+      passwordError = "The two new passwords aren't the same.";
+      return;
+    }
+    changingPassword = true;
+    try {
+      await api.changePassword(pw.current, pw.next);
+      pw = { current: "", next: "", again: "" };
+      toast("Password changed. Your other devices are signed out.", "success");
+    } catch (err) {
+      passwordError = errorMessage(err);
+    } finally {
+      changingPassword = false;
+    }
+  }
 
   function refreshAll() {
     if (!info) refresh("appInfo", api.appInfo).then((i) => (info = i)).catch(() => {});
@@ -872,6 +929,55 @@
     </section>
 
     <section>
+      <h2>Name</h2>
+      <p class="intro muted">Friends see this name on your clips. You still log in as {account.username}.</p>
+      <form class="inline-form" onsubmit={saveName}>
+        <input
+          class="input"
+          bind:value={nameDraft}
+          placeholder={account.username}
+          maxlength="32"
+          aria-label="Display name"
+          aria-invalid={!!nameError}
+        />
+        <button class="btn btn-primary" type="submit" disabled={savingName || !nameChanged}>
+          {#if savingName}<span class="spinner"></span> Saving…{:else}Save name{/if}
+        </button>
+      </form>
+      {#if nameError}<small class="error">{nameError}</small>{/if}
+    </section>
+
+    <section>
+      <h2>Password</h2>
+      <p class="intro muted">Changing it signs you out on your other devices. This one stays logged in.</p>
+      <form class="password-form" onsubmit={changePassword}>
+        <input type="text" class="sr-only" autocomplete="username" value={account.username} tabindex="-1" aria-hidden="true" readonly />
+        <label class="row">
+          <span class="label">Current password</span>
+          <input class="input" type="password" autocomplete="current-password" bind:value={pw.current} />
+        </label>
+        <div class="grid">
+          <label class="row">
+            <span class="label">New password</span>
+            <input class="input" type="password" autocomplete="new-password" bind:value={pw.next} />
+          </label>
+          <label class="row">
+            <span class="label">New password again</span>
+            <input class="input" type="password" autocomplete="new-password" bind:value={pw.again} />
+          </label>
+        </div>
+        {#if passwordError}<small class="error">{passwordError}</small>{/if}
+        <div>
+          <button class="btn" type="submit" disabled={changingPassword}>
+            {#if changingPassword}<span class="spinner"></span> Changing…{:else}Change password{/if}
+          </button>
+        </div>
+      </form>
+      <small class="help">Forgot it? Your admin can send you a link to set a new one.</small>
+    </section>
+
+
+    <section>
       <h2>About</h2>
       {#if info}
         <p class="about">
@@ -1426,6 +1532,23 @@
     margin: 0;
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .inline-form {
+    display: flex;
+    gap: 0.6rem;
+    max-width: 30rem;
+  }
+
+  .inline-form .input {
+    flex: 1;
+  }
+
+  .password-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    max-width: 30rem;
   }
 
   .sr-only {

@@ -57,6 +57,9 @@ pub enum AppError {
     OverwriteOriginal,
     #[error("internal error: {0}")]
     Internal(String),
+    /// The server said no, with a message for the user (wrong password, name too long…).
+    #[error("refused: {0}")]
+    Refused(String),
     #[error("can't reach the server: {0}")]
     Network(String),
     #[error("server error: {0}")]
@@ -115,6 +118,7 @@ impl AppError {
             AppError::ClipBusy => "clip_busy",
             AppError::OverwriteOriginal => "overwrite_original",
             AppError::Internal(_) => "internal",
+            AppError::Refused(_) => "refused",
             AppError::Network(_) => "network",
             AppError::ServerError(_) => "server_error",
             AppError::InvalidVideo(_) => "invalid_video",
@@ -166,6 +170,7 @@ impl AppError {
                 "That's the original clip. Choose a different name so it isn't overwritten.".into()
             }
             AppError::Internal(_) => "Something went wrong. Please try again.".into(),
+            AppError::Refused(message) => message.clone(),
             AppError::Network(_) => "Can't reach the Klipt server. Check your connection and try again.".into(),
             AppError::ServerError(_) => "The server had a problem. Try again in a moment.".into(),
             AppError::InvalidVideo(_) => "The server couldn't read this video. It may be damaged.".into(),

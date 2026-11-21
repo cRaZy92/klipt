@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, errorMessage, type ClipView, type Visibility } from "../lib/api";
+  import { api, errorMessage, nameOf, type ClipView, type Visibility } from "../lib/api";
   import { uploadTitle } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import { fraction, isBusy, retryUpload, startUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
@@ -17,12 +17,15 @@
   let replace = $state(true);
   /** Friends you can tag (everyone on the server but you); null until loaded or if it failed. */
   let friends = $state<string[] | null>(null);
+  /** Display names by username, for the friend chips. */
+  let names = $state<Record<string, string>>({});
   let tagged = $state<string[]>([]);
 
   $effect(() => {
     Promise.all([api.listUsers(), api.getAccount()])
       .then(([users, account]) => {
         const me = account?.username.toLowerCase();
+        names = Object.fromEntries(users.map((u) => [u.username, nameOf(u)]));
         friends = users.map((u) => u.username).filter((name) => name.toLowerCase() !== me);
       })
       .catch(() => (friends = null));
@@ -133,7 +136,7 @@
                 onclick={() => toggleTag(name)}
               >
                 {#if tagged.includes(name)}<Icon name="check" size={13} />{/if}
-                {name}
+                {names[name] ?? name}
               </button>
             {/each}
           </div>

@@ -17,6 +17,9 @@ pub struct Auth {
     pub server_url: String,
     pub token: String,
     pub username: String,
+    /// The display name set on the server (None: friends see the username).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
 }
 
 /// Never prints the token, so a stray `{:?}` can't leak it into logs.
@@ -68,7 +71,12 @@ mod tests {
 
     #[test]
     fn debug_hides_the_token() {
-        let a = Auth { server_url: "https://k".into(), token: "secret-token".into(), username: "u".into() };
+        let a = Auth {
+            server_url: "https://k".into(),
+            token: "secret-token".into(),
+            username: "u".into(),
+            display_name: None,
+        };
         let shown = format!("{a:?}");
         assert!(!shown.contains("secret-token") && shown.contains("<redacted>"), "{shown}");
     }

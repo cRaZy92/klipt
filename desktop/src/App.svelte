@@ -53,6 +53,7 @@
       hotkeyStatus = status;
       if (status.error) toast(status.error, "error");
       ready = true;
+      if (a) syncAccount();
     } catch (e) {
       startupError = errorMessage(e);
     }
@@ -142,6 +143,16 @@
     } catch (e) {
       toast(errorMessage(e), "error");
     }
+  }
+
+  /** A name changed on the website shows up here; the server also learns which version runs here. */
+  function syncAccount() {
+    api
+      .refreshAccount()
+      .then((fresh) => {
+        if (fresh && account && fresh.serverUrl === account.serverUrl && fresh.username === account.username) account = fresh;
+      })
+      .catch(() => {});
   }
 
   function loggedIn(a: Account) {
@@ -333,17 +344,17 @@
             onclick={() => (accountMenu = !accountMenu)}
             aria-expanded={accountMenu}
             aria-haspopup="menu"
-            aria-label="Account: {account.username}"
-            title={account.username}
+            aria-label="Account: {account.displayName}"
+            title={account.displayName}
           >
-            <Avatar name={account.username} size={36} />
+            <Avatar name={account.displayName} size={36} />
           </button>
           {#if accountMenu}
             <div class="menu" role="menu" use:menu={{ close: () => (accountMenu = false) }}>
               <div class="who">
-                <Avatar name={account.username} size={38} />
+                <Avatar name={account.displayName} size={38} />
                 <div>
-                  <strong>{account.username}</strong>
+                  <strong>{account.displayName}</strong>
                   <span>{hostOf(account.serverUrl)}</span>
                 </div>
               </div>
@@ -418,6 +429,7 @@
               bind:dirty={viewDirty}
               onsaved={settingsSaved}
               onlogout={requestLogout}
+              onaccount={(a) => (account = a)}
             />
           {/key}
         </main>

@@ -22,6 +22,9 @@ pub enum ApiError {
 pub struct Me {
     pub id: String,
     pub username: String,
+    /// The display name as set; missing from older servers.
+    #[serde(default)]
+    pub custom_name: Option<String>,
     pub is_admin: bool,
 }
 
@@ -204,6 +207,22 @@ impl ApiClient {
     /// An authenticated PATCH of a JSON API path; returns the answer as-is.
     pub async fn patch_json(&self, token: &str, path: &str, body: &serde_json::Value) -> Result<serde_json::Value, ApiError> {
         let resp = self.http.patch(self.url(path)).bearer_auth(token).json(body).send().await.map_err(network)?;
+        parse_json(resp).await
+    }
+
+    /// An authenticated POST of JSON; returns the answer, or `Null` for a 204.
+    pub async fn post_json(
+        &self,
+        token: &str,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, ApiError> {
+        let resp = self.http.post(self.url(path)).bearer_auth(token).json(body).send().await.map_err(network)?;
+        if resp.status() == StatusCode::NO_CONTENT
+            || resp.status() == StatusCode::CREATED && resp.content_length() == Some(0)
+        {
+            return Ok(serde_json::Value::Null);
+        }
         parse_json(resp).await
     }
 

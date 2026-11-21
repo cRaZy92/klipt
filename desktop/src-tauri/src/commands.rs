@@ -389,6 +389,21 @@ pub fn allow_clip_folder(app: &AppHandle, dir: &Path) {
 pub struct Account {
     pub server_url: String,
     pub username: String,
+    /// The name friends see: the display name, or the username without one.
+    pub display_name: String,
+    /// The display name as set (None: not set).
+    pub custom_name: Option<String>,
+}
+
+impl Account {
+    pub fn from_auth(a: &Auth) -> Account {
+        Account {
+            server_url: a.server_url.clone(),
+            username: a.username.clone(),
+            display_name: a.display_name.clone().unwrap_or_else(|| a.username.clone()),
+            custom_name: a.display_name.clone(),
+        }
+    }
 }
 
 /// The saved login, if any. Doesn't contact the server: a revoked token shows up as
@@ -396,10 +411,7 @@ pub struct Account {
 #[tauri::command]
 pub async fn get_account(app: AppHandle) -> Option<Account> {
     let data_dir = app.state::<AppState>().data_dir.clone();
-    off_main(move || auth::load(&data_dir).map(|a| Account { server_url: a.server_url, username: a.username }))
-        .await
-        .ok()
-        .flatten()
+    off_main(move || auth::load(&data_dir).map(|a| Account::from_auth(&a))).await.ok().flatten()
 }
 
 /// Checks that `server_url` is a Klipt server and returns its normalized address.
@@ -429,9 +441,11 @@ pub async fn login(app: AppHandle, server_url: String, username: String, passwor
     let base = normalize_server_url(&server_url)?;
     let client = ApiClient::new(&base).map_err(|_| AppError::InvalidServerAddress)?;
     let session = client.login(username.trim(), &password, &device_name()).await.map_err(login_error)?;
-    let Me { username, .. } = session.me;
+    let Me { username, custom_name, .. } = session.me;
     let state = app.state::<AppState>();
-    auth::save(&state.data_dir, &Auth { server_url: base.clone(), token: session.token, username: username.clone() })?;
+    let saved = Auth { server_url: base.clone(), token: session.token, username, display_name: custom_name };
+    auth::save(&state.data_dir, &saved)?;
+    crate::account::report_device(&app, &saved);
     // The same lock as Settings saves, and the change made to the current settings, so a save
     // finishing meanwhile isn't overwritten.
     let _saving = SAVING_SETTINGS.lock().await;
@@ -444,7 +458,7 @@ pub async fn login(app: AppHandle, server_url: String, username: String, passwor
             *current = next;
         }
     }
-    Ok(Account { server_url: base, username })
+    Ok(Account::from_auth(&saved))
 }
 
 /// Forgets the login. Telling the server is best effort: logging out works offline too.
@@ -1457,7 +1471,7 @@ mod tests {
     #[test]
     fn a_dead_token_clears_only_its_own_login() {
         let dir = tempfile::tempdir().unwrap();
-        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into() };
+        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into(), display_name: None };
         assert!(!clear_auth_if_current(dir.path(), "old").unwrap(), "nothing saved: nothing to clear");
 
         // The user already logged in again: an old upload's 401 leaves the new login alone.

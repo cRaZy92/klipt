@@ -1,7 +1,9 @@
 //! Klipt desktop app core. All logic lives here; the Svelte UI talks to it through Tauri commands.
 
+pub mod account;
 pub mod cleanup;
 pub mod commands;
+pub mod diagnostics;
 pub mod editor;
 pub mod errors;
 pub mod export;
@@ -58,7 +60,7 @@ pub fn run() {
                 Ok(()) => crate::elog!(
                     "klipt: Klipt {} starting on {} ({})",
                     app.package_info().version,
-                    std::env::consts::OS,
+                    diagnostics::os_name(),
                     std::env::consts::ARCH
                 ),
                 Err(e) => crate::elog!("klipt: can't write the log file: {e}"),
@@ -164,6 +166,9 @@ pub fn run() {
             resources::resource_usage,
             tray::release_window,
             update::pending_update,
+            account::refresh_account,
+            account::update_profile,
+            account::change_password,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Klipt")

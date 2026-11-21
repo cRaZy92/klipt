@@ -377,6 +377,7 @@
     { id: "general", label: "General", icon: "sliders" },
     { id: "resources", label: "Resources", icon: "pulse" },
     { id: "account", label: "Account", icon: "user" },
+    { id: "about", label: "Help & about", icon: "info" },
   ] as const;
   type Tab = (typeof TABS)[number]["id"];
   let tab = $state<Tab>("recording");
@@ -1012,6 +1013,7 @@
       <small class="help">Forgot it? Your admin can send you a link to set a new one.</small>
     </section>
 
+    {:else if tab === "about"}
     <section>
       <h2>Help</h2>
       <p class="intro muted">Something not working, or an idea? It goes straight to your admin.</p>

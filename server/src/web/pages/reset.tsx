@@ -10,7 +10,7 @@ export function ResetPage(props: { code: string; username: string | null }): JSX
           <>
             <LogoMark size={44} />
             <h1>New password</h1>
-            <p class="muted">
+            <p class="muted lead">
               For <strong>{e(props.username)}</strong>. You'll be signed out everywhere, then logged in here.
             </p>
             <form data-form="reset" data-next="/" class="form">

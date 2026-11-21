@@ -282,6 +282,7 @@ code { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; f
 .center-card .logo-mark { margin-bottom: 18px; }
 .center-card h1 { font-size: 1.7rem; margin-bottom: 20px; }
 .center-card > .muted { margin: 18px 0 0; font-size: .9rem; }
+.center-card > .muted.lead { margin: -8px 0 20px; }
 .form { display: grid; gap: 14px; }
 .form label { display: grid; gap: 6px; font-size: .88rem; font-weight: 550; color: var(--text-muted); }
 .form input {

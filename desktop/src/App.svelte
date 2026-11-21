@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { api, errorMessage, on, type Account, type ClipView, type HotkeyStatus, type Settings, type SettingsSaved } from "./lib/api";
+  import { api, errorMessage, on, type Account, type ClipView, type FeedbackKind, type HotkeyStatus, type Settings, type SettingsSaved } from "./lib/api";
   import { menu } from "./lib/a11y";
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
@@ -12,6 +12,7 @@
   import Icon from "./components/Icon.svelte";
   import Toast from "./components/Toast.svelte";
   import Modal from "./components/Modal.svelte";
+  import FeedbackDialog from "./components/FeedbackDialog.svelte";
   import Editor from "./views/Editor.svelte";
   import Feed from "./views/Feed.svelte";
   import Library from "./views/Library.svelte";
@@ -33,6 +34,8 @@
   /** The save-clip shortcut as the system reports it, or why it isn't working. */
   let hotkeyStatus = $state<HotkeyStatus>({ display: null, error: null, errorCode: null });
   let accountMenu = $state(false);
+  /** The "Report a problem" dialog from the account menu. */
+  let feedbackKind = $state<FeedbackKind | null>(null);
   /** A newer version waiting to be installed; `command` installs it on Linux. */
   let update = $state<{ version: string; command: string | null; installing: boolean } | null>(null);
   /** Settings has unsaved changes (the editor saves by itself). */
@@ -360,6 +363,9 @@
               </div>
               <hr />
               <button role="menuitem" onclick={openWebsite}><Icon name="external" size={16} /> Open website</button>
+              <button role="menuitem" onclick={() => ((accountMenu = false), (feedbackKind = "bug"))}>
+                <Icon name="alert" size={16} /> Report a problem
+              </button>
               <button role="menuitem" onclick={requestLogout}><Icon name="logout" size={16} /> Log out</button>
             </div>
           {/if}
@@ -436,6 +442,10 @@
       {/if}
     </div>
   </div>
+{/if}
+
+{#if feedbackKind}
+  <FeedbackDialog kind={feedbackKind} onclose={() => (feedbackKind = null)} />
 {/if}
 
 {#if leaving}

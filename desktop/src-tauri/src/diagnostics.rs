@@ -67,6 +67,7 @@ pub fn system_info(app_version: &str, settings: &Settings) -> Vec<Entry> {
         let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
         add("Desktop", format!("{desktop} {session}").trim().to_string());
     }
+    add("Encoder", crate::recorder::current_encoder().unwrap_or_else(|| "not recording".into()));
     add(
         "Recording",
         format!(

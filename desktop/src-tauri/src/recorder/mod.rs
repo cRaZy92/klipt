@@ -244,6 +244,13 @@ pub mod events {
 
 /// Starts the supervisor for the app: the platform backend, game detection in `data_dir`, the
 /// library save pipeline from [`AppState`], and Tauri events as the output.
+/// The encoder the replay buffer last started with, for problem reports.
+static CURRENT_ENCODER: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn current_encoder() -> Option<String> {
+    CURRENT_ENCODER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
 pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) -> SupervisorHandle {
     let (detect_dir, running_dir) = (data_dir.clone(), data_dir.clone());
     let (pipeline_app, sink_app) = (app.clone(), app.clone());
@@ -268,6 +275,8 @@ pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) ->
                     sink_app.emit(events::RECORDER_ERROR, serde_json::json!({ "code": code, "message": message }))
                 }
                 SupervisorEvent::Recording { encoder } => {
+                    crate::elog!("klipt: recording with {encoder}");
+                    *CURRENT_ENCODER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(encoder.clone());
                     sink_app.emit(events::RECORDING_STARTED, serde_json::json!({ "encoder": encoder }))
                 }
                 SupervisorEvent::FullRecordingStarted { started_at_ms } => {

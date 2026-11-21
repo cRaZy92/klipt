@@ -1,17 +1,21 @@
 //! Your account on the server from the app: display name, password, telling the server which
-//! app version runs on what PC.
+//! app version runs on what PC, and sending a problem report or an idea (with the log).
 
 use std::time::Duration;
 
+use serde::Serialize;
 use tauri::{AppHandle, Manager};
+use tauri_plugin_opener::OpenerExt;
 
-use crate::commands::{clear_auth_if_current, off_main, Account};
+use crate::commands::{clear_auth_if_current, lock, off_main, Account};
 use crate::errors::{AppError, Result};
 use crate::state::AppState;
 use crate::upload::api::{ApiClient, ApiError};
 use crate::upload::auth::{self, Auth};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
+/// How much of the log a report sends (its end).
+pub const REPORT_LOG_BYTES: u64 = 1_500_000;
 
 /// Friendly words for the server's refusals on these calls.
 fn refusal(code: &str) -> Option<&'static str> {
@@ -131,3 +135,75 @@ pub async fn change_password(app: AppHandle, current_password: String, new_passw
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InfoLine {
+    pub label: String,
+    pub value: String,
+}
+
+fn collect_info(app: &AppHandle) -> Vec<(String, String)> {
+    let settings = lock(&app.state::<AppState>().settings).clone();
+    crate::diagnostics::system_info(&app.package_info().version.to_string(), &settings)
+}
+
+/// What a problem report says about this PC, to show before sending.
+#[tauri::command]
+pub async fn system_info(app: AppHandle) -> Result<Vec<InfoLine>> {
+    off_main(move || collect_info(&app).into_iter().map(|(label, value)| InfoLine { label, value }).collect()).await
+}
+
+/// Sends a problem report or an idea to the server's admin. A report with `include_logs` carries
+/// the system info and the end of the log.
+#[tauri::command]
+pub async fn send_feedback(app: AppHandle, kind: String, message: String, include_logs: bool) -> Result<()> {
+    if kind != "bug" && kind != "idea" {
+        return Err(AppError::InvalidInput("kind".into()));
+    }
+    let message = message.trim().to_string();
+    if message.is_empty() || message.chars().count() > 10_000 {
+        return Err(AppError::Refused("Write a few words, up to 10,000 characters.".into()));
+    }
+    let (auth, client) = saved(&app)?;
+    crate::elog!("klipt: sending a {} report", if kind == "bug" { "problem" } else { "idea" });
+    let app2 = app.clone();
+    let (system, logs) = off_main(move || {
+        if !include_logs {
+            return (None, None);
+        }
+        let info = collect_info(&app2);
+        let logs = format!("{}\n{}", crate::diagnostics::as_text(&info), crate::logging::tail(REPORT_LOG_BYTES));
+        (Some(info), Some(logs))
+    })
+    .await?;
+    let mut body = serde_json::json!({ "kind": kind, "message": message, "source": "desktop" });
+    if let Some(system) = system {
+        body["system"] =
+            serde_json::Value::Object(system.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect());
+    }
+    if let Some(logs) = logs {
+        body["logs"] = serde_json::Value::String(logs);
+    }
+    match client.post_json(&auth.token, "/api/feedback", &body).await {
+        Ok(_) => Ok(()),
+        Err(ApiError::Server { status: 404, .. }) => {
+            Err(AppError::Refused("Your server is too old for reports. Ask your admin to update it.".into()))
+        }
+        Err(e) => {
+            let e = api_error(e);
+            forget_if_unauthorized(&app, &auth, &e);
+            Err(e)
+        }
+    }
+}
+
+/// Opens the folder with the app's logs.
+#[tauri::command]
+pub async fn open_logs_folder(app: AppHandle) -> Result<()> {
+    off_main(move || {
+        let dir = crate::logging::dir().ok_or_else(|| AppError::Internal("logging isn't set up".into()))?;
+        app.opener()
+            .open_path(dir.to_string_lossy(), None::<&str>)
+            .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+    })
+    .await?
+}

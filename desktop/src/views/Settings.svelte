@@ -8,6 +8,7 @@
     errorFields,
     errorMessage,
     type Account,
+    type FeedbackKind,
     type AudioDevice,
     type Display,
     type HotkeyStatus,
@@ -40,6 +41,7 @@
   import Icon from "../components/Icon.svelte";
   import Keys from "../components/Keys.svelte";
   import ResourcesPanel from "../components/ResourcesPanel.svelte";
+  import FeedbackDialog from "../components/FeedbackDialog.svelte";
 
   let {
     active = true,
@@ -220,6 +222,12 @@
     } finally {
       changingPassword = false;
     }
+  }
+
+  let feedbackKind = $state<FeedbackKind | null>(null);
+
+  function openLogs() {
+    api.openLogsFolder().catch((e) => toast(errorMessage(e), "error"));
   }
 
   function refreshAll() {
@@ -976,6 +984,15 @@
       <small class="help">Forgot it? Your admin can send you a link to set a new one.</small>
     </section>
 
+    <section>
+      <h2>Help</h2>
+      <p class="intro muted">Something not working, or an idea? It goes straight to your admin.</p>
+      <div class="help-actions">
+        <button class="btn" onclick={() => (feedbackKind = "bug")}><Icon name="alert" size={16} /> Report a problem</button>
+        <button class="btn" onclick={() => (feedbackKind = "idea")}><Icon name="bulb" size={16} /> Suggest a feature</button>
+        <button class="btn btn-ghost" onclick={openLogs}><Icon name="folder" size={16} /> Open logs folder</button>
+      </div>
+    </section>
 
     <section>
       <h2>About</h2>
@@ -1026,6 +1043,10 @@
 </div></div>
 </div>
 </div>
+
+{#if feedbackKind}
+  <FeedbackDialog kind={feedbackKind} onclose={() => (feedbackKind = null)} />
+{/if}
 
 <style>
   .settings {
@@ -1549,6 +1570,12 @@
     flex-direction: column;
     gap: 0.9rem;
     max-width: 30rem;
+  }
+
+  .help-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
   }
 
   .sr-only {

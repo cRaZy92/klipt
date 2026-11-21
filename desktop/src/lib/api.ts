@@ -172,6 +172,14 @@ export interface Account {
   customName: string | null;
 }
 
+/** A line of what a problem report says about this PC. */
+export interface InfoLine {
+  label: string;
+  value: string;
+}
+
+export type FeedbackKind = "bug" | "idea";
+
 /** The name to show for a person: their display name (newer servers) or username. */
 export function nameOf(p: { username: string; displayName?: string | null }): string {
   return p.displayName || p.username;
@@ -470,6 +478,12 @@ export const api = {
   /** Signs out your other devices. */
   changePassword: (currentPassword: string, newPassword: string) =>
     invoke<void>("change_password", { currentPassword, newPassword }),
+  /** What a problem report says about this PC. */
+  systemInfo: () => invoke<InfoLine[]>("system_info"),
+  /** Sends a problem or an idea to the server's admin; `includeLogs` adds system info and the log. */
+  sendFeedback: (kind: FeedbackKind, message: string, includeLogs: boolean) =>
+    invoke<void>("send_feedback", { kind, message, includeLogs }),
+  openLogsFolder: () => invoke<void>("open_logs_folder"),
   getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
   saveClipNow: () => invoke<void>("save_clip_now"),
   /** Starts a full recording, or stops the running one (results arrive as events). */

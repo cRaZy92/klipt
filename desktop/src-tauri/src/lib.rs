@@ -169,6 +169,9 @@ pub fn run() {
             account::refresh_account,
             account::update_profile,
             account::change_password,
+            account::system_info,
+            account::send_feedback,
+            account::open_logs_folder,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Klipt")

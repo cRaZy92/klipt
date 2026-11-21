@@ -686,7 +686,12 @@ pub struct CheckProgress {
 /// `clip-imported`, `import-finished`). False when an import is already running or the folder
 /// wasn't checked.
 #[tauri::command]
-pub fn import_folder(app: AppHandle, folder: String) -> Result<bool> {
+pub async fn import_folder(app: AppHandle, folder: String) -> Result<bool> {
+    // Resolves the folder on disk first (slow on a sleeping or network drive): off the main thread.
+    crate::commands::off_main(move || start_import(app, folder)).await?
+}
+
+fn start_import(app: AppHandle, folder: String) -> Result<bool> {
     let tools = app.state::<AppState>().tools.clone().ok_or(AppError::ToolsMissing)?;
     let root = PathBuf::from(&folder);
     let root = dunce::canonicalize(&root).unwrap_or(root);

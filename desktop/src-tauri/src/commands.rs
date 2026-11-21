@@ -61,6 +61,16 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Runs `work` on a blocking thread and waits for it. A command that isn't `async` runs on the
+/// main thread, which also draws the window: one that touches the library database, the disk or
+/// another process (file manager, clipboard) froze the whole UI until it finished, and longer
+/// while the library lock was held elsewhere (a sync push, cleanup). Such commands go through here.
+pub(crate) async fn off_main<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| AppError::Internal(format!("background task failed: {e}")))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Pure helpers (unit-tested below)
 
@@ -346,12 +356,15 @@ pub fn take_screenshot(app: AppHandle) {
 
 /// Opens the clips folder in the file manager (creating it if needed).
 #[tauri::command]
-pub fn open_clips_folder(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
-    let dir = lock(&state.settings).output_dir.clone();
-    std::fs::create_dir_all(&dir)?;
-    app.opener()
-        .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+pub async fn open_clips_folder(app: AppHandle) -> Result<()> {
+    off_main(move || {
+        let dir = lock(&app.state::<AppState>().settings).output_dir.clone();
+        std::fs::create_dir_all(&dir)?;
+        app.opener()
+            .open_path(dir.to_string_lossy(), None::<&str>)
+            .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+    })
+    .await?
 }
 
 /// How many bytes the clips folder (with its subfolders) takes on disk.
@@ -381,8 +394,12 @@ pub struct Account {
 /// The saved login, if any. Doesn't contact the server: a revoked token shows up as
 /// `unauthorized` on the next upload.
 #[tauri::command]
-pub fn get_account(state: State<'_, AppState>) -> Option<Account> {
-    auth::load(&state.data_dir).map(|a| Account { server_url: a.server_url, username: a.username })
+pub async fn get_account(app: AppHandle) -> Option<Account> {
+    let data_dir = app.state::<AppState>().data_dir.clone();
+    off_main(move || auth::load(&data_dir).map(|a| Account { server_url: a.server_url, username: a.username }))
+        .await
+        .ok()
+        .flatten()
 }
 
 /// Checks that `server_url` is a Klipt server and returns its normalized address.
@@ -476,20 +493,23 @@ pub async fn get_full_recording(app: AppHandle) -> Option<i64> {
 // ---------------------------------------------------------------------------------------------
 // Library
 
+/// Also looks at each clip's video and thumbnail on disk, so it's slow on a big library or a
+/// sleeping drive: off the main thread.
 #[tauri::command]
-pub fn list_clips(state: State<'_, AppState>, filter: Option<ListFilter>) -> Result<Vec<ClipView>> {
-    lock(&state.library).list(&filter.unwrap_or_default())
+pub async fn list_clips(app: AppHandle, filter: Option<ListFilter>) -> Result<Vec<ClipView>> {
+    off_main(move || lock(&app.state::<AppState>().library).list(&filter.unwrap_or_default())).await?
 }
 
 #[tauri::command]
-pub fn list_games(state: State<'_, AppState>) -> Result<Vec<GameCount>> {
-    lock(&state.library).games()
+pub async fn list_games(app: AppHandle) -> Result<Vec<GameCount>> {
+    off_main(move || lock(&app.state::<AppState>().library).games()).await?
 }
 
 #[tauri::command]
-pub fn rename_clip(app: AppHandle, state: State<'_, AppState>, id: String, title: String) -> Result<()> {
+pub async fn rename_clip(app: AppHandle, id: String, title: String) -> Result<()> {
     let title = clean_title(&title)?;
-    edit_synced(&app, &state, &id, "title", |library| library.rename(&id, &title))
+    off_main(move || edit_synced(&app, &app.state::<AppState>(), &id, "title", |library| library.rename(&id, &title)))
+        .await?
 }
 
 /// Saves a local edit; for an uploaded clip, also marks `field` to sync and sends it.
@@ -513,20 +533,27 @@ fn edit_synced(
 
 /// Stars or unstars a clip.
 #[tauri::command]
-pub fn set_clip_favorite(app: AppHandle, state: State<'_, AppState>, id: String, favorite: bool) -> Result<()> {
-    edit_synced(&app, &state, &id, "favorite", |library| library.set_favorite(&id, favorite))
+pub async fn set_clip_favorite(app: AppHandle, id: String, favorite: bool) -> Result<()> {
+    off_main(move || {
+        edit_synced(&app, &app.state::<AppState>(), &id, "favorite", |library| library.set_favorite(&id, favorite))
+    })
+    .await?
 }
 
 /// Tags a clip with a game (`None` or blank = Unknown). Tagging an Unknown clip also remembers
 /// its exe, so the next clip of that game is named automatically.
 #[tauri::command]
-pub fn set_clip_game(app: AppHandle, state: State<'_, AppState>, id: String, name: Option<String>) -> Result<()> {
+pub async fn set_clip_game(app: AppHandle, id: String, name: Option<String>) -> Result<()> {
+    off_main(move || set_clip_game_now(&app, &app.state::<AppState>(), &id, name)).await?
+}
+
+fn set_clip_game_now(app: &AppHandle, state: &AppState, id: &str, name: Option<String>) -> Result<()> {
     let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
     let library = lock(&state.library);
-    let clip = library.get(&id)?;
+    let clip = library.get(id)?;
     let steam_app_id = steam_app_id_for(&library.games()?, &clip, name.as_deref());
     drop(library);
-    edit_synced(&app, &state, &id, "game", |library| library.set_game(&id, name.as_deref(), steam_app_id))?;
+    edit_synced(app, state, id, "game", |library| library.set_game(id, name.as_deref(), steam_app_id))?;
     if let (true, Some(exe), Some(name)) = (should_save_mapping(&clip, name.as_deref()), &clip.exe, &name) {
         if let Err(e) = mappings::set(&state.data_dir, exe, name) {
             eprintln!("klipt: can't remember {exe} as {name}: {e}");
@@ -555,39 +582,48 @@ pub async fn delete_clip(app: AppHandle, id: String, delete_file: bool) -> Resul
 }
 
 #[tauri::command]
-pub fn show_in_folder(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
-    let clip = lock(&state.library).get(&id)?;
-    if !clip.path.is_file() {
-        return Err(AppError::FileMissing);
-    }
-    app.opener().reveal_item_in_dir(&clip.path).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+pub async fn show_in_folder(app: AppHandle, id: String) -> Result<()> {
+    off_main(move || {
+        let clip = lock(&app.state::<AppState>().library).get(&id)?;
+        if !clip.path.is_file() {
+            return Err(AppError::FileMissing);
+        }
+        app.opener().reveal_item_in_dir(&clip.path).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+    })
+    .await?
 }
 
 /// A URL that plays the clip's picture without its sound, for the hover preview on its card. No
 /// sound at all: a muted video would still open a (muted) system audio stream, which made
 /// PipeWire start Klipt muted (see `MediaServer::url_for_video_only`).
 #[tauri::command]
-pub fn clip_preview_url(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<String> {
-    let clip = lock(&state.library).get(&id)?;
-    if !clip.path.is_file() {
-        return Err(AppError::FileMissing);
-    }
-    Ok(app.state::<crate::media_server::MediaServer>().url_for_video_only(&clip.path))
+pub async fn clip_preview_url(app: AppHandle, id: String) -> Result<String> {
+    off_main(move || {
+        let clip = lock(&app.state::<AppState>().library).get(&id)?;
+        if !clip.path.is_file() {
+            return Err(AppError::FileMissing);
+        }
+        Ok(app.state::<crate::media_server::MediaServer>().url_for_video_only(&clip.path))
+    })
+    .await?
 }
 
 /// Copies the clip's share link to the clipboard and returns it.
 #[tauri::command]
-pub fn copy_share_link(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<String> {
-    let clip = lock(&state.library).get(&id)?;
-    let url = clip.share_url.ok_or_else(|| AppError::InvalidInput("the clip isn't uploaded".into()))?;
-    copy_text(&app, &url)?;
-    Ok(url)
+pub async fn copy_share_link(app: AppHandle, id: String) -> Result<String> {
+    off_main(move || {
+        let clip = lock(&app.state::<AppState>().library).get(&id)?;
+        let url = clip.share_url.ok_or_else(|| AppError::InvalidInput("the clip isn't uploaded".into()))?;
+        copy_text(&app, &url)?;
+        Ok(url)
+    })
+    .await?
 }
 
 /// Copies any text (a feed clip's share link) to the clipboard.
 #[tauri::command]
-pub fn copy_text_to_clipboard(app: AppHandle, text: String) -> Result<()> {
-    copy_text(&app, &text)
+pub async fn copy_text_to_clipboard(app: AppHandle, text: String) -> Result<()> {
+    off_main(move || copy_text(&app, &text)).await?
 }
 
 fn copy_text(app: &AppHandle, text: &str) -> Result<()> {
@@ -623,16 +659,27 @@ struct Job {
 /// Starts uploading a clip: export (trim + mix), resumable upload, finalize. Returns once the
 /// upload has started; the result arrives as `upload-done` or `upload-failed`.
 #[tauri::command]
-pub fn upload_clip(
+pub async fn upload_clip(
     app: AppHandle,
-    state: State<'_, AppState>,
-    uploads: State<'_, Uploads>,
     id: String,
     title: String,
     visibility: Visibility,
     tagged: Option<Vec<String>>,
     replace: Option<bool>,
 ) -> Result<()> {
+    off_main(move || start_upload(app, id, title, visibility, tagged, replace)).await?
+}
+
+fn start_upload(
+    app: AppHandle,
+    id: String,
+    title: String,
+    visibility: Visibility,
+    tagged: Option<Vec<String>>,
+    replace: Option<bool>,
+) -> Result<()> {
+    let state = app.state::<AppState>();
+    let uploads = app.state::<Uploads>();
     let title = clean_title(&title)?;
     let tagged: Vec<String> =
         tagged.unwrap_or_default().into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).take(20).collect();
@@ -1537,10 +1584,13 @@ pub async fn list_users(app: AppHandle) -> Result<serde_json::Value> {
 /// which must be on the server. A full URL rather than a path, so a server at a subpath
 /// (`https://example.com/klipt`) doesn't get its path twice.
 #[tauri::command]
-pub fn open_website(app: AppHandle, url: Option<String>) -> Result<()> {
-    let saved = auth::load(&app.state::<AppState>().data_dir).ok_or(AppError::Unauthorized)?;
-    let url = website_url(&saved.server_url, url)?;
-    app.opener().open_url(url, None::<&str>).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+pub async fn open_website(app: AppHandle, url: Option<String>) -> Result<()> {
+    off_main(move || {
+        let saved = auth::load(&app.state::<AppState>().data_dir).ok_or(AppError::Unauthorized)?;
+        let url = website_url(&saved.server_url, url)?;
+        app.opener().open_url(url, None::<&str>).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
+    })
+    .await?
 }
 
 fn website_url(server_url: &str, url: Option<String>) -> Result<String> {

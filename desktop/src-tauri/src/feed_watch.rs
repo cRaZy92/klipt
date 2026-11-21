@@ -183,7 +183,12 @@ pub fn feed_new_count(app: AppHandle) -> u32 {
 /// had seen up to before this, so the Feed can mark the clips that were new; `None` before the
 /// first check of this account.
 #[tauri::command]
-pub fn mark_feed_seen(app: AppHandle, newest: String) -> Option<String> {
+pub async fn mark_feed_seen(app: AppHandle, newest: String) -> Option<String> {
+    // Writes the seen mark to disk: off the main thread.
+    crate::commands::off_main(move || mark_seen(&app, newest)).await.ok().flatten()
+}
+
+fn mark_seen(app: &AppHandle, newest: String) -> Option<String> {
     let watch = app.try_state::<FeedWatch>()?;
     let mut inner = watch.lock();
     let seen = inner.seen.as_mut()?;
@@ -193,8 +198,8 @@ pub fn mark_feed_seen(app: AppHandle, newest: String) -> Option<String> {
     }
     seen.seen_at = newest;
     let seen = seen.clone();
-    save(&path(&app), &seen);
-    set_count(&app, &mut inner);
+    save(&path(app), &seen);
+    set_count(app, &mut inner);
     Some(before)
 }
 

@@ -89,7 +89,18 @@
       }
       if (kind === 'profile') {
         var me = await api('PATCH', '/api/me', { displayName: data.displayName });
-        document.querySelectorAll('.topbar .who span').forEach(function (el) { el.textContent = me.displayName; });
+        document.querySelectorAll('.topbar .who').forEach(function (who) {
+          var label = who.querySelector('span:not(.avatar)');
+          if (label) label.textContent = me.displayName;
+          var avatar = who.querySelector('.avatar');
+          if (avatar) {
+            // same initial and hue as Avatar() in src/web/layout.tsx
+            var hash = 0;
+            for (var ch of me.displayName.toLowerCase()) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+            avatar.textContent = ([...me.displayName][0] || '?').toUpperCase();
+            avatar.style.setProperty('--h', String(hash % 360));
+          }
+        });
         form.querySelector('[name=displayName]').value = me.customName || '';
         toast('Name saved');
         btn.disabled = false;

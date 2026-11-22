@@ -12,6 +12,12 @@ export interface Span {
   width: number;
 }
 
+/** A removed part on a lane; open on a side where it runs off a zoomed-in screen. */
+export interface CutSpan extends Span {
+  openLeft: boolean;
+  openRight: boolean;
+}
+
 /** Finer steps for a zoomed-in timeline, and coarser ones for long recordings. */
 const FINE_STEPS = [100, 200, 500, 1000, 2000];
 const LONG_STEPS = [30_000, 60_000, 120_000, 300_000, 600_000, 900_000, 1_800_000, 3_600_000];
@@ -65,13 +71,15 @@ export function laneShading(
   trim: TrimRange,
   pieces: Piece[],
   view: TimeView = fullView(duration),
-): { dims: Span[]; cuts: Span[] } {
+): { dims: Span[]; cuts: CutSpan[] } {
   if (!(duration > 0)) return { dims: [], cuts: [] };
   const span = (from: number, to: number) => viewSpan(from, to, view);
   const dims = [span(0, trim.start), span(trim.end, duration)].filter((d): d is Span => d !== null);
   const cuts = pieces.flatMap((p) => {
-    const part = p.removed ? span(Math.max(p.start, trim.start), Math.min(p.end, trim.end)) : null;
-    return part ? [part] : [];
+    const from = Math.max(p.start, trim.start);
+    const to = Math.min(p.end, trim.end);
+    const part = p.removed ? span(from, to) : null;
+    return part ? [{ ...part, openLeft: from < view.from, openRight: to > view.to }] : [];
   });
   return { dims, cuts };
 }

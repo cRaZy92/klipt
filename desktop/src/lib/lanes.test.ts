@@ -107,7 +107,8 @@ describe("laneShading", () => {
     ];
     const { dims, cuts } = laneShading(100_000, trim, pieces, { from: 50_000, to: 90_000 });
     expect(dims).toEqual([{ left: 87.5, width: 12.5 }]);
-    expect(cuts).toEqual([{ left: 0, width: 25 }]);
+    // The removed part runs off the screen's left side: open there.
+    expect(cuts).toEqual([{ left: 0, width: 25, openLeft: true, openRight: false }]);
   });
 
   it("shades removed parts, only as far as they are inside the trim", () => {
@@ -119,8 +120,8 @@ describe("laneShading", () => {
       { start: 90_000, end: 100_000, removed: true },
     ];
     expect(laneShading(100_000, trim, pieces).cuts).toEqual([
-      { left: 10, width: 10 },
-      { left: 46, width: 16 },
+      { left: 10, width: 10, openLeft: false, openRight: false },
+      { left: 46, width: 16, openLeft: false, openRight: false },
     ]);
   });
 

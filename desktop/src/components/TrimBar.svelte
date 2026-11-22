@@ -1,6 +1,7 @@
 <script lang="ts">
   import { clampPopupLeft, clampThumb, clampTrim, defaultThumb, formatClock, MIN_TRIM_MS } from "../lib/trim";
-  import { fullView, inView, viewMs, viewPct, viewSpan, type TimeView } from "../lib/timelineView";
+  import { fullView, inView, panView, viewMs, viewPct, viewSpan, type TimeView } from "../lib/timelineView";
+  import { edgeScroller, edgeSpeed } from "../lib/edgeScroll";
   import { canRemove, clampToKept, deleteSplit, keptRanges, moveSplit, toggle, type Piece } from "../lib/cuts";
   import { frameUrl, previewIndex, tiles } from "../lib/filmstrip";
   import Icon from "./Icon.svelte";
@@ -32,6 +33,7 @@
     onscrubend,
     locked = false,
     view = null,
+    onview,
   }: {
     /** The clip's length in ms. */
     duration: number;
@@ -59,6 +61,8 @@
     locked?: boolean;
     /** The stretch of the clip the timeline shows (zoomed in); null = the whole clip. */
     view?: TimeView | null;
+    /** A drag held at an edge moves the zoomed-in view along (auto-scroll). */
+    onview?: (view: TimeView) => void;
   } = $props();
 
   const shownView = $derived(view ?? fullView(duration));
@@ -135,6 +139,29 @@
       .filter((s) => s.at > start && s.at < end && onScreen(s.at)),
   );
 
+  /** The pointer of the drag in progress, as last seen: auto-scroll moves the drag on with it. */
+  let lastPointer: PointerEvent | null = null;
+  /** Held at an edge while dragging: the view moves along and the handle (or playhead) with it. */
+  const autoScroll = edgeScroller((dt) => {
+    if (dragging === null || !lastPointer || !track || !onview) return;
+    const rect = track.getBoundingClientRect();
+    const speed = edgeSpeed(lastPointer.clientX - rect.left, rect.width);
+    if (!speed) return;
+    const v = shownView;
+    const next = panView(v, duration, (speed * dt * (v.to - v.from)) / 1000);
+    if (next === v) return;
+    onview(next);
+    move(lastPointer);
+  });
+
+  $effect(() => () => autoScroll.stop());
+
+  /** A drag starts: watch for it being held at an edge. */
+  function startDrag(e: PointerEvent) {
+    lastPointer = e;
+    autoScroll.start();
+  }
+
   function moveSplitTo(i: number, ms: number) {
     if (locked) return;
     const next = moveSplit(pieces, i, ms);
@@ -151,6 +178,7 @@
     (e.currentTarget as HTMLElement).focus();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragging = i;
+    startDrag(e);
     onscrubstart?.();
   }
 
@@ -204,6 +232,7 @@
     (e.currentTarget as HTMLElement).focus();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragging = handle;
+    startDrag(e);
     onscrubstart?.();
   }
 
@@ -213,12 +242,14 @@
     e.preventDefault();
     track!.setPointerCapture(e.pointerId);
     dragging = "playhead";
+    startDrag(e);
     onscrubstart?.();
     onseek(msAt(e));
   }
 
   function move(e: PointerEvent) {
     if (dragging === null) return;
+    lastPointer = e;
     if (dragging === "playhead") onseek(msAt(e));
     else if (typeof dragging === "number") moveSplitTo(dragging, msAt(e));
     else moveHandle(dragging, msAt(e));
@@ -228,6 +259,8 @@
     // A handle's pointerup also bubbles to the bar: end the scrub once.
     if (dragging === null) return;
     dragging = null;
+    lastPointer = null;
+    autoScroll.stop();
     onscrubend?.();
   }
 
@@ -307,7 +340,13 @@
     {#each shown as p (p.i)}
       {@const visible = part(p.from, p.to)}
       {#if p.removed && visible}
-        <div class="cut" style:left="{visible.left}%" style:width="{visible.width}%"></div>
+        <div
+          class="cut"
+          class:open-left={pct(p.from) < 0}
+          class:open-right={pct(p.to) > 100}
+          style:left="{visible.left}%"
+          style:width="{visible.width}%"
+        ></div>
       {/if}
       {#if shown.length > 1 && visible}
         {@const allowed = canRemove(pieces, p.i, { start, end })}
@@ -527,6 +566,19 @@
       inset 2px 0 0 var(--danger),
       inset -2px 0 0 var(--danger);
     pointer-events: none;
+  }
+
+  /* A removed part running off screen (zoomed in) has no edge line where the screen cuts it. */
+  .cut.open-left {
+    box-shadow: inset -2px 0 0 var(--danger);
+  }
+
+  .cut.open-right {
+    box-shadow: inset 2px 0 0 var(--danger);
+  }
+
+  .cut.open-left.open-right {
+    box-shadow: none;
   }
 
   /* Remove / keep a part: shown while the bar is hovered or the button has focus. */

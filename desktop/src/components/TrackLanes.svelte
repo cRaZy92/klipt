@@ -20,6 +20,7 @@
     type TimeView,
   } from "../lib/timelineView";
   import { windowPeaks } from "../lib/waveform";
+  import { edgeScroller, edgeSpeed } from "../lib/edgeScroll";
   import type { SubtitleRange, ZoomRange } from "../lib/api";
   import { moveZoom, rampMs, resizeZoom } from "../lib/zoom";
   import { moveSubtitle, resizeSubtitle } from "../lib/subtitles";
@@ -31,6 +32,9 @@
     name: string;
     /** The track's waveform (0–1 per bucket); null while it isn't loaded. */
     peaks: Float32Array | null;
+    /** The share of the clip (0–1) `peaks` covers: all of it, or a part around a zoomed-in view. */
+    peaksFrom: number;
+    peaksTo: number;
     /** 0–100. */
     volume: number;
     muted: boolean;
@@ -149,6 +153,34 @@
     return viewMs(e.clientX - rect.left, rect.width, view);
   }
 
+  /**
+   * The drag in progress (a scrub, or a zoom or subtitle block): its lane's time area, its pointer
+   * as last seen, and what a pointer at a new place does. Held at an edge of a zoomed-in timeline,
+   * the view moves along and the drag goes on with it.
+   */
+  let edgeDrag: { area: HTMLElement; e: PointerEvent; apply: (e: PointerEvent) => void } | null = null;
+  const autoScroll = edgeScroller((dt) => {
+    if (!edgeDrag) return;
+    const rect = edgeDrag.area.getBoundingClientRect();
+    const speed = edgeSpeed(edgeDrag.e.clientX - rect.left, rect.width);
+    if (!speed) return;
+    const next = panView(view, duration, (speed * dt * (view.to - view.from)) / 1000);
+    if (next === view) return;
+    onview(next);
+    edgeDrag.apply(edgeDrag.e);
+  });
+  $effect(() => () => autoScroll.stop());
+
+  function startDrag(area: HTMLElement, e: PointerEvent, apply: (e: PointerEvent) => void) {
+    edgeDrag = { area, e, apply };
+    autoScroll.start();
+  }
+
+  function endDrag() {
+    edgeDrag = null;
+    autoScroll.stop();
+  }
+
   // Like the video lane's track: the pointer seeks, and a drag scrubs.
   function grab(e: PointerEvent) {
     if (e.button !== 0) return;
@@ -156,17 +188,21 @@
     const area = e.currentTarget as HTMLElement;
     area.setPointerCapture(e.pointerId);
     scrubbing = area;
+    startDrag(area, e, (ev) => onseek(msAt(ev, area)));
     onscrubstart?.();
     onseek(msAt(e, area));
   }
 
   function move(e: PointerEvent) {
-    if (scrubbing !== null && scrubbing === e.currentTarget) onseek(msAt(e, e.currentTarget as HTMLElement));
+    if (scrubbing === null || scrubbing !== e.currentTarget) return;
+    if (edgeDrag) edgeDrag.e = e;
+    onseek(msAt(e, e.currentTarget as HTMLElement));
   }
 
   function release() {
     if (scrubbing === null) return;
     scrubbing = null;
+    endDrag();
     onscrubend?.();
   }
 
@@ -200,12 +236,19 @@
     const what = grabbed(block, e.clientX);
     block.setPointerCapture(e.pointerId);
     zoomDrag = { i, what, offset: msAt(e, area) - z.startMs, moved: false };
+    startDrag(area, e, (ev) => zoomTo(ev, area));
     onzoomgesture(true);
   }
 
   function zoomMove(e: PointerEvent) {
     if (!zoomDrag) return;
-    const area = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
+    if (edgeDrag) edgeDrag.e = e;
+    zoomTo(e, (e.currentTarget as HTMLElement).parentElement as HTMLElement);
+  }
+
+  /** The dragged zoom follows a pointer at `e` on `area`. */
+  function zoomTo(e: PointerEvent, area: HTMLElement) {
+    if (!zoomDrag) return;
     const ms = msAt(e, area);
     const { i, what } = zoomDrag;
     const next = what === "move" ? moveZoom(zooms, i, ms - zoomDrag.offset, trim) : resizeZoom(zooms, i, what, ms, trim);
@@ -219,6 +262,7 @@
     if (!zoomDrag) return;
     const { i, what } = zoomDrag;
     zoomDrag = null;
+    endDrag();
     onzoomgesture(false);
     // Show the zoom where it is fully in, so its box can be placed (a resized end shows the end).
     const z = zooms[i];
@@ -255,12 +299,19 @@
     const what = grabbed(block, e.clientX);
     block.setPointerCapture(e.pointerId);
     subDrag = { i, what, offset: msAt(e, area) - s.startMs };
+    startDrag(area, e, (ev) => subTo(ev, area));
     onsubtitlegesture(true);
   }
 
   function subMove(e: PointerEvent) {
     if (!subDrag) return;
-    const area = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
+    if (edgeDrag) edgeDrag.e = e;
+    subTo(e, (e.currentTarget as HTMLElement).parentElement as HTMLElement);
+  }
+
+  /** The dragged subtitle follows a pointer at `e` on `area`. */
+  function subTo(e: PointerEvent, area: HTMLElement) {
+    if (!subDrag) return;
     const ms = msAt(e, area);
     const { i, what } = subDrag;
     const next =
@@ -272,6 +323,7 @@
     if (!subDrag) return;
     const { i, what } = subDrag;
     subDrag = null;
+    endDrag();
     onsubtitlegesture(false);
     const s = subtitles[i];
     if (s) onseek(what === "end" ? Math.max(s.startMs, s.endMs - 1) : s.startMs);
@@ -287,6 +339,13 @@
     }
   }
 
+  /** The share of a track's peaks (0–1) the view shows, for peaks covering `peaksFrom`–`peaksTo` of the clip. */
+  function waveShare(t: LaneTrack): { from: number; to: number } {
+    const d = Math.max(1, duration);
+    const cover = Math.max(1e-9, t.peaksTo - t.peaksFrom);
+    return { from: (view.from / d - t.peaksFrom) / cover, to: (view.to / d - t.peaksFrom) / cover };
+  }
+
   /** The ruler's time area: where the pointer is in time, for zooming around it. */
   let rulerArea = $state<HTMLElement>();
 
@@ -295,7 +354,7 @@
   const canZoom = $derived(maxScale(duration) > 1);
   const scale = $derived(viewScale(view, duration));
 
-  function zoomTo(next: number) {
+  function zoomScale(next: number) {
     onview(zoomView(view, duration, next, zoomAnchor()));
   }
 
@@ -406,7 +465,7 @@
         class="zoom-step"
         aria-label="Zoom the timeline out"
         disabled={!canZoom || scale <= 1}
-        onclick={() => zoomTo(scale / 2)}
+        onclick={() => zoomScale(scale / 2)}
       >
         <Icon name="zoomOut" size={13} />
       </button>
@@ -421,13 +480,13 @@
         style:--fill="{scaleToSlider(scale, duration) * 100}%"
         aria-label="Timeline zoom"
         aria-valuetext="{scale < 10 ? scale.toFixed(1) : Math.round(scale)}×"
-        oninput={(e) => zoomTo(sliderToScale(Number(e.currentTarget.value) / 1000, duration))}
+        oninput={(e) => zoomScale(sliderToScale(Number(e.currentTarget.value) / 1000, duration))}
       />
       <button
         class="zoom-step"
         aria-label="Zoom the timeline in"
         disabled={!canZoom || scale >= maxScale(duration)}
-        onclick={() => zoomTo(scale * 2)}
+        onclick={() => zoomScale(scale * 2)}
       >
         <Icon name="zoom" size={13} />
       </button>
@@ -646,12 +705,18 @@
         onpointercancel={release}
         onlostpointercapture={release}
       >
-        <canvas class="wave {t.key.startsWith('track-') ? 'track' : t.key}" class:muted={t.muted} use:waveform={{ peaks: t.peaks, from: view.from / Math.max(1, duration), to: view.to / Math.max(1, duration) }}></canvas>
+        <canvas class="wave {t.key.startsWith('track-') ? 'track' : t.key}" class:muted={t.muted} use:waveform={{ peaks: t.peaks, ...waveShare(t) }}></canvas>
         {#each shading.dims as d, i (i)}
           <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
         {/each}
         {#each shading.cuts as c (c.left)}
-          <div class="cut" style:left="{c.left}%" style:width="{c.width}%"></div>
+          <div
+            class="cut"
+            class:open-left={c.openLeft}
+            class:open-right={c.openRight}
+            style:left="{c.left}%"
+            style:width="{c.width}%"
+          ></div>
         {/each}
       </div>
     </div>
@@ -1158,6 +1223,19 @@
       inset 2px 0 0 var(--danger),
       inset -2px 0 0 var(--danger);
     pointer-events: none;
+  }
+
+  /* A removed part running off screen (zoomed in) has no edge line where the screen cuts it. */
+  .cut.open-left {
+    box-shadow: inset -2px 0 0 var(--danger);
+  }
+
+  .cut.open-right {
+    box-shadow: inset 2px 0 0 var(--danger);
+  }
+
+  .cut.open-left.open-right {
+    box-shadow: none;
   }
 
   /* The playhead carries on from the video lane's down through the audio lanes. */

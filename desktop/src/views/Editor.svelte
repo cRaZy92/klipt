@@ -4,7 +4,7 @@
   import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount } from "../lib/api";
   import type { RemoveWhere } from "../lib/removal";
   import { AudioEngine, FINE_PEAK_BUCKETS } from "../lib/audioEngine";
-  import { followView, fullView, inView, viewScale, zoomView, type TimeView } from "../lib/timelineView";
+  import { followView, fullView, inView, peakWindow, viewScale, zoomView, type TimeView } from "../lib/timelineView";
   import {
     cutSeekAhead,
     schedule,
@@ -470,11 +470,34 @@
     else extraVolumes[Number(key.slice("track-".length))] = volume;
   }
 
+  /** How many buckets a part of a track read for a zoomed-in timeline gets (it is up to 6 views long). */
+  const WINDOW_PEAK_BUCKETS = 16_384;
+  /**
+   * Zoomed far into a long recording: the part of the clip whose peaks are read straight from the
+   * samples (-1 while the whole track's are enough). Numbers, so a pan inside the part reads nothing.
+   */
+  const peakFrom = $derived(peakWindow(timelineView, duration, FINE_PEAK_BUCKETS)?.from ?? -1);
+  const peakTo = $derived(peakWindow(timelineView, duration, FINE_PEAK_BUCKETS)?.to ?? -1);
+  const windowPeaks = $derived<Record<string, Float32Array | null> | null>(
+    audioReady && data && peakFrom >= 0 && duration > 0
+      ? Object.fromEntries(
+          audioTracks(data).map((t) => [
+            t.key,
+            engine.peaksRange(t.key, peakFrom / duration, peakTo / duration, WINDOW_PEAK_BUCKETS),
+          ]),
+        )
+      : null,
+  );
+
   const laneTracks = $derived(
     data
       ? audioTracks(data).map((t) => {
           const volume = volumeOf(t.key);
-          return { key: t.key, name: t.label, peaks: lanePeaks[t.key] ?? null, volume, muted: volume === 0 };
+          const part = windowPeaks?.[t.key];
+          const wave = part
+            ? { peaks: part, peaksFrom: peakFrom / duration, peaksTo: peakTo / duration }
+            : { peaks: lanePeaks[t.key] ?? null, peaksFrom: 0, peaksTo: 1 };
+          return { key: t.key, name: t.label, ...wave, volume, muted: volume === 0 };
         })
       : [],
   );
@@ -1545,6 +1568,7 @@
             {onscrubend}
             locked={editLocked}
             view={timelineView}
+            onview={(v) => (timelineView = v)}
           />
         {/snippet}
       </TrackLanes>

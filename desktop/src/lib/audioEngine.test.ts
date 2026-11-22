@@ -161,6 +161,15 @@ describe("peaks", () => {
     expect(Array.from(fresh)).toEqual([Math.fround(0.8), 0]);
   });
 
+  it("reads part of a track for a zoomed-in timeline, caching the last part", async () => {
+    const { engine } = await loaded();
+    // Samples [0, 0.5, -1, 0.25]: the second half.
+    expect(Array.from(engine.peaksRange("game", 0.5, 1, 2)!)).toEqual([1, 0.25]);
+    expect(engine.peaksRange("game", 0.5, 1, 2)).toBe(engine.peaksRange("game", 0.5, 1, 2));
+    expect(Array.from(engine.peaksRange("game", 0, 0.5, 1)!)).toEqual([0.5]);
+    expect(engine.peaksRange("nope", 0, 1, 2)).toBeNull();
+  });
+
   it("forgets tracks and cached peaks on close", async () => {
     const { engine } = await loaded();
     const old = engine.peaks("game", 2)!;

@@ -6,6 +6,7 @@ import {
   inView,
   isZoomed,
   maxScale,
+  peakWindow,
   panView,
   scaleToSlider,
   scrollThumb,
@@ -115,6 +116,13 @@ describe("placing things on the view", () => {
     expect(viewMs(5000, 1000, v)).toBe(20_000);
   });
 
+  it("never rounds past an edge that isn't a whole ms", () => {
+    const f = { from: 66_388.775, to: 72_388.775 };
+    expect(viewMs(1000, 1000, f)).toBe(72_388);
+    expect(viewMs(0, 1000, f)).toBe(66_389);
+    expect(followView(f, D * 2, viewMs(1000, 1000, f))).toBe(f);
+  });
+
   it("matches the whole-clip math at full view", () => {
     expect(viewPct(15_000, fullView(D))).toBe(25);
     expect(viewMs(500, 1000, fullView(D))).toBe(30_000);
@@ -131,6 +139,34 @@ describe("placing things on the view", () => {
   it("handles a clip with no length", () => {
     expect(viewPct(100, fullView(0))).toBe(0);
     expect(viewMs(100, 1000, fullView(0))).toBe(0);
+  });
+});
+
+describe("peakWindow", () => {
+  const hour = 3_600_000;
+
+  it("is not needed while the whole track's peaks are fine enough", () => {
+    expect(peakWindow(fullView(hour), hour, 2 ** 18)).toBeNull();
+    expect(peakWindow({ from: 0, to: 1000 }, 60_000, 2 ** 18)).toBeNull();
+  });
+
+  it("covers the view with a step either side on a long recording zoomed far in", () => {
+    const v = { from: 1_000_500, to: 1_010_500 };
+    const w = peakWindow(v, hour, 2 ** 18)!;
+    // 10 s rounds up to a 16 384 ms step.
+    expect(w).toEqual({ from: 983_040, to: 983_040 + 3 * 16_384 });
+    expect(w.from <= v.from && w.to >= v.to).toBe(true);
+  });
+
+  it("stays the same while the view pans inside a step", () => {
+    const a = peakWindow({ from: 1_000_500, to: 1_010_500 }, hour, 2 ** 18);
+    const b = peakWindow({ from: 1_005_000, to: 1_015_000 }, hour, 2 ** 18);
+    expect(b).toEqual(a);
+  });
+
+  it("stays inside the clip", () => {
+    expect(peakWindow({ from: 0, to: 1000 }, hour, 2 ** 18)).toEqual({ from: 0, to: 3072 });
+    expect(peakWindow({ from: hour - 1000, to: hour }, hour, 2 ** 18)!.to).toBe(hour);
   });
 });
 

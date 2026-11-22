@@ -89,11 +89,15 @@ export function viewPct(ms: number, view: TimeView): number {
   return ((ms - view.from) / span) * 100;
 }
 
-/** The time at `x` pixels on a timeline `width` pixels wide, in whole ms (inside the view). */
+/**
+ * The time at `x` pixels on a timeline `width` pixels wide, in whole ms, inside the view (rounding
+ * must not step past a view edge that isn't a whole ms: the view would turn the page).
+ */
 export function viewMs(x: number, width: number, view: TimeView): number {
   const span = view.to - view.from;
   if (!(span > 0) || !(width > 0) || !Number.isFinite(x)) return Math.round(view.from) || 0;
-  return Math.round(view.from + (clamp(x, 0, width) / width) * span);
+  const ms = Math.round(view.from + (clamp(x, 0, width) / width) * span);
+  return Math.floor(view.to) > Math.ceil(view.from) ? clamp(ms, Math.ceil(view.from), Math.floor(view.to)) : ms;
 }
 
 /** Whether `ms` is on screen. */
@@ -118,6 +122,20 @@ export function scaleToSlider(scale: number, duration: number): number {
 /** The scale at the zoom slider's position `value` (0–1). */
 export function sliderToScale(value: number, duration: number): number {
   return Math.pow(maxScale(duration), clamp(Number.isFinite(value) ? value : 0, 0, 1));
+}
+
+/**
+ * The part of the clip to read waveform peaks for when the whole track's `wholeBuckets` would
+ * give fewer than `perView` across `view` (long recordings, zoomed far in); null when they're
+ * enough. The part is snapped to steps of the view's length (rounded up to a power of 2) and
+ * covers a step either side, so panning reuses it until the view crosses a step.
+ */
+export function peakWindow(view: TimeView, duration: number, wholeBuckets: number, perView = 2048): TimeView | null {
+  const span = view.to - view.from;
+  if (!(duration > 0) || !(span > 0) || (span / duration) * wholeBuckets >= perView) return null;
+  const step = 2 ** Math.ceil(Math.log2(span));
+  const from = Math.max(0, Math.floor(view.from / step) * step - step);
+  return { from, to: Math.min(duration, from + 3 * step) };
 }
 
 /** The scrollbar's thumb: where the view is in the whole clip, in percent. */

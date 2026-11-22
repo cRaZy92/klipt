@@ -15,6 +15,8 @@ export class AudioEngine {
   private master: GainNode | null = null;
   private tracks = new Map<string, { buffer: AudioBuffer; gain: GainNode }>();
   private peakCache = new Map<string, Float32Array>();
+  /** Per track, the last part's peaks `peaksRange` made (one, so panning doesn't pile them up). */
+  private windowCache = new Map<string, { id: string; peaks: Float32Array }>();
   private sources: AudioBufferSourceNode[] = [];
   private segments: Segment[] = [];
   private startedAt = 0;
@@ -59,6 +61,7 @@ export class AudioEngine {
           for (const id of [...this.peakCache.keys()]) {
             if (id.startsWith(`${key}:`)) this.peakCache.delete(id);
           }
+          this.windowCache.delete(key);
           return null;
         } catch {
           return key;
@@ -91,6 +94,29 @@ export class AudioEngine {
       this.peakCache.set(id, cached);
     }
     return cached;
+  }
+
+  /**
+   * Waveform peaks of part of a loaded track, the share `from`–`to` (0–1) of it, read straight
+   * from the samples: detail for a zoomed-in timeline finer than FINE_PEAK_BUCKETS over the whole
+   * track gives (long recordings). The last part per track is cached; null if not loaded.
+   */
+  peaksRange(key: string, from: number, to: number, buckets: number): Float32Array | null {
+    const track = this.tracks.get(key);
+    if (!track) return null;
+    const id = `${from}:${to}:${buckets}`;
+    const hit = this.windowCache.get(key);
+    if (hit?.id === id) return hit.peaks;
+    const channels = Array.from({ length: track.buffer.numberOfChannels }, (_, i) => track.buffer.getChannelData(i));
+    const length = channels.reduce((max, c) => Math.max(max, c.length), 0);
+    const start = Math.min(length, Math.max(0, Math.floor(from * length)));
+    const end = Math.min(length, Math.max(start, Math.floor(to * length)));
+    const result = peaks(
+      channels.map((c) => c.subarray(start, end)),
+      buckets,
+    );
+    this.windowCache.set(key, { id, peaks: result });
+    return result;
   }
 
   setGain(key: string, gain: number) {
@@ -159,6 +185,7 @@ export class AudioEngine {
     this.master = null;
     this.tracks.clear();
     this.peakCache.clear();
+    this.windowCache.clear();
   }
 }
 

@@ -9,7 +9,7 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| 2026-11-22 | Timeline zoom            | Zoom the editor timeline (Ctrl+scroll, the slider in the ruler's corner, + / − / 0) down to 1 s; scrollbar, Shift+scroll, follows the playhead; finer ruler labels and waveforms when zoomed. Untested in the app and on Windows |
+| 2026-11-22 | Timeline zoom            | Zoom the editor timeline (Ctrl+scroll, the slider in the ruler's corner, + / − / 0) down to 1 s; scrollbar, Shift+scroll, follows the playhead; finer ruler labels and waveforms when zoomed (read straight from the samples on long recordings); drags held at an edge scroll along. Untested in the app and on Windows |
 | 2026-11-21 | Ready for a friend       | Log file on every PC; Report a problem / Suggest a feature (with system info and log) to the admin page; display names; change password (app and website) and admin password links; admin page shows last seen, app version, OS and GPU; hotkey hint for overlays that take shortcuts. Untested on Windows; server needs redeploy |
 | 2026-11-20 | Replace an online clip   | Re-uploading an uploaded clip can swap its video at the same link (`85ebbfa`). Untested in the app; server needs redeploy |
 | 2026-11-20 | Editor subtitles         | Typed subtitles (T key, own lane), burned into exports and uploads with libass. Untested in the app and on Windows |

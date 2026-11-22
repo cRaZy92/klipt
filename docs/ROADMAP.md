@@ -1,6 +1,6 @@
 # Klipt roadmap
 
-As of 2026-11-21. Update this file when an item is done or a plan changes.
+As of 2026-11-22. Update this file when an item is done or a plan changes.
 
 All of v1 is built for Windows and Linux, and every desktop change pushed to `main` ships itself as a
 signed Windows release. What's missing is mostly proof on real machines and with real friends, not code.
@@ -45,7 +45,8 @@ link, with no help.
       the owner expects it is. Results go in the C9 row of
       `docs/superpowers/specs/2026-11-09-klipt-capture-decision.md`.
 - [ ] **Windows checks, later.** Screenshots (exclusive-fullscreen games may come out black; DPI
-      scaling), subtitles with a non-ASCII profile path, folder import.
+      scaling), subtitles with a non-ASCII profile path, folder import, full recording (the "Full
+      recording" list in `desktop/recorder-obs/TEST-ON-WINDOWS.md`).
 - [ ] **Check the 2026-11-21 additions on Windows.** The log file under `%APPDATA%\app.klipt.Klipt\logs`,
       GPU names from the registry in a report, the overlay hint with NVIDIA/AMD software running.
 - [ ] **Friends join on their own.** The server deploys itself; nobody is pushed to install. When a
@@ -119,11 +120,11 @@ instead of "Are you sure?" (item 10).
 
 ## Planned: recording and multi-clip editing (chosen 2026-11-20)
 
-Asked for by the owner. Item 1 is built (plan: `docs/superpowers/plans/2026-11-20-full-recording.md`); items 2 and 3 have no spec yet.
+Asked for by the owner. Item 1 is built and merged to `main` (plan: `docs/superpowers/plans/2026-11-20-full-recording.md`); items 2 and 3 have no spec yet.
 
 | # | Feature                          | What it means                                                                                      |
 | - | -------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 1 | Full recording (start/stop) — **built 2026-11-20** (branch `feat/full-recording`) | Besides the replay buffer, a shortcut (default Ctrl+Alt+Backquote), a Record button in My clips and a tray item start and stop a normal recording of any length, saved to `<clips>/Recordings/` and into the library with a recording marker. Linux: gsr `-ro` + SIGRTMIN in the same process (one encoder). Windows: a libobs `ffmpeg_muxer` output sharing the replay buffer's encoders. Recordings follow the normal cleanup rule. Settings, pause, game exit and quit never cut a running recording |
+| 1 | Full recording (start/stop) — **built 2026-11-20, on `main`; needs a Windows check** | Besides the replay buffer, a shortcut (default Ctrl+Alt+Backquote), a Record button in My clips and a tray item start and stop a normal recording of any length, saved to `<clips>/Recordings/` and into the library with a recording marker. Linux: gsr `-ro` + SIGRTMIN in the same process (one encoder). Windows: a libobs `ffmpeg_muxer` output sharing the replay buffer's encoders. Recordings follow the normal cleanup rule. Settings, pause, game exit and quit never cut a running recording |
 | 2 | Several clips from one recording | In the editor, mark several parts of one clip or recording and export each as its own clip (own title, game kept, own thumbnail), without touching the source |
 | 3 | Combine clips into one upload    | Pick several clips (e.g. from the multi-select bar in My clips) and join them in order into one video that uploads as a single clip; each part keeps its own trim. Moved here from "Merging clips in the editor" under Later |
 

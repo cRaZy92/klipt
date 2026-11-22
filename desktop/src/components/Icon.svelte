@@ -16,6 +16,7 @@
     tag: "M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9zM7.5 7.5h.01",
     rename: "M4 7V5h16v2M12 5v14M9 19h6",
     combine: "M3 7h6v10H3zM15 7h6v10h-6zM9 12h6",
+    album: "M4 6h16M4 12h10M4 18h7M18 14v6M15 17h6",
     arrowUp: "M12 19V5m0 0-6 6m6-6 6 6",
     arrowDown: "M12 5v14m0 0-6-6m6 6 6-6",
     scissors: "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12",

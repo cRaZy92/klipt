@@ -17,6 +17,7 @@
   import ClipCard from "../components/ClipCard.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
   import CombineDialog from "../components/CombineDialog.svelte";
+  import AlbumDialog from "../components/AlbumDialog.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import ImageViewer from "../components/ImageViewer.svelte";
@@ -72,6 +73,8 @@
   let bulkUpload = $state<{ clips: ClipView[]; visibility: "feed" | "link" } | null>(null);
   /** Joining the selected clips into one new clip. */
   let combining = $state<ClipView[] | null>(null);
+  /** "Add to album": the server clips going in, and how many picked ones aren't uploaded. */
+  let albuming = $state<{ ids: string[]; skipped: number } | null>(null);
   /** Cards picked for a bulk action, by `MyClip.key`; `anchor` is the last one clicked (for Shift). */
   let selected = $state<Set<string>>(new Set());
   let anchor: string | null = null;
@@ -113,6 +116,10 @@
   );
   /** Selected clips that can be joined into one: clips (not screenshots) on this PC, oldest first. */
   const joinable = $derived(combinable(picked.local.map((p) => p.clip)));
+  /** The selected clips that are on the server (an album holds those), each once. */
+  const albumable = $derived([
+    ...new Set([...picked.local.flatMap((p) => (p.clip.serverClipId ? [p.clip.serverClipId] : [])), ...picked.online.map((u) => u.id)]),
+  ]);
   const allStarred = $derived(
     picked.local.every((p) => p.clip.favorite) && picked.online.every((u) => u.favorite !== false),
   );
@@ -142,7 +149,7 @@
   }
 
   const dialogOpen = $derived(
-    !!(uploading || playing || viewing || renaming || tagging || removing || deletingOnline || bulkUpload || combining),
+    !!(uploading || playing || viewing || renaming || tagging || removing || deletingOnline || bulkUpload || combining || albuming),
   );
 
   let searchInput = $state<HTMLInputElement>();
@@ -690,6 +697,7 @@
                   onshowfolder={() => act(() => api.showInFolder(clip.id))}
                   oncopy={() => copyLink(clip)}
                   onvisibility={clip.serverClipId ? () => toggleLocalVisibility(clip) : undefined}
+                  onalbum={clip.serverClipId ? () => (albuming = { ids: [clip.serverClipId!], skipped: 0 }) : undefined}
                 />
               {:else}
                 {@const upload = item.upload}
@@ -706,6 +714,7 @@
                   ondownload={() => download(upload)}
                   ondelete={() => (deletingOnline = upload)}
                   onfavorite={upload.favorite === undefined ? undefined : () => toggleOnlineFavorite(upload)}
+                  onalbum={() => (albuming = { ids: [upload.id], skipped: 0 })}
                   selected={selected.has(item.key)}
                   selecting={selected.size > 0}
                   onselect={(e) => toggleSelect(item.key, e)}
@@ -768,6 +777,14 @@
       >
         <Icon name="combine" size={15} /> Combine
       </button>
+      <button
+        class="btn btn-sm btn-ghost"
+        disabled={albumable.length === 0}
+        title={albumable.length === 0 ? "Only uploaded clips can go in an album" : "Gather them in an album with one link"}
+        onclick={() => (albuming = { ids: albumable, skipped: Math.max(0, selected.size - albumable.length) })}
+      >
+        <Icon name="album" size={15} /> Album
+      </button>
       <button class="btn btn-sm btn-ghost bulk-danger" onclick={() => askRemove(picked.local, picked.online)}>
         <Icon name="trash" size={15} /> Delete
       </button>
@@ -802,6 +819,10 @@
       <button class="btn btn-primary" onclick={startBulkUpload}><Icon name="upload" size={16} /> Upload</button>
     {/snippet}
   </Modal>
+{/if}
+
+{#if albuming}
+  <AlbumDialog clipIds={albuming.ids} skipped={albuming.skipped} onclose={() => (albuming = null)} />
 {/if}
 
 {#if combining}

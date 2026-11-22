@@ -21,6 +21,7 @@
     ondownload,
     ondelete,
     onfavorite,
+    onalbum,
     selected = false,
     selecting = false,
     onselect,
@@ -39,6 +40,8 @@
     ondelete: () => void;
     /** Stars it on the server; missing for servers without favorites. */
     onfavorite?: () => void;
+    /** "Add to album". */
+    onalbum?: () => void;
     /** Picked for a bulk action. */
     selected?: boolean;
     /** Something is selected: clicking the picture selects instead of playing. */
@@ -169,6 +172,9 @@
         <div class="menu" role="menu" use:menu={{ close: () => (menuOpen = false) }}>
           <button role="menuitem" onclick={() => pick(onopenweb)}><Icon name="external" size={16} /> Open on website</button>
           <button role="menuitem" onclick={() => pick(onrename)}><Icon name="rename" size={16} /> Rename</button>
+          {#if onalbum}
+            <button role="menuitem" onclick={() => pick(onalbum)}><Icon name="album" size={16} /> Add to album</button>
+          {/if}
           <button role="menuitem" onclick={() => pick(onvisibility)}>
             <Icon name="eye" size={16} />
             {upload.visibility === "feed" ? "Hide from feed" : "Show in feed"}

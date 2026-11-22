@@ -261,6 +261,38 @@ pub async fn clip_viewers(app: AppHandle, id: String) -> Result<serde_json::Valu
     client.get_json(&saved.token, &format!("/api/clips/{id}/viewers"), &[]).await.map_err(|e| failed(&data_dir, &saved, e))
 }
 
+/// Your albums on the server, most recently changed first (the server's `AlbumSummary[]`); with
+/// `clip`, each says whether it holds that clip (`hasClip`).
+#[tauri::command]
+pub async fn list_albums(app: AppHandle, clip: Option<String>) -> Result<Value> {
+    let query = match clip.as_deref() {
+        Some(id) => vec![("clip", checked_id(id)?.to_string())],
+        None => Vec::new(),
+    };
+    let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
+    client.get_json(&saved.token, "/api/albums", &query).await.map_err(|e| failed(&data_dir, &saved, e))
+}
+
+/// A new album titled `title` holding server clips `clip_ids`, in that order (the server's `Album`).
+#[tauri::command]
+pub async fn create_album(app: AppHandle, title: String, clip_ids: Vec<String>) -> Result<Value> {
+    let title = clean_title(&title)?;
+    let ids = clip_ids.iter().map(|id| checked_id(id).map(String::from)).collect::<Result<Vec<_>>>()?;
+    let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
+    let body = serde_json::json!({ "title": title, "clipIds": ids });
+    client.post_json(&saved.token, "/api/albums", &body).await.map_err(|e| failed(&data_dir, &saved, e))
+}
+
+/// Puts server clip `clip_id` at the end of album `album_id`, or (`add` false) takes it out.
+#[tauri::command]
+pub async fn set_album_clip(app: AppHandle, album_id: String, clip_id: String, add: bool) -> Result<()> {
+    let (album, clip) = (checked_id(&album_id)?, checked_id(&clip_id)?);
+    let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
+    let path = format!("/api/albums/{album}/clips/{clip}");
+    let done = if add { client.put_empty(&saved.token, &path).await } else { client.delete(&saved.token, &path).await };
+    done.map_err(|e| failed(&data_dir, &saved, e))
+}
+
 /// Downloads your upload into the clips folder and adds it to the library, linked to the server
 /// copy (so it shows as uploaded and isn't listed twice).
 #[tauri::command]

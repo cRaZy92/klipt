@@ -94,6 +94,18 @@ export interface ClipView {
   thumbPath: string | null;
 }
 
+/** An album on the server (`AlbumSummary` in packages/shared): clips under one link. */
+export interface AlbumSummary {
+  id: string;
+  title: string;
+  clipCount: number;
+  coverUrl: string | null;
+  shareUrl: string;
+  updatedAt: string;
+  /** Asked for one clip: whether it's in the album. */
+  hasClip?: boolean;
+}
+
 export interface GameCount {
   name: string;
   steamAppId: number | null;
@@ -562,6 +574,12 @@ export const api = {
   /** Stars or unstars a server clip (yours or a friend's); kept on the server. */
   setServerFavorite: (id: string, favorite: boolean) => invoke<void>("set_server_favorite", { id, favorite }),
   feedGames: () => invoke<FeedGame[]>("feed_games"),
+  /** Your albums, most recently changed first; with `clip` (a server clip id), which hold it. */
+  listAlbums: (clip?: string) => invoke<AlbumSummary[]>("list_albums", { clip: clip ?? null }),
+  /** A new album holding server clips `clipIds`, in that order. */
+  createAlbum: (title: string, clipIds: string[]) => invoke<AlbumSummary>("create_album", { title, clipIds }),
+  /** Puts a server clip at the end of an album, or (`add` false) takes it out. */
+  setAlbumClip: (albumId: string, clipId: string, add: boolean) => invoke<void>("set_album_clip", { albumId, clipId, add }),
   /** Friends' clips new since you last opened the Feed. */
   feedNewCount: () => invoke<number>("feed_new_count"),
   /** You've seen the feed up to the clip created at `newest`. Gives back what you'd seen up to

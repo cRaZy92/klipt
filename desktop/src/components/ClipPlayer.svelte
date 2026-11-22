@@ -3,6 +3,7 @@
   import { navKey } from "../lib/clipNav";
   import { hueOf, relativeDate, viewsLabel } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
+  import AlbumDialog from "./AlbumDialog.svelte";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
 
@@ -82,7 +83,11 @@
     api.openWebsite(clip.shareUrl).catch((e) => toast(errorMessage(e), "error"));
   }
 
+  /** "Add to album" is open over the player: the player's keys wait. */
+  let albumOpen = $state(false);
+
   function onkeydown(e: KeyboardEvent) {
+    if (albumOpen) return;
     if (e.key === "Escape") return onclose();
     const dir = onnavigate ? navKey(e) : null;
     const target = dir === "next" ? next : dir === "prev" ? prev : null;
@@ -137,6 +142,9 @@
             onclick={() => go(next)}><Icon name="forward" size={16} /></button>
         {/if}
         <button class="btn btn-sm" onclick={copyLink}><Icon name="link" size={15} /> Copy link</button>
+        <button class="btn btn-sm btn-ghost" onclick={() => (albumOpen = true)} title="Put it in one of your albums">
+          <Icon name="album" size={15} /> Album
+        </button>
         <button class="btn btn-sm btn-ghost" onclick={openOnWeb}><Icon name="external" size={15} /> Open on web</button>
         <button class="btn btn-sm btn-ghost btn-icon" aria-label="Close" onclick={onclose}><Icon name="close" /></button>
       </div>
@@ -178,6 +186,10 @@
     </div>
   </div>
 </div>
+
+{#if albumOpen}
+  <AlbumDialog clipIds={[clip.id]} onclose={() => (albumOpen = false)} />
+{/if}
 
 <style>
   .backdrop {

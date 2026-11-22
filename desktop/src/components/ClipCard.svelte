@@ -22,6 +22,7 @@
     oncopy,
     onvisibility,
     onfavorite,
+    onalbum,
     onview,
     onplay,
     processing = null,
@@ -47,6 +48,8 @@
     onvisibility?: () => void;
     /** Stars or unstars the clip; without it there's no star. */
     onfavorite?: () => void;
+    /** Uploaded: "Add to album". */
+    onalbum?: () => void;
     /** Changes when the thumbnail file is rewritten, so the cached picture isn't shown. */
     thumbVersion?: number;
     /** Shows a screenshot full size (screenshots have no editor). */
@@ -324,6 +327,9 @@
                 <Icon name="eye" size={16} />
                 {clip.visibility === "link" ? "Show in feed" : "Hide from feed"}
               </button>
+            {/if}
+            {#if uploaded && onalbum}
+              <button role="menuitem" onclick={() => pick(onalbum)}><Icon name="album" size={16} /> Add to album</button>
             {/if}
             {#if uploaded}
               <button role="menuitem" onclick={() => pick(onupload)} disabled={busy}>

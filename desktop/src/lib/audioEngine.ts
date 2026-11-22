@@ -4,6 +4,8 @@
 import { clipMsAt, schedule, segmentAt, type Segment, AUDIO_LEAD_MS } from "./playSchedule";
 import type { TrimRange } from "./trim";
 import { peaks, poolPeaks } from "./waveform";
+import type { AudioRange } from "./api";
+import { gainPoints } from "./audioParts";
 
 /** The finest waveform kept per track; coarser ones are pooled from it (a multiple of 4096). */
 export const FINE_PEAK_BUCKETS = 2 ** 18;
@@ -13,7 +15,10 @@ const LEAD_S = AUDIO_LEAD_MS / 1000;
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  private tracks = new Map<string, { buffer: AudioBuffer; gain: GainNode }>();
+  /** Per track: its samples, its fader for muted parts (`parts`) and its volume. */
+  private tracks = new Map<string, { buffer: AudioBuffer; parts: GainNode; gain: GainNode }>();
+  /** The muted and turned-down parts per track key (that track's own). */
+  private partLists = new Map<string, AudioRange[]>();
   private peakCache = new Map<string, Float32Array>();
   /** Per track, the last part's peaks `peaksRange` made (one, so panning doesn't pile them up). */
   private windowCache = new Map<string, { id: string; peaks: Float32Array }>();
@@ -57,7 +62,9 @@ export class AudioEngine {
           const buffer = await ctx.decodeAudioData(data);
           const gain = ctx.createGain();
           gain.connect(this.master!);
-          this.tracks.set(key, { buffer, gain });
+          const parts = ctx.createGain();
+          parts.connect(gain);
+          this.tracks.set(key, { buffer, parts, gain });
           for (const id of [...this.peakCache.keys()]) {
             if (id.startsWith(`${key}:`)) this.peakCache.delete(id);
           }
@@ -124,6 +131,35 @@ export class AudioEngine {
     if (track) track.gain.gain.value = gain;
   }
 
+  /**
+   * The muted and turned-down parts of track `key` (its own only). While playing, the rest of the
+   * playback follows them at once.
+   */
+  setParts(key: string, parts: AudioRange[]) {
+    this.partLists.set(key, parts);
+    const track = this.tracks.get(key);
+    if (track) this.scheduleParts(track.parts, parts);
+  }
+
+  /**
+   * Schedules `node`'s gain for `parts` over every part of the clip playing now, on the audio
+   * clock: straight lines between the corners `gainPoints` gives, so it matches the export.
+   */
+  private scheduleParts(node: GainNode, parts: AudioRange[]) {
+    const param = node.gain;
+    param.cancelScheduledValues(0);
+    if (!this.playing || parts.length === 0) {
+      param.value = 1;
+      return;
+    }
+    for (const seg of this.segments) {
+      const at = (ms: number) => this.startedAt + seg.at + (ms - seg.from) / 1000;
+      const points = gainPoints(parts, seg.from, seg.to);
+      param.setValueAtTime(points[0].gain, at(points[0].ms));
+      for (const point of points.slice(1)) param.linearRampToValueAtTime(point.gain, at(point.ms));
+    }
+  }
+
   setMaster(gain: number) {
     this.context();
     this.master!.gain.value = gain;
@@ -136,15 +172,16 @@ export class AudioEngine {
     this.segments = schedule(fromMs, kept);
     this.startedAt = ctx.currentTime + LEAD_S;
     for (const seg of this.segments) {
-      for (const { buffer, gain } of this.tracks.values()) {
+      for (const { buffer, parts } of this.tracks.values()) {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.connect(gain);
+        source.connect(parts);
         source.start(this.startedAt + seg.at, seg.from / 1000, (seg.to - seg.from) / 1000);
         this.sources.push(source);
       }
     }
     this.playing = true;
+    for (const [key, track] of this.tracks) this.scheduleParts(track.parts, this.partLists.get(key) ?? []);
   }
 
   stop() {
@@ -184,6 +221,7 @@ export class AudioEngine {
     this.ctx = null;
     this.master = null;
     this.tracks.clear();
+    this.partLists.clear();
     this.peakCache.clear();
     this.windowCache.clear();
   }

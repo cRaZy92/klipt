@@ -32,6 +32,8 @@ pub struct Edit {
     pub zooms: Vec<crate::library::ZoomRange>,
     /// Subtitles (sorted, never overlapping), in the file's time: drawn onto the picture.
     pub subtitles: Vec<crate::library::SubtitleRange>,
+    /// Parts of audio tracks muted or turned down (sorted by track, then time), in the file's time.
+    pub audio: Vec<crate::library::AudioRange>,
 }
 
 /// How strong "Blur video" is: a Gaussian sigma at 720p. Shapes and colours stay, details don't.
@@ -74,6 +76,32 @@ fn volume(v: f32) -> f32 {
 
 fn seconds(ms: u64) -> String {
     format!("{}.{:03}", ms / 1000, ms % 1000)
+}
+
+/// How long the sound takes to fade into (and out of) a muted or turned-down part: short enough
+/// to be exact, long enough not to click. Shorter for a very short part.
+const AUDIO_RAMP_MS: u64 = 30;
+
+/// The `volume` filter (no labels) for audio track `track` at `vol`, with the parts of `audio`
+/// on that track muted or turned down. `offset_ms` is the file time of the input's `t = 0`.
+fn track_volume(track: u32, vol: f32, audio: &[crate::library::AudioRange], offset_ms: u64) -> String {
+    let parts: Vec<_> = audio.iter().filter(|r| r.track == track && r.level < 1.0).collect();
+    if parts.is_empty() {
+        return format!("volume={vol}");
+    }
+    let t = if offset_ms == 0 { "t".to_string() } else { format!("(t+{})", seconds(offset_ms)) };
+    // Per part, how far into it the sound is (0..1, ramped at both ends) times how much it drops.
+    // Parts on one track never overlap, so the drops just add up.
+    let drops: Vec<String> = parts
+        .iter()
+        .map(|r| {
+            let ramp = seconds((r.end_ms.saturating_sub(r.start_ms) / 2).clamp(1, AUDIO_RAMP_MS));
+            let (s, e) = (seconds(r.start_ms), seconds(r.end_ms));
+            let drop = 1.0 - r.level.clamp(0.0, 1.0);
+            format!("{drop:.4}*clip(({t}-{s})/{ramp},0,1)*clip(({e}-{t})/{ramp},0,1)")
+        })
+        .collect();
+    format!("volume=volume='{vol}*max(0,1-{})':eval=frame", drops.join("-"))
 }
 
 /// How long a zoom takes to ease in (and out): at most 400 ms, at most half of the zoom.
@@ -195,11 +223,14 @@ pub fn export_args(
     // The master volume only appears when it changes something, so default exports stay as before.
     let master = volume(edit.master_volume);
     let master = if master == 1.0 { String::new() } else { format!(",volume={master}") };
+    // `-ss` before `-i` makes the trim start `t = 0`; with removed parts the file is read whole.
+    let offset = if edit.removed.is_empty() { start.unwrap_or(0) } else { 0 };
+    let vol = |track: u32, v: f32| track_volume(track, v, &edit.audio, offset);
     let graph = if inputs.len() == 1 {
-        format!("[0:a:0]volume={}{master}[aout]", inputs[0].1)
+        format!("[0:a:0]{}{master}[aout]", vol(0, inputs[0].1))
     } else {
         let filters: Vec<String> =
-            inputs.iter().enumerate().map(|(i, (track, vol))| format!("[0:a:{track}]volume={vol}[a{i}]")).collect();
+            inputs.iter().enumerate().map(|(i, (track, v))| format!("[0:a:{track}]{}[a{i}]", vol(*track, *v))).collect();
         let labels: String = (0..inputs.len()).map(|i| format!("[a{i}]")).collect();
         format!("{};{labels}amix=inputs={}:normalize=0{master}[aout]", filters.join(";"), inputs.len())
     };
@@ -491,7 +522,7 @@ mod tests {
     }
 
     fn edit(start: Option<u64>, end: Option<u64>) -> Edit {
-        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new() }
+        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new(), audio: Vec::new() }
     }
 
     #[test]
@@ -518,7 +549,7 @@ mod tests {
 
     #[test]
     fn volumes_are_clamped_and_bad_ranges_rejected() {
-        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new() };
+        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new(), audio: Vec::new() };
         let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains("volume=2[a0]") && joined.contains("volume=0[a1]") && joined.contains("-to 1.500"));
         for (s, e) in [(Some(4000), Some(2000)), (Some(2000), Some(2000)), (None, Some(0))] {
@@ -846,6 +877,76 @@ mod tests {
         let tracks = Tracks { mic: Some(1), voice: Some(2), extra: vec![] };
         let out = export(&tools(), &three, cache.path(), "v", &edit(Some(1000), Some(3000)), tracks, |_| {}).unwrap();
         assert_eq!(probe(&tools(), &out).unwrap().audio_tracks, 1);
+    }
+
+    fn part(track: u32, start_ms: u64, end_ms: u64, level: f32) -> crate::library::AudioRange {
+        crate::library::AudioRange { track, start_ms, end_ms, level }
+    }
+
+    #[test]
+    fn muted_parts_turn_one_track_down_by_time() {
+        let e = Edit { audio: vec![part(1, 1000, 2000, 0.0), part(1, 3000, 3500, 0.25)], ..edit(Some(500), Some(4000)) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &[]).unwrap().join(" ");
+        assert!(joined.contains("[0:a:0]volume=1[a0]"), "the game is untouched: {joined}");
+        // `-ss` makes the trim start t = 0, so the parts are shifted by it.
+        assert!(
+            joined.contains(
+                "[0:a:1]volume=volume='0.5*max(0,1-1.0000*clip(((t+0.500)-1.000)/0.030,0,1)*clip((2.000-(t+0.500))/0.030,0,1)\
+                 -0.7500*clip(((t+0.500)-3.000)/0.030,0,1)*clip((3.500-(t+0.500))/0.030,0,1))':eval=frame[a1]"
+            ),
+            "{joined}"
+        );
+        assert!(joined.contains("-c:v copy"), "a muted part doesn't touch the picture: {joined}");
+    }
+
+    #[test]
+    fn muted_parts_use_the_file_time_with_cuts() {
+        let e = Edit { removed: vec![cut(2000, 3000)], audio: vec![part(0, 1000, 1100, 0.5)], ..edit(Some(500), None) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &Tracks::default(), SIZE, None, &["-c:v", "libx264"]).unwrap().join(" ");
+        assert!(joined.contains("volume=volume='1*max(0,1-0.5000*clip((t-1.000)/0.030,0,1)*clip((1.100-t)/0.030,0,1))':eval=frame"), "{joined}");
+    }
+
+    /// The mean loudness (dB) of `path`'s audio from `from_ms` for `len_ms`.
+    fn mean_volume(path: &Path, from_ms: u64, len_ms: u64) -> f32 {
+        let out = Command::new(&tools().ffmpeg)
+            .args(["-nostdin", "-hide_banner", "-ss", &seconds(from_ms), "-t", &seconds(len_ms), "-i"])
+            .arg(path)
+            .args(["-map", "0:a:0", "-af", "volumedetect", "-f", "null", "-"])
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stderr);
+        let line = text.lines().find(|l| l.contains("mean_volume:")).unwrap_or_else(|| panic!("no volume: {text}"));
+        line.split("mean_volume:").nth(1).unwrap().trim().trim_end_matches(" dB").parse().unwrap()
+    }
+
+    #[test]
+    fn a_muted_part_is_silent_in_the_export() {
+        let cache = tempfile::tempdir().unwrap();
+        // Both tracks muted from 2 s to 3.5 s of the file; the export starts at 1 s.
+        let e = Edit { audio: vec![part(0, 2000, 3500, 0.0), part(1, 2000, 3500, 0.0)], ..edit(Some(1000), Some(5000)) };
+        let out = export(&tools(), fixture(), cache.path(), "m", &e, MIC, |_| {}).unwrap();
+        let loud = mean_volume(&out, 200, 600);
+        let muted = mean_volume(&out, 1200, 1000);
+        assert!(loud > -40.0, "before the part: {loud} dB");
+        assert!(muted < -80.0, "inside the part: {muted} dB");
+        assert!(mean_volume(&out, 2700, 600) > -40.0, "after the part");
+    }
+
+    #[test]
+    fn a_turned_down_part_is_quieter_with_cuts() {
+        let cache = tempfile::tempdir().unwrap();
+        // Both tracks at a quarter from 3 s to 5 s; 1–2 s is cut out.
+        let e = Edit {
+            removed: vec![cut(1000, 2000)],
+            audio: vec![part(0, 3000, 5000, 0.25), part(1, 3000, 5000, 0.25)],
+            ..edit(None, None)
+        };
+        let out = export(&tools(), fixture(), cache.path(), "d", &e, Tracks::default(), |_| {}).unwrap();
+        // Export time = file time − 1 s after the cut.
+        let normal = mean_volume(&out, 1100, 700);
+        let down = mean_volume(&out, 2200, 1500);
+        let drop = normal - down;
+        assert!((10.0..14.0).contains(&drop), "a quarter is −12 dB, got {drop} ({normal} → {down})");
     }
 
     // Review Focus 4: a missing input is an error and leaves nothing behind.

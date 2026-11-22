@@ -14,8 +14,8 @@ use crate::errors::{AppError, Result};
 use crate::export::Edit;
 use crate::ffmpeg::{self, Tools};
 use crate::library::{
-    Clip, ClipKind, ClipView, CutRange, Library, NewClip, SubtitleRange, Trim, Volumes, ZoomRange, MIN_SUBTITLE_MS,
-    MIN_ZOOM_MS,
+    AudioRange, Clip, ClipKind, ClipView, CutRange, Library, NewClip, SubtitleRange, Trim, Volumes, ZoomRange, MIN_SUBTITLE_MS,
+    MIN_AUDIO_RANGE_MS, MIN_ZOOM_MS,
 };
 
 /// The shortest part that can become a clip.
@@ -62,12 +62,20 @@ pub fn part_edit(edit: &Edit, start: u64, end: u64, offset_ms: u64, duration_ms:
         .filter(|(_, (s, e))| *e >= s + MIN_SUBTITLE_MS)
         .map(|(t, (start_ms, end_ms))| SubtitleRange { start_ms, end_ms, text: t.text.clone() })
         .collect();
+    let audio = edit
+        .audio
+        .iter()
+        .map(|r| (r, clipped(r.start_ms, r.end_ms)))
+        .filter(|(_, (s, e))| *e >= s + MIN_AUDIO_RANGE_MS)
+        .map(|(r, (start_ms, end_ms))| AudioRange { start_ms, end_ms, ..*r })
+        .collect();
     Edit {
         trim_start_ms: (trim_start > 0).then_some(trim_start),
         trim_end_ms: (trim_end < duration_ms).then_some(trim_end),
         removed,
         zooms,
         subtitles,
+        audio,
         ..edit.clone()
     }
 }
@@ -155,6 +163,7 @@ pub fn make_part(
         crate::library::validate_cuts(trim, &new_edit.removed, duration_ms)?;
         crate::library::validate_zooms(&new_edit.zooms, duration_ms)?;
         crate::library::validate_subtitles(&new_edit.subtitles, duration_ms)?;
+        crate::library::validate_audio_ranges(&new_edit.audio, duration_ms)?;
         let (clip, thumb) = {
             let library = library.lock().unwrap_or_else(PoisonError::into_inner);
             let clip = library.insert(new)?;
@@ -164,6 +173,7 @@ pub fn make_part(
                 library.set_removed_ranges(&clip.id, &new_edit.removed)?;
                 library.set_zoom_ranges(&clip.id, &new_edit.zooms)?;
                 library.set_subtitles(&clip.id, &new_edit.subtitles)?;
+                library.set_audio_ranges(&clip.id, &new_edit.audio)?;
                 library.set_thumbnail(&clip.id, Some(thumb_ms))
             })();
             if let Err(e) = saved {
@@ -202,6 +212,7 @@ mod tests {
             removed: Vec::new(),
             zooms: Vec::new(),
             subtitles: Vec::new(),
+            audio: Vec::new(),
         }
     }
 

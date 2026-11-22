@@ -1068,6 +1068,7 @@ mod tests {
                 removed_ranges: Vec::new(),
                 zoom_ranges: Vec::new(),
                 subtitles: Vec::new(),
+                audio_ranges: Vec::new(),
             },
             file_missing: false,
             thumb_path: None,

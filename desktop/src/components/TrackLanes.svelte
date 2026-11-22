@@ -21,7 +21,8 @@
   } from "../lib/timelineView";
   import { windowPeaks } from "../lib/waveform";
   import { edgeScroller, edgeSpeed } from "../lib/edgeScroll";
-  import type { SubtitleRange, ZoomRange } from "../lib/api";
+  import type { AudioRange, SubtitleRange, ZoomRange } from "../lib/api";
+  import { addPart, levelLabel, movePart, MIN_AUDIO_PART_MS, partsOn, resizePart, spanPart } from "../lib/audioParts";
   import { moveZoom, rampMs, resizeZoom } from "../lib/zoom";
   import { moveSubtitle, resizeSubtitle } from "../lib/subtitles";
   import Icon from "./Icon.svelte";
@@ -29,6 +30,8 @@
   interface LaneTrack {
     /** The audio engine's key: "game", "mic", "voice" or "track-<index>". */
     key: string;
+    /** The track's index in the file (0 = the game), as muted parts name it. */
+    track: number;
     name: string;
     /** The track's waveform (0–1 per bucket); null while it isn't loaded. */
     peaks: Float32Array | null;
@@ -68,6 +71,14 @@
     onsubtitleremove,
     onsubtitleedit,
     onlanedown,
+    audioParts,
+    selectedPart,
+    onpartselect,
+    onpartchange,
+    onpartgesture,
+    onpartremove,
+    onpartlevel,
+    onpartadd,
     view,
     onview,
     video,
@@ -119,6 +130,19 @@
      * (which can remove a subtitle and shift the others' indices).
      */
     onlanedown?: () => void;
+    /** The muted and turned-down parts of every track, sorted by track, then time. */
+    audioParts: AudioRange[];
+    /** The picked part's index in `audioParts`, or null. */
+    selectedPart: number | null;
+    onpartselect: (i: number | null) => void;
+    onpartchange: (parts: AudioRange[]) => void;
+    /** A drag of a part (or drawing one) started (true) or ended (false): one drag is one undo step. */
+    onpartgesture: (active: boolean) => void;
+    onpartremove: (i: number) => void;
+    /** The level button of part `i`: Muted → 25% → 50%. */
+    onpartlevel: (i: number) => void;
+    /** "Mute a part" on a lane: adds one on `track` at the playhead. */
+    onpartadd: (track: number) => void;
     /** The stretch of the clip the lanes show (the timeline's zoom). */
     view: TimeView;
     /** The user zoomed or scrolled the timeline. */
@@ -336,6 +360,107 @@
       onsubtitleselect(i);
       onseek(subtitles[i].startMs);
       if (!locked) onsubtitleedit(i);
+    }
+  }
+
+  /**
+   * A part being dragged on an audio lane: its body (moves it), one edge (resizes it), or a new one
+   * being drawn with Shift held (stretches from where the drag started).
+   */
+  let partDrag: { i: number; what: "move" | "start" | "end" | "span"; offset: number; anchor: number } | null =
+    $state(null);
+
+  /** A press on an audio lane: Shift draws a new muted part; otherwise it seeks and scrubs. */
+  function laneDown(e: PointerEvent, track: number) {
+    onlanedown?.();
+    if (e.button === 0 && e.shiftKey && !locked) {
+      const area = e.currentTarget as HTMLElement;
+      const ms = msAt(e, area);
+      const added = addPart(audioParts, track, ms, trim, MIN_AUDIO_PART_MS);
+      if (added) {
+        e.preventDefault();
+        area.setPointerCapture(e.pointerId);
+        onpartgesture(true);
+        onpartchange(added.parts);
+        onpartselect(added.index);
+        partDrag = { i: added.index, what: "span", offset: 0, anchor: added.parts[added.index].startMs };
+        startDrag(area, e, (ev) => partTo(ev, area));
+        return;
+      }
+    }
+    onpartselect(null);
+    grab(e);
+  }
+
+  function laneMove(e: PointerEvent) {
+    if (partDrag?.what === "span") {
+      if (edgeDrag) edgeDrag.e = e;
+      partTo(e, e.currentTarget as HTMLElement);
+      return;
+    }
+    move(e);
+  }
+
+  function laneUp() {
+    if (partDrag?.what === "span") partUp();
+    else release();
+  }
+
+  function partDown(e: PointerEvent, i: number) {
+    if (e.button !== 0) return;
+    onlanedown?.();
+    e.preventDefault();
+    e.stopPropagation();
+    const block = e.currentTarget as HTMLElement;
+    const area = block.parentElement as HTMLElement;
+    const p = audioParts[i];
+    if (!p) return;
+    onpartselect(i);
+    onseek(p.startMs);
+    if (locked) return;
+    const what = grabbed(block, e.clientX);
+    block.setPointerCapture(e.pointerId);
+    partDrag = { i, what, offset: msAt(e, area) - p.startMs, anchor: p.startMs };
+    startDrag(area, e, (ev) => partTo(ev, area));
+    onpartgesture(true);
+  }
+
+  function partMove(e: PointerEvent) {
+    if (!partDrag) return;
+    if (edgeDrag) edgeDrag.e = e;
+    partTo(e, (e.currentTarget as HTMLElement).parentElement as HTMLElement);
+  }
+
+  /** The dragged part follows a pointer at `e` on `area`. */
+  function partTo(e: PointerEvent, area: HTMLElement) {
+    if (!partDrag) return;
+    const ms = msAt(e, area);
+    const { i, what } = partDrag;
+    const next =
+      what === "span"
+        ? spanPart(audioParts, i, partDrag.anchor, ms, trim)
+        : what === "move"
+          ? movePart(audioParts, i, ms - partDrag.offset, trim)
+          : resizePart(audioParts, i, what, ms, trim);
+    if (next !== audioParts) onpartchange(next);
+  }
+
+  function partUp() {
+    if (!partDrag) return;
+    const { i, what } = partDrag;
+    partDrag = null;
+    endDrag();
+    onpartgesture(false);
+    const p = audioParts[i];
+    if (p) onseek(what === "end" ? Math.max(p.startMs, p.endMs - 1) : p.startMs);
+  }
+
+  function partKey(e: KeyboardEvent, i: number) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      onpartselect(i);
+      onseek(audioParts[i].startMs);
     }
   }
 
@@ -665,6 +790,15 @@
     <div class="label" class:last={i === tracks.length - 1}>
       <div class="line">
         <span class="name" title={t.name}>{t.name}</span>
+        <button
+          class="add-part"
+          aria-label="Mute part of {t.name}"
+          title="Mute part of {t.name} from the playhead (or Shift+drag on the lane)"
+          disabled={locked}
+          onclick={() => onpartadd(t.track)}
+        >
+          <Icon name="volume" size={12} />
+        </button>
         <output>{level(t.volume)}</output>
       </div>
       <div class="line">
@@ -699,11 +833,12 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="area"
-        onpointerdown={grab}
-        onpointermove={move}
-        onpointerup={release}
-        onpointercancel={release}
-        onlostpointercapture={release}
+        title="Shift+drag to mute part of {t.name}"
+        onpointerdown={(e) => laneDown(e, t.track)}
+        onpointermove={laneMove}
+        onpointerup={laneUp}
+        onpointercancel={laneUp}
+        onlostpointercapture={laneUp}
       >
         <canvas class="wave {t.key.startsWith('track-') ? 'track' : t.key}" class:muted={t.muted} use:waveform={{ peaks: t.peaks, ...waveShare(t) }}></canvas>
         {#each shading.dims as d, i (i)}
@@ -717,6 +852,66 @@
             style:left="{c.left}%"
             style:width="{c.width}%"
           ></div>
+        {/each}
+        {#each partsOn(audioParts, t.track) as { part: p, i } (i)}
+          {@const fit = layoutOf(p.startMs, p.endMs)}
+          <!-- A pointer target for placing the part in time; Enter picks it from the keyboard. -->
+          <div
+            class="part-block"
+            class:down={p.level > 0}
+            class:compact={!fit.showText}
+            class:selected={selectedPart === i}
+            class:moving={partDrag?.i === i && partDrag.what === "move"}
+            class:resizing={partDrag?.i === i && partDrag.what !== "move"}
+            role="button"
+            tabindex="0"
+            aria-label="{t.name} {levelLabel(p.level).toLowerCase()} from {(p.startMs / 1000).toFixed(1)} s to {(p.endMs / 1000).toFixed(1)} s"
+            aria-pressed={selectedPart === i}
+            title="Drag to move, drag an edge to make it longer or shorter, Delete to remove"
+            style:left="{pct(p.startMs)}%"
+            style:width="{pct(p.endMs) - pct(p.startMs)}%"
+            onpointerdown={(e) => partDown(e, i)}
+            onpointermove={partMove}
+            onpointerup={partUp}
+            onpointercancel={partUp}
+            onlostpointercapture={partUp}
+            onkeydown={(e) => partKey(e, i)}
+          >
+            <span class="zoom-edge start" aria-hidden="true" style:width="{fit.edgePx}px"></span>
+            <span class="zoom-edge end" aria-hidden="true" style:width="{fit.edgePx}px"></span>
+            {#if fit.showText}
+              {#if selectedPart === i && !locked}
+                <button
+                  class="part-level"
+                  title="Change how far it's turned down: Muted, 25% or 50%"
+                  aria-label="Level: {levelLabel(p.level)}. Change it"
+                  onpointerdown={(e) => e.stopPropagation()}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    onpartlevel(i);
+                  }}
+                >
+                  {levelLabel(p.level)}
+                </button>
+              {:else}
+                <span class="zoom-text part-text">{levelLabel(p.level)}</span>
+              {/if}
+            {/if}
+            {#if selectedPart === i && !locked && fit.showRemove}
+              <button
+                class="zoom-remove"
+                aria-label="Remove this muted part"
+                title="Remove (Delete)"
+                onpointerdown={(e) => e.stopPropagation()}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  onpartremove(i);
+                }}
+              >
+                <Icon name="close" size={11} />
+              </button>
+            {/if}
+          </div>
         {/each}
       </div>
     </div>
@@ -1158,7 +1353,97 @@
       0 0 0 1px var(--accent);
   }
 
-  .locked .zoom-block {
+  .locked .zoom-block,
+  .locked .part-block {
+    cursor: not-allowed;
+  }
+
+  /* A muted part covers its stretch of the waveform, which shows faintly through hatching; a part
+     turned down covers it less. */
+  .part-block {
+    position: absolute;
+    top: 0.25rem;
+    bottom: 0.25rem;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    overflow: hidden;
+    box-sizing: border-box;
+    min-width: 6px;
+    padding-top: 0.15rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background:
+      repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.07) 0 2px, transparent 2px 8px),
+      rgba(11, 10, 16, 0.85);
+    color: var(--text);
+    cursor: grab;
+    touch-action: none;
+  }
+  .part-block.down {
+    background:
+      repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.07) 0 2px, transparent 2px 8px),
+      rgba(11, 10, 16, 0.5);
+  }
+  .part-block.moving {
+    cursor: grabbing;
+  }
+  .part-block.resizing {
+    cursor: ew-resize;
+  }
+  .part-block.selected {
+    border-color: #fff;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .part-block:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .part-block.compact {
+    border-radius: 3px;
+  }
+  .part-text {
+    flex: none;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  }
+  .part-level {
+    flex: none;
+    margin-left: 0.3rem;
+    padding: 0 0.35rem;
+    border: none;
+    border-radius: 4px;
+    background: rgba(5, 4, 10, 0.7);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1rem;
+    cursor: pointer;
+  }
+  .part-block .zoom-remove {
+    margin-left: auto;
+  }
+
+  .add-part {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .add-part:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+  .add-part:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
   }
 

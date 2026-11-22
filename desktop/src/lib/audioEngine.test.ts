@@ -9,7 +9,8 @@ const skip = [
 function fakeContext() {
   const starts: { url: string; when: number; offset: number; duration: number }[] = [];
   const stops: string[] = [];
-  const gains: { gain: { value: number }; connected: unknown }[] = [];
+  type Param = { value: number; events: [string, number, number][] };
+  const gains: { gain: Param; connected: unknown }[] = [];
   const ctx = {
     currentTime: 10,
     destination: { dest: true },
@@ -26,7 +27,14 @@ function fakeContext() {
       };
     },
     createGain() {
-      const g = { gain: { value: 1 }, connected: null as unknown, connect(n: unknown) { g.connected = n; } };
+      const gain: Param & Record<string, unknown> = {
+        value: 1,
+        events: [],
+        cancelScheduledValues: () => (gain.events = []),
+        setValueAtTime: (v: number, t: number) => gain.events.push(["set", v, t]),
+        linearRampToValueAtTime: (v: number, t: number) => gain.events.push(["ramp", v, t]),
+      };
+      const g = { gain, connected: null as unknown, connect(n: unknown) { g.connected = n; } };
       gains.push(g);
       return g;
     },
@@ -103,6 +111,32 @@ describe("AudioEngine", () => {
     const values = gains.map((g) => g.gain.value);
     expect(values).toContain(0.5);
     expect(values).toContain(0.8);
+  });
+
+  it("follows a track's muted parts on the audio clock, across a skipped part", async () => {
+    const { engine, gains } = await loaded(["game"]);
+    // The game's fader for parts is the one fed by its sources: the last gain made.
+    const fader = gains.at(-1)!.gain;
+    engine.setParts("game", [{ track: 0, startMs: 1800, endMs: 3500, level: 0 }]);
+    expect(fader.events).toEqual([]);
+    engine.play(1500, skip);
+    const at = (s: number) => +s.toFixed(3);
+    expect(fader.events.map(([k, v, t]) => [k, v, at(t)])).toEqual([
+      // 1500–2000 plays from 10.05 s: the part starts at 1800 and fades down for 30 ms.
+      ["set", 1, 10.05],
+      ["ramp", 1, 10.35],
+      ["ramp", 0, 10.38],
+      ["ramp", 0, 10.55],
+      // 3000–5000 from 10.55 s: still muted until 3470, back up at 3500.
+      ["set", 0, 10.55],
+      ["ramp", 0, 11.02],
+      ["ramp", 1, 11.05],
+      ["ramp", 1, 12.55],
+    ]);
+    // Removing the part while playing takes effect at once.
+    engine.setParts("game", []);
+    expect(fader.events).toEqual([]);
+    expect(fader.value).toBe(1);
   });
 
   it("stops every source", async () => {

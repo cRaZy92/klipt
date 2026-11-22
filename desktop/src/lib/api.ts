@@ -25,6 +25,18 @@ export interface SubtitleRange {
   text: string;
 }
 
+/**
+ * A part of one audio track muted or turned down in the editor: during startMs..endMs (ms into the
+ * file) track `track` (0 = the game, then mic, voice chat and any others, as the file has them)
+ * plays at `level` (0 = silent, below 1) of its volume. The video isn't cut.
+ */
+export interface AudioRange {
+  track: number;
+  startMs: number;
+  endMs: number;
+  level: number;
+}
+
 export interface ZoomRange {
   startMs: number;
   endMs: number;
@@ -52,6 +64,8 @@ export interface ClipView {
   /** Zooms set in the editor, sorted, never overlapping. Missing = none. */
   zoomRanges?: ZoomRange[];
   subtitles?: SubtitleRange[];
+  /** Muted and turned-down parts of the audio tracks, sorted by track, then time. Missing = none. */
+  audioRanges?: AudioRange[];
   gameVolume: number;
   micVolume: number;
   serverClipId: string | null;
@@ -282,6 +296,8 @@ export interface EditInput {
   /** Zooms: uploads and exports ease into each and back out. */
   zoomRanges: ZoomRange[];
   subtitles: SubtitleRange[];
+  /** Muted and turned-down parts of the audio tracks: uploads and exports turn them down too. */
+  audioRanges: AudioRange[];
 }
 
 export interface ExportProgress {

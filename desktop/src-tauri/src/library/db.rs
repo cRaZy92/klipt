@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::{Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
-use super::{MAX_SUBTITLE_CHARS, MAX_ZOOM, MIN_SUBTITLE_MS, MIN_ZOOM, MIN_ZOOM_MS};
+use super::{AudioRange, Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
+use super::{MAX_SUBTITLE_CHARS, MIN_AUDIO_RANGE_MS, MAX_ZOOM, MIN_SUBTITLE_MS, MIN_ZOOM, MIN_ZOOM_MS};
 use crate::errors::{AppError, Result};
 
 /// Per-track volume range the editor offers (0–200 %).
@@ -82,13 +82,17 @@ const MIGRATIONS: &[&str] = &["
 ", "
     -- A full recording (started and stopped by the user), not a replay-buffer clip. Local only.
     ALTER TABLE clips ADD COLUMN is_recording INTEGER NOT NULL DEFAULT 0;
+", "
+    -- Parts of audio tracks muted or turned down in the editor: JSON list of
+    -- {\"track\", \"startMs\", \"endMs\", \"level\"} (ms into the file).
+    ALTER TABLE clips ADD COLUMN audio_ranges TEXT NOT NULL DEFAULT '[]';
 "];
 
-/// Queries that select more after these read them from index 32 on.
+/// Queries that select more after these read them from index 33 on.
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
                        visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind, \
-                       extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles, is_recording";
+                       extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles, is_recording, audio_ranges";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -125,6 +129,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         zoom_ranges: serde_json::from_str(&row.get::<_, String>(29)?).unwrap_or_default(),
         subtitles: serde_json::from_str(&row.get::<_, String>(30)?).unwrap_or_default(),
         is_recording: row.get(31)?,
+        audio_ranges: serde_json::from_str(&row.get::<_, String>(32)?).unwrap_or_default(),
     })
 }
 
@@ -253,6 +258,13 @@ impl Library {
     pub fn set_zoom_ranges(&self, id: &str, zooms: &[ZoomRange]) -> Result<()> {
         let json = serde_json::to_string(zooms).map_err(|e| AppError::Internal(e.to_string()))?;
         self.update(id, "UPDATE clips SET zoom_ranges = ?2 WHERE id = ?1", params![id, json])
+    }
+
+    /// Stores the muted and turned-down parts of the audio tracks (checked with
+    /// `validate_audio_ranges` by the caller).
+    pub fn set_audio_ranges(&self, id: &str, ranges: &[AudioRange]) -> Result<()> {
+        let json = serde_json::to_string(ranges).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.update(id, "UPDATE clips SET audio_ranges = ?2 WHERE id = ?1", params![id, json])
     }
 
     /// Stores the subtitles typed in the editor (checked with `validate_subtitles` by the caller).
@@ -386,7 +398,7 @@ impl Library {
             "SELECT {COLUMNS}, sync_pending FROM clips WHERE sync_pending != '' AND server_clip_id IS NOT NULL"
         ))?;
         let rows = stmt
-            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(32)?))))?
+            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(33)?))))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -606,6 +618,32 @@ pub fn validate_subtitles(subs: &[SubtitleRange], duration_ms: u64) -> Result<()
             return bad("a subtitle is too long");
         }
         at = s.end_ms;
+    }
+    Ok(())
+}
+
+/// Checks the muted and turned-down parts of a clip `duration_ms` long: sorted by track, then
+/// time; each at least `MIN_AUDIO_RANGE_MS` long, inside the file, at a level from 0 up to (not
+/// including) 1; never overlapping on one track (touching is fine).
+pub fn validate_audio_ranges(ranges: &[AudioRange], duration_ms: u64) -> Result<()> {
+    let bad = |why: &str| Err(AppError::InvalidInput(format!("audio parts: {why}")));
+    let mut prev: Option<&AudioRange> = None;
+    for r in ranges {
+        if r.end_ms < r.start_ms.saturating_add(MIN_AUDIO_RANGE_MS) {
+            return bad("a part is too short");
+        }
+        if r.end_ms > duration_ms {
+            return bad("a part ends after the clip");
+        }
+        if !(r.level.is_finite() && (0.0..1.0).contains(&r.level)) {
+            return bad("a part's level must be from 0 to below 1");
+        }
+        if let Some(p) = prev {
+            if r.track < p.track || (r.track == p.track && r.start_ms < p.end_ms) {
+                return bad("parts overlap or are out of order");
+            }
+        }
+        prev = Some(r);
     }
     Ok(())
 }
@@ -926,6 +964,38 @@ mod tests {
         f.lib.set_subtitles(&c.id, &[s(1000, 3000, "čo to bolo")]).unwrap();
         assert_eq!(f.lib.get(&c.id).unwrap().subtitles, vec![s(1000, 3000, "čo to bolo")]);
         assert!(matches!(f.lib.set_subtitles("nope", &[]), Err(AppError::ClipNotFound(_))));
+    }
+
+    fn a(track: u32, start_ms: u64, end_ms: u64, level: f32) -> AudioRange {
+        AudioRange { track, start_ms, end_ms, level }
+    }
+
+    #[test]
+    fn audio_ranges_round_trip() {
+        let f = Fixture::new();
+        let c = f.add("a.mp4", 1000, None);
+        assert!(f.lib.get(&c.id).unwrap().audio_ranges.is_empty(), "new clips have none");
+        let ranges = [a(0, 1000, 3000, 0.0), a(1, 500, 900, 0.25)];
+        f.lib.set_audio_ranges(&c.id, &ranges).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().audio_ranges, ranges.to_vec());
+        assert!(matches!(f.lib.set_audio_ranges("nope", &[]), Err(AppError::ClipNotFound(_))));
+    }
+
+    #[test]
+    fn invalid_audio_ranges_are_refused() {
+        let bad = |r: &[AudioRange]| matches!(validate_audio_ranges(r, 10_000), Err(AppError::InvalidInput(_)));
+        assert!(bad(&[a(0, 1000, 1199, 0.0)]), "199 ms");
+        assert!(bad(&[a(0, 3000, 2000, 0.0)]), "backwards");
+        assert!(bad(&[a(0, 9000, 10_001, 0.0)]), "past the end");
+        assert!(bad(&[a(0, 1000, 2000, 1.0)]), "level 1 changes nothing");
+        assert!(bad(&[a(0, 1000, 2000, -0.1)]), "negative level");
+        assert!(bad(&[a(0, 1000, 2000, f32::NAN)]), "NaN level");
+        assert!(bad(&[a(0, 1000, 3000, 0.0), a(0, 2500, 4000, 0.5)]), "overlap on one track");
+        assert!(bad(&[a(1, 1000, 2000, 0.0), a(0, 3000, 4000, 0.0)]), "tracks out of order");
+        assert!(bad(&[a(0, 5000, 6000, 0.0), a(0, 1000, 2000, 0.0)]), "times out of order");
+        assert!(validate_audio_ranges(&[], 10_000).is_ok());
+        assert!(validate_audio_ranges(&[a(0, 0, 200, 0.0), a(0, 200, 10_000, 0.5)], 10_000).is_ok(), "touching");
+        assert!(validate_audio_ranges(&[a(0, 1000, 3000, 0.0), a(1, 1000, 3000, 0.25)], 10_000).is_ok(), "same time, other track");
     }
 
     #[test]

@@ -156,6 +156,7 @@ pub fn current_edit(clip: &Clip) -> Edit {
         removed: clip.removed_ranges.clone(),
         zooms: clip.zoom_ranges.clone(),
         subtitles: clip.subtitles.clone(),
+        audio: clip.audio_ranges.clone(),
     }
 }
 
@@ -182,12 +183,14 @@ pub fn save_edit(library: &Library, uploads: &Uploads, cache_dir: &Path, id: &st
     crate::library::validate_cuts(trim, &edit.removed, clip.duration_ms)?;
     crate::library::validate_zooms(&edit.zooms, clip.duration_ms)?;
     crate::library::validate_subtitles(&edit.subtitles, clip.duration_ms)?;
+    crate::library::validate_audio_ranges(&edit.audio, clip.duration_ms)?;
     forget_upload_export(library, cache_dir, id)?;
     library.update_edit(id, trim, &volumes)?;
     library.set_blur_video(id, edit.blur_video)?;
     library.set_removed_ranges(id, &edit.removed)?;
     library.set_zoom_ranges(id, &edit.zooms)?;
     library.set_subtitles(id, &edit.subtitles)?;
+    library.set_audio_ranges(id, &edit.audio)?;
     Ok(true)
 }
 
@@ -419,7 +422,7 @@ mod tests {
     }
 
     fn cut(start: u64, end: u64) -> Edit {
-        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new() }
+        Edit { trim_start_ms: Some(start), trim_end_ms: Some(end), game_volume: 0.8, mic_volume: 0.3, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new(), audio: Vec::new() }
     }
 
     #[test]
@@ -469,7 +472,7 @@ mod tests {
     #[test]
     fn saving_a_full_clip_edit_without_any_cache_works() {
         let f = Fixture::new();
-        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new() };
+        let edit = Edit { trim_start_ms: None, trim_end_ms: None, game_volume: 0.5, mic_volume: 1.0, voice_volume: 0.7, master_volume: 0.9, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new(), audio: Vec::new() };
         assert!(save_edit(&f.lib, &Uploads::default(), &f.cache(), &f.clip.id, edit.clone()).unwrap());
         assert_eq!(current_edit(&f.lib.get(&f.clip.id).unwrap()), edit);
     }

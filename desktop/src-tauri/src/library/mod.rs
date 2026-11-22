@@ -1,7 +1,7 @@
 //! The local clip library: one SQLite row per saved clip, plus generated thumbnails.
 
 mod db;
-pub use db::{validate_cuts, validate_edit, validate_subtitles, validate_zooms};
+pub use db::{validate_audio_ranges, validate_cuts, validate_edit, validate_subtitles, validate_zooms};
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -95,6 +95,9 @@ pub struct Clip {
     pub zoom_ranges: Vec<ZoomRange>,
     /// Subtitles typed in the editor (ms into the video file), sorted, never overlapping.
     pub subtitles: Vec<SubtitleRange>,
+    /// Parts of audio tracks muted or turned down in the editor (ms into the video file), sorted
+    /// by track, then time; never overlapping on one track.
+    pub audio_ranges: Vec<AudioRange>,
 }
 
 /// A part of a clip removed in the editor, `start_ms..end_ms` into the video file.
@@ -138,6 +141,21 @@ pub struct SubtitleRange {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+}
+
+/// The shortest part of a lane that can be muted or turned down.
+pub const MIN_AUDIO_RANGE_MS: u64 = 200;
+
+/// A part of one audio track muted or turned down in the editor: during `start_ms..end_ms` (into
+/// the video file) track `track` (0 = the game, then mic, voice chat and any others, as the file
+/// has them) plays at `level` (0 = silent, below 1) of its volume. The video isn't cut.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioRange {
+    pub track: u32,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub level: f32,
 }
 
 impl Clip {

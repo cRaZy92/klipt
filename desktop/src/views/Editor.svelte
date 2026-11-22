@@ -34,7 +34,8 @@
   } from "../lib/cuts";
   import { formatTenths, stepMs } from "../lib/timecode";
   import { addZoomAt, removeZoom, sameZooms, setZoomBox, zoomAt, zoomIndexAt } from "../lib/zoom";
-  import type { SubtitleRange, ZoomRange } from "../lib/api";
+  import type { AudioRange, SubtitleRange, ZoomRange } from "../lib/api";
+  import { addPart, nextLevel, removePart, sameParts, setPartLevel } from "../lib/audioParts";
   import {
     MAX_SUBTITLE_CHARS,
     addSubtitleAt,
@@ -117,6 +118,10 @@
   let subtitles = $state<SubtitleRange[]>([]);
   /** The subtitle picked on the Subtitles lane. */
   let selectedSubtitle = $state<number | null>(null);
+  /** The muted and turned-down parts of the audio tracks (sorted by track, then time). */
+  let audioParts = $state<AudioRange[]>([]);
+  /** The part picked on an audio lane (its index in `audioParts`). */
+  let selectedPart = $state<number | null>(null);
   /** The subtitle whose text is being typed (its text box is open on the video). */
   let editingSubtitle = $state<number | null>(null);
   /** The thumbnail's frame; null = automatic. */
@@ -252,6 +257,7 @@
       removedRanges: removedRanges(pieces, trim),
       zoomRanges: zooms.map((z) => ({ startMs: z.startMs, endMs: z.endMs, zoom: z.zoom, x: z.x, y: z.y })),
       subtitles: savedSubtitles(subtitles),
+      audioRanges: audioParts.map((p) => ({ track: p.track, startMs: p.startMs, endMs: p.endMs, level: p.level })),
     };
   });
 
@@ -276,6 +282,7 @@
         !sameRanges(edit.removedRanges, stored.removedRanges) ||
         !sameZooms(edit.zoomRanges, stored.zoomRanges) ||
         !sameSubtitles(edit.subtitles, stored.subtitles) ||
+        !sameParts(edit.audioRanges, stored.audioRanges) ||
         savedThumb !== storedThumb),
   );
 
@@ -291,6 +298,7 @@
     blurVideo: boolean;
     zooms: ZoomRange[];
     subtitles: SubtitleRange[];
+    audioParts: AudioRange[];
     thumb: number | null;
   }
 
@@ -305,6 +313,7 @@
     blurVideo,
     zooms: zooms.map((z) => ({ ...z })),
     subtitles: subtitles.map((t) => ({ ...t })),
+    audioParts: audioParts.map((p) => ({ ...p })),
     thumb,
   });
 
@@ -314,7 +323,7 @@
    * A drag on the timeline or a volume slider in progress: its changes become one undo step,
    * recorded when it ends (so a drag that rests is still one step).
    */
-  const gestures = new Gestures<"scrub" | "slider" | "zoom" | "subtitle" | "subtitleText">(() => history?.record(editState));
+  const gestures = new Gestures<"scrub" | "slider" | "zoom" | "subtitle" | "subtitleText" | "part">(() => history?.record(editState));
 
   function applyState(s: EditState) {
     trim = s.trim;
@@ -330,6 +339,8 @@
     subtitles = s.subtitles;
     if (selectedSubtitle !== null && selectedSubtitle >= subtitles.length) selectedSubtitle = null;
     editingSubtitle = null;
+    audioParts = s.audioParts;
+    if (selectedPart !== null && selectedPart >= audioParts.length) selectedPart = null;
     thumb = s.thumb;
   }
 
@@ -416,6 +427,7 @@
       blurVideo = d.clip.blurVideo ?? false;
       zooms = d.clip.zoomRanges ?? [];
       subtitles = d.clip.subtitles ?? [];
+      audioParts = d.clip.audioRanges ?? [];
       thumb = d.clip.thumbnailMs;
       position = trim.start;
       stripFrames = d.filmstrip.frames;
@@ -459,6 +471,14 @@
     audioReady && data ? Object.fromEntries(audioTracks(data).map((t) => [t.key, engine.peaks(t.key, peakBuckets)])) : {},
   );
 
+  /** A track's index in the file by its engine key: the game first, then mic and voice chat. */
+  function trackIndex(key: string): number {
+    if (key === "game") return 0;
+    if (key === "mic") return 1;
+    if (key === "voice") return data?.clip.hasMic ? 2 : 1;
+    return Number(key.slice("track-".length));
+  }
+
   /** A track's slider (0–100) by its engine key. */
   function volumeOf(key: string): number {
     if (key === "game") return gameVolume;
@@ -501,7 +521,7 @@
           const wave = part
             ? { peaks: part, peaksFrom: peakFrom / duration, peaksTo: peakTo / duration }
             : { peaks: lanePeaks[t.key] ?? null, peaksFrom: 0, peaksTo: 1 };
-          return { key: t.key, name: t.label, ...wave, volume, muted: volume === 0 };
+          return { key: t.key, track: trackIndex(t.key), name: t.label, ...wave, volume, muted: volume === 0 };
         })
       : [],
   );
@@ -599,6 +619,15 @@
   $effect(() => {
     if (!audioReady || silent) return;
     for (const t of data?.extraTracks ?? []) engine.setGain(`track-${t.index}`, (extraVolumes[t.index] ?? 100) / 100);
+  });
+  // The muted parts play as they will be exported; changing one while playing applies at once.
+  $effect(() => {
+    if (!audioReady || silent || !data) return;
+    const parts = audioParts;
+    for (const t of audioTracks(data)) {
+      const track = trackIndex(t.key);
+      engine.setParts(t.key, parts.filter((p) => p.track === track));
+    }
   });
 
   // Trimming or splitting while playing: play the new parts from where the playhead is.
@@ -969,6 +998,7 @@
     zooms = next;
     selectedZoom = zoomIndexAt(next, Math.round(position));
     selectedSubtitle = null;
+    selectedPart = null;
   }
 
   /** Adds a subtitle at the playhead and opens its text box. */
@@ -987,6 +1017,7 @@
     const i = subtitleIndexAt(next, Math.round(position));
     selectedSubtitle = i;
     selectedZoom = null;
+    selectedPart = null;
     editingSubtitle = i;
   }
 
@@ -998,6 +1029,7 @@
     gestures.start("subtitleText");
     selectedSubtitle = i;
     selectedZoom = null;
+    selectedPart = null;
     editingSubtitle = i;
     seek(subtitles[i].startMs);
   }
@@ -1051,6 +1083,37 @@
     selectedSubtitle = null;
   }
 
+  /** "Mute part of …": a muted part on `track` from the playhead, picked. */
+  function partHere(track: number) {
+    if (editLocked) return;
+    const next = addPart(audioParts, track, position, trim);
+    if (!next) {
+      toast("Can't mute a part here: inside another one on this track, too close to the next one, or outside the trim", "error");
+      return;
+    }
+    audioParts = next.parts;
+    selectPart(next.index);
+  }
+
+  function selectPart(i: number | null) {
+    selectedPart = i;
+    if (i !== null) {
+      selectedZoom = null;
+      selectedSubtitle = null;
+    }
+  }
+
+  function removePartAt(i: number) {
+    if (editLocked) return;
+    audioParts = removePart(audioParts, i);
+    selectedPart = null;
+  }
+
+  function cyclePartLevel(i: number) {
+    if (editLocked || !audioParts[i]) return;
+    audioParts = setPartLevel(audioParts, i, nextLevel(audioParts[i].level));
+  }
+
   function removeZoomAt(i: number) {
     if (editLocked) return;
     zooms = removeZoom(zooms, i);
@@ -1096,6 +1159,7 @@
     else if (action.kind === "delete") {
       if (selectedZoom !== null) removeZoomAt(selectedZoom);
       else if (selectedSubtitle !== null) removeSubtitleAt(selectedSubtitle);
+      else if (selectedPart !== null) removePartAt(selectedPart);
     }
     else togglePlay();
   }
@@ -1575,7 +1639,10 @@
         {selectedZoom}
         onzoomselect={(i) => {
           selectedZoom = i;
-          if (i !== null) selectedSubtitle = null;
+          if (i !== null) {
+            selectedSubtitle = null;
+            selectedPart = null;
+          }
         }}
         onzoomchange={(next) => {
           if (!editLocked) zooms = next;
@@ -1586,7 +1653,10 @@
         {selectedSubtitle}
         onsubtitleselect={(i) => {
           selectedSubtitle = i;
-          if (i !== null) selectedZoom = null;
+          if (i !== null) {
+            selectedZoom = null;
+            selectedPart = null;
+          }
         }}
         onsubtitlechange={(next) => {
           if (!editLocked) subtitles = next;
@@ -1595,6 +1665,16 @@
         onsubtitleremove={removeSubtitleAt}
         onsubtitleedit={editSubtitle}
         {onlanedown}
+        {audioParts}
+        {selectedPart}
+        onpartselect={selectPart}
+        onpartchange={(next) => {
+          if (!editLocked) audioParts = next;
+        }}
+        onpartgesture={(active) => (active ? gestures.start("part") : gestures.end("part"))}
+        onpartremove={removePartAt}
+        onpartlevel={cyclePartLevel}
+        onpartadd={partHere}
         view={timelineView}
         onview={(v) => (timelineView = v)}
       >
@@ -1623,6 +1703,7 @@
         <span><kbd>S</kbd> split</span>
         <span><kbd>Z</kbd> zoom</span>
         <span><kbd>T</kbd> subtitle</span>
+        <span><kbd>Shift</kbd>+drag on a sound lane: mute part of it</span>
         <span><kbd>←</kbd><kbd>→</kbd> one frame</span>
         <span><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> one second</span>
         <span><kbd>+</kbd><kbd>−</kbd> or <kbd>Ctrl</kbd>+scroll zoom the timeline</span>

@@ -579,6 +579,12 @@ export const api = {
    */
   makePartClip: (id: string, title: string, edit: EditInput, thumbnailMs: number | null) =>
     invoke<ClipView>("make_part_clip", { id, title, ...edit, thumbnailMs }),
+  /**
+   * "Combine": clips `ids`, in this order and each with its saved edit, become one new clip
+   * titled `title`; they stay as they are. Progress arrives as `combine-progress`; the new clip
+   * also arrives as `clip-imported`.
+   */
+  combineClips: (ids: string[], title: string) => invoke<ClipView>("combine_clips", { ids, title }),
   /** What Klipt's processes use right now; made for polling about once a second. */
   resourceUsage: () => invoke<ResourceUsage>("resource_usage"),
   /** Closes the hidden window to free its memory; answers `release-window-check`. */
@@ -612,6 +618,8 @@ export interface Events {
   "upload-done": UploadDone;
   "upload-failed": UploadFailed;
   "export-progress": ExportProgress;
+  /** How far a "Combine" is, 0..1. */
+  "combine-progress": number;
   /** The number of friends' clips you haven't seen changed. */
   "feed-new": { count: number };
   /** A clip's thumbnail was made again (the editor picked a new frame). */

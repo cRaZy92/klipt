@@ -8,6 +8,7 @@
   import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
   import { formatElapsed } from "../lib/elapsed";
   import type { RemoveWhere } from "../lib/removal";
+  import { combinable, MAX_COMBINE } from "../lib/combine";
   import { keepShown, selectClick } from "../lib/selection";
   import { isBusy, uploadInTurn, uploads as uploadJobs } from "../lib/uploads.svelte";
   import { WHERE, gameChips, gameCounts, matchesPlace, mergeClips, visibleClips, type MediaKind, type Place } from "../lib/myClips";
@@ -15,6 +16,7 @@
   import { toast } from "../lib/toasts.svelte";
   import ClipCard from "../components/ClipCard.svelte";
   import ClipPlayer from "../components/ClipPlayer.svelte";
+  import CombineDialog from "../components/CombineDialog.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import ImageViewer from "../components/ImageViewer.svelte";
@@ -68,6 +70,8 @@
   } | null>(null);
   let deleting = $state(false);
   let bulkUpload = $state<{ clips: ClipView[]; visibility: "feed" | "link" } | null>(null);
+  /** Joining the selected clips into one new clip. */
+  let combining = $state<ClipView[] | null>(null);
   /** Cards picked for a bulk action, by `MyClip.key`; `anchor` is the last one clicked (for Shift). */
   let selected = $state<Set<string>>(new Set());
   let anchor: string | null = null;
@@ -107,6 +111,8 @@
   const uploadable = $derived(
     picked.local.map((p) => p.clip).filter((c) => !c.fileMissing && !c.shareUrl && !isBusy(uploadJobs[c.id])),
   );
+  /** Selected clips that can be joined into one: clips (not screenshots) on this PC, oldest first. */
+  const joinable = $derived(combinable(picked.local.map((p) => p.clip)));
   const allStarred = $derived(
     picked.local.every((p) => p.clip.favorite) && picked.online.every((u) => u.favorite !== false),
   );
@@ -136,7 +142,7 @@
   }
 
   const dialogOpen = $derived(
-    !!(uploading || playing || viewing || renaming || tagging || removing || deletingOnline || bulkUpload),
+    !!(uploading || playing || viewing || renaming || tagging || removing || deletingOnline || bulkUpload || combining),
   );
 
   let searchInput = $state<HTMLInputElement>();
@@ -356,6 +362,16 @@
       visibility,
     );
     if (done > 0) toast(`Uploaded ${done === 1 ? "1 clip" : `${done} clips`}. Copy a link from its card to share it.`, "success");
+  }
+
+  /** A combine finished: show the new clip, and open its upload when that was asked for. */
+  function combined(clip: ClipView, upload: boolean) {
+    local = [clip, ...local.filter((c) => c.id !== clip.id)];
+    // Hidden while it ran: the selection may be a new one by now.
+    if (combining) clearSelection();
+    combining = null;
+    if (upload) uploading = clip;
+    else toast(`Combined into “${clip.title}”.`, "success");
   }
 
   /** Picks a folder (ShadowPlay, OBS, Medal…) and imports the clips in it. */
@@ -740,6 +756,18 @@
           ? ` ${uploadable.length}`
           : ""}
       </button>
+      <button
+        class="btn btn-sm btn-ghost"
+        disabled={joinable.length < 2 || joinable.length > MAX_COMBINE}
+        title={joinable.length < 2
+          ? "Pick two or more clips on this PC to join them into one"
+          : joinable.length > MAX_COMBINE
+            ? `Up to ${MAX_COMBINE} clips can be combined at once`
+            : "Join them into one new clip, e.g. to upload them as one video"}
+        onclick={() => (combining = joinable)}
+      >
+        <Icon name="combine" size={15} /> Combine
+      </button>
       <button class="btn btn-sm btn-ghost bulk-danger" onclick={() => askRemove(picked.local, picked.online)}>
         <Icon name="trash" size={15} /> Delete
       </button>
@@ -774,6 +802,10 @@
       <button class="btn btn-primary" onclick={startBulkUpload}><Icon name="upload" size={16} /> Upload</button>
     {/snippet}
   </Modal>
+{/if}
+
+{#if combining}
+  <CombineDialog clips={combining} onclose={() => (combining = null)} ondone={combined} />
 {/if}
 
 {#if uploading}

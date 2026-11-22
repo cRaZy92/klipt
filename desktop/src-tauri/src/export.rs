@@ -353,7 +353,7 @@ pub fn export(
 }
 
 /// Runs ffmpeg in `cwd` (where relative paths in its filters point).
-fn run(tools: &Tools, args: &[String], cwd: &Path, expected_us: f64, progress: &mut impl FnMut(f32)) -> Result<()> {
+pub(crate) fn run(tools: &Tools, args: &[String], cwd: &Path, expected_us: f64, progress: &mut impl FnMut(f32)) -> Result<()> {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
     let mut command = Command::new(&tools.ffmpeg);
     command.current_dir(cwd).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());

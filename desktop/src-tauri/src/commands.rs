@@ -41,6 +41,8 @@ pub mod events {
     pub const UPLOAD_FAILED: &str = "upload-failed";
     /// Payload: `{ id, progress }`, progress 0..=1 of an "Export copy…".
     pub const EXPORT_PROGRESS: &str = "export-progress";
+    /// Payload: progress 0..=1 of a "Combine" (one runs at a time from the UI).
+    pub const COMBINE_PROGRESS: &str = "combine-progress";
     /// Payload: `{ id }`: the clip's thumbnail was made again (the editor picked a frame).
     pub const THUMBNAIL_CHANGED: &str = "thumbnail-changed";
     /// Payload: `{ id, frames }`: how many filmstrip frames of the open clip are readable now.
@@ -1315,6 +1317,36 @@ pub async fn make_part_clip(
     })
     .await?
     .inspect_err(|e| crate::elog!("klipt: new clip from a part failed: {e}"))?;
+    emit(&app, crate::import::events::CLIP_IMPORTED, &view);
+    Ok(view)
+}
+
+/// "Combine": clips `ids` (in this order, each with its saved edit) are joined into one new clip
+/// titled `title` in the clips folder; the clips themselves stay as they are. Reports
+/// `combine-progress` (0..=1); the new clip also arrives as `clip-imported`, so My clips shows it.
+#[tauri::command]
+pub async fn combine_clips(app: AppHandle, ids: Vec<String>, title: String) -> Result<ClipView> {
+    let title = clean_title(&title)?;
+    let (clips, tools, dir) = {
+        let state = app.state::<AppState>();
+        let library = lock(&state.library);
+        let clips = ids.iter().map(|id| library.get(id)).collect::<Result<Vec<_>>>()?;
+        let dir = lock(&state.settings).output_dir.clone();
+        (clips, state.tools.clone(), dir)
+    };
+    let tools = tools.ok_or(AppError::ToolsMissing)?;
+    let cache_dir = cache_dir(&app)?;
+    let worker_app = app.clone();
+    let view = tauri::async_runtime::spawn_blocking(move || {
+        let state = worker_app.state::<AppState>();
+        crate::combine::combine(&tools, &state.library, &clips, &title, &dir, &cache_dir, |p| {
+            emit(&worker_app, events::COMBINE_PROGRESS, p);
+        })
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("combine task failed: {e}")))
+    .and_then(|r| r)
+    .inspect_err(|e| crate::elog!("klipt: combining clips failed: {e}"))?;
     emit(&app, crate::import::events::CLIP_IMPORTED, &view);
     Ok(view)
 }

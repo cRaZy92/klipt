@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod cleanup;
+pub mod combine;
 pub mod commands;
 pub mod diagnostics;
 pub mod editor;
@@ -165,6 +166,7 @@ pub fn run() {
             commands::save_edit,
             commands::export_copy,
             commands::make_part_clip,
+            commands::combine_clips,
             resources::resource_usage,
             tray::release_window,
             update::pending_update,

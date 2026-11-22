@@ -156,3 +156,29 @@ export const clipFavorites = pgTable(
   },
   (t) => [primaryKey({ columns: [t.clipId, t.userId] }), index('clip_favorites_user_idx').on(t.userId)],
 );
+
+/** A named list of clips (anyone's, in the owner's order) with one share link: `/a/<id>`, the id is the secret. */
+export const albums = pgTable(
+  'albums',
+  {
+    id: text('id').primaryKey(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    /** Bumped when the title or the clips change; albums are listed most recently changed first. */
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [index('albums_user_idx').on(t.userId, t.updatedAt.desc())],
+);
+
+/** The clips in an album, in order (`position`, lowest first). A deleted clip leaves its albums. */
+export const albumClips = pgTable(
+  'album_clips',
+  {
+    albumId: text('album_id').notNull().references(() => albums.id, { onDelete: 'cascade' }),
+    clipId: text('clip_id').notNull().references(() => clips.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    addedAt: ts('added_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.albumId, t.clipId] }), index('album_clips_clip_idx').on(t.clipId)],
+);

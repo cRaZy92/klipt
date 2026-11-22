@@ -78,6 +78,13 @@
       "when": 1795225785598,
       "tag": "0010_accounts_devices_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795319793670,
+      "tag": "0011_albums",
+      "breakpoints": true
     }
   ]
 }

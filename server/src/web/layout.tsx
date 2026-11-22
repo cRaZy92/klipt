@@ -4,7 +4,7 @@ import type { AuthUser } from '../auth/sessions.js';
 import { esc as e } from './escape.js';
 
 /** The top bar's sections; the page passes its own so the bar can mark it. */
-export type NavSection = 'feed' | 'me' | 'get-app' | 'admin' | 'account';
+export type NavSection = 'feed' | 'me' | 'albums' | 'get-app' | 'admin' | 'account';
 
 /** The app icon: a play triangle between two clip brackets (desktop/src-tauri/icons/source.svg). */
 export function LogoMark(props: { size?: number }): JSX.Element {
@@ -75,6 +75,7 @@ export function Layout(props: {
                 <nav class="nav" aria-label="Main">
                   {link('feed', '/', 'Feed')}
                   {link('me', '/me', 'My clips')}
+                  {link('albums', '/albums', 'Albums')}
                   {link('get-app', '/get-app', 'Get the app')}
                   {user.isAdmin ? link('admin', '/admin', 'Admin') : ''}
                 </nav>

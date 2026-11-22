@@ -222,3 +222,27 @@ export interface ClipViewer {
   displayName: string;
   viewedAt: string;
 }
+
+/** The most clips an album holds. */
+export const MAX_ALBUM_CLIPS = 200;
+
+/** An album as lists show it: `GET /api/albums`. */
+export interface AlbumSummary {
+  id: string;
+  title: string;
+  owner: { username: string; displayName: string };
+  clipCount: number;
+  /** The first clip's thumbnail; null while the album is empty. */
+  coverUrl: string | null;
+  /** The album's page, `/a/<id>`: anyone with the link can watch it, like a clip's share link. */
+  shareUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  /** With `?clip=<id>`: whether that clip is in the album. */
+  hasClip?: boolean;
+}
+
+/** An album with its clips, in order: `GET /api/albums/:id`. */
+export interface Album extends AlbumSummary {
+  clips: Clip[];
+}

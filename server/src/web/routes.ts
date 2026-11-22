@@ -23,6 +23,8 @@ import { embedFileName } from '../clips/files.js';
 import { MePage } from './pages/me.js';
 import { NotFoundPage } from './pages/notFound.js';
 import { UserPage } from './pages/user.js';
+import { AlbumPage, AlbumsPage } from './pages/albums.js';
+import { albumClipList, getAlbum, listAlbums, toAlbumSummary } from '../albums/repo.js';
 import { createLatestInstaller } from './latestInstaller.js';
 import { createSteamArt, parseAppId } from './steamArt.js';
 
@@ -159,6 +161,24 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
         ? { url: `${config.baseUrl}/media/${embedFileName(clip.id)}${versionQuery(found.clip)}`, width: plan.width, height: plan.height }
         : null;
     return html(reply, SharePage({ user: req.user, clip, embed, canDelete, viewers, signup }) as string);
+  });
+
+  app.get('/albums', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    const albums = (await listAlbums(db, req.user!.id)).map((a) => toAlbumSummary(a, config.baseUrl));
+    return html(reply, AlbumsPage({ user: req.user!, albums }) as string);
+  });
+
+  // Public, like a clip's share link: the id is the secret. `?c=<clip id>` picks the clip that plays.
+  app.get('/a/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const found = /^[A-Za-z0-9_-]{12}$/.test(id) ? await getAlbum(db, id) : null;
+    if (!found) return html(reply, NotFoundPage({ user: req.user, message: "This album doesn't exist or was deleted." }) as string, 404);
+    const clips = (await albumClipList(db, id, req.user?.id)).map((c) => toClip(c, config.baseUrl));
+    const pick = (req.query as { c?: unknown }).c;
+    const current = clips.find((c) => c.id === pick) ?? clips[0] ?? null;
+    const isOwner = req.user?.id === found.album.userId;
+    return html(reply, AlbumPage({ user: req.user, album: toAlbumSummary(found, config.baseUrl), clips, current, isOwner }) as string);
   });
 
   app.get('/me', async (req, reply) => {

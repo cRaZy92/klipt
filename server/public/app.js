@@ -47,6 +47,9 @@
     invalid_display_name: 'Names are up to 32 characters.',
     invalid_reset: 'This password link was used already or has expired. Ask your admin for a new one.',
     password_mismatch: "The two new passwords aren't the same.",
+    album_full: 'That album is full (200 clips).',
+    album_changed: 'The album changed meanwhile. Reload the page and try again.',
+    unknown_clip: 'That clip no longer exists.',
   };
   function friendly(err) {
     if (err.status === 429) return MESSAGES.rate_limited;
@@ -118,6 +121,11 @@
         form.reset();
         toast('Sent. Thanks!');
         btn.disabled = false;
+        return;
+      }
+      if (kind === 'album') {
+        var made = await api('POST', '/api/albums', { title: data.title });
+        location.assign('/a/' + encodeURIComponent(made.id));
         return;
       }
       if (kind === 'reset') {
@@ -202,6 +210,36 @@
         btn.classList.toggle('on', on);
         btn.textContent = on ? '★ Favorite' : '☆ Favorite';
         toast(on ? 'Added to favorites' : 'Removed from favorites');
+      } else if (action === 'album-pick') {
+        await openAlbumPicker();
+      } else if (action === 'album-rename') {
+        var album = btn.closest('[data-album-id]');
+        var title = prompt('Album name', btn.dataset.title);
+        if (title === null) return;
+        title = title.trim();
+        if (!title || title.length > 100) { toast('Album names are 1-100 characters'); return; }
+        await api('PATCH', '/api/albums/' + album.dataset.albumId, { title: title });
+        album.querySelector('[data-role=album-title]').textContent = title;
+        btn.dataset.title = title;
+        document.title = title + ' · Klipt';
+        toast('Renamed');
+      } else if (action === 'album-delete') {
+        if (!confirm('Delete this album? Its clips stay where they are.')) return;
+        await api('DELETE', '/api/albums/' + btn.closest('[data-album-id]').dataset.albumId);
+        location.assign('/albums');
+      } else if (action === 'album-move') {
+        var item = btn.closest('[data-album-clip]');
+        var ids = Array.prototype.map.call(item.parentElement.querySelectorAll('[data-album-clip]'), function (li) { return li.dataset.albumClip; });
+        var from = ids.indexOf(item.dataset.albumClip);
+        var to = from + Number(btn.dataset.dir);
+        if (to < 0 || to >= ids.length) return;
+        ids.splice(to, 0, ids.splice(from, 1)[0]);
+        await api('PATCH', '/api/albums/' + btn.closest('[data-album-id]').dataset.albumId, { clipIds: ids });
+        location.reload();
+      } else if (action === 'album-remove') {
+        var gone = btn.closest('[data-album-clip]');
+        await api('DELETE', '/api/albums/' + btn.closest('[data-album-id]').dataset.albumId + '/clips/' + gone.dataset.albumClip);
+        location.reload();
       } else if (action === 'retry-transcode') {
         btn.disabled = true;
         await api('POST', '/api/admin/transcodes/' + encodeURIComponent(clipRow.dataset.clipId) + '/retry');
@@ -231,6 +269,91 @@
       }
     } catch (e) {
       toast(friendly(e));
+    }
+  });
+
+  // A clip's page: "Add to album" lists your albums with a check box each, and makes new ones.
+  function albumPicker() { return document.querySelector('dialog.album-picker'); }
+
+  async function openAlbumPicker() {
+    var dialog = albumPicker();
+    if (!dialog) return;
+    if (!dialog.open) dialog.showModal();
+    await renderAlbumChoices(dialog);
+  }
+
+  async function renderAlbumChoices(dialog) {
+    var list = dialog.querySelector('[data-role=album-choices]');
+    var albums = await api('GET', '/api/albums?clip=' + encodeURIComponent(dialog.dataset.clipId));
+    list.textContent = '';
+    if (albums.length === 0) {
+      var none = document.createElement('li');
+      none.className = 'muted';
+      none.textContent = 'No albums yet. Name one below.';
+      list.appendChild(none);
+      return;
+    }
+    albums.forEach(function (a) {
+      var li = document.createElement('li');
+      var label = document.createElement('label');
+      var box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !!a.hasClip;
+      box.dataset.albumId = a.id;
+      var name = document.createElement('span');
+      name.className = 'album-choice-name';
+      name.textContent = a.title;
+      var count = document.createElement('span');
+      count.className = 'muted';
+      count.textContent = a.clipCount === 1 ? '1 clip' : a.clipCount + ' clips';
+      var open = document.createElement('a');
+      open.href = '/a/' + encodeURIComponent(a.id);
+      open.className = 'album-choice-open';
+      open.textContent = 'Open';
+      label.append(box, name, count);
+      li.append(label, open);
+      list.appendChild(li);
+    });
+  }
+
+  document.addEventListener('change', async function (ev) {
+    var box = ev.target;
+    var dialog = box.closest && box.closest('dialog.album-picker');
+    if (!dialog || !box.dataset.albumId) return;
+    box.disabled = true;
+    try {
+      await api(box.checked ? 'PUT' : 'DELETE', '/api/albums/' + box.dataset.albumId + '/clips/' + dialog.dataset.clipId);
+      var count = box.parentElement.querySelector('.muted');
+      var n = parseInt(count.textContent, 10) + (box.checked ? 1 : -1);
+      count.textContent = n === 1 ? '1 clip' : n + ' clips';
+      toast(box.checked ? 'Added to ' + box.nextSibling.textContent : 'Removed from ' + box.nextSibling.textContent);
+    } catch (e) {
+      box.checked = !box.checked;
+      toast(friendly(e));
+    } finally {
+      box.disabled = false;
+    }
+  });
+
+  document.addEventListener('submit', async function (ev) {
+    var form = ev.target.closest && ev.target.closest('form[data-role=album-new]');
+    if (!form) return;
+    ev.preventDefault();
+    var dialog = form.closest('dialog.album-picker');
+    var input = form.querySelector('[name=title]');
+    var title = input.value.trim();
+    if (!title) return;
+    var btn = form.querySelector('button');
+    btn.disabled = true;
+    try {
+      await api('POST', '/api/albums', { title: title, clipIds: [dialog.dataset.clipId] });
+      form.reset();
+      await renderAlbumChoices(dialog);
+      toast('Added to ' + title);
+    } catch (e) {
+      toast(friendly(e));
+    } finally {
+      btn.disabled = false;
     }
   });
 

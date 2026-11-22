@@ -3,6 +3,7 @@ import type { AuthUser } from '../../auth/sessions.js';
 import { esc as e } from '../escape.js';
 import { Avatar, Layout } from '../layout.js';
 import { skDate, viewsLabel } from '../components.js';
+import { AlbumPicker } from './albums.js';
 
 function meta(attr: 'property' | 'name', key: string, value: string | number): string {
   return `<meta ${attr}="${key}" content="${e(String(value))}" />`;
@@ -168,6 +169,14 @@ export function SharePage(props: {
             ) : (
               ''
             )}
+            {props.user ? (
+              <button type="button" class="btn" data-action="album-pick" title="Put this clip in one of your albums">
+                <Icon d="M4 6h16M4 12h10M4 18h7M18 14v6M15 17h6" />
+                Add to album
+              </button>
+            ) : (
+              ''
+            )}
           </div>
           <div class="share-more">
             <a class="btn ghost small" href={e(`${clip.videoUrl}?download=1`)} download="">
@@ -185,6 +194,7 @@ export function SharePage(props: {
           </div>
           {props.signup && !props.user ? <JoinCard clip={clip} /> : ''}
         </aside>
+        {props.user ? <AlbumPicker clipId={clip.id} /> : ''}
       </div>
     </Layout>
   );

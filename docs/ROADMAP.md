@@ -130,7 +130,7 @@ Asked for by the owner. Item 1 is built and merged to `main` (plan: `docs/superp
 
 ## Planned: safety and editor additions (chosen 2026-11-20)
 
-Picked by the owner from a list of suggestions. None has a spec yet.
+Picked by the owner from a list of suggestions (item 8 added 2026-11-22). None has a spec yet.
 
 | # | Feature                          | What it means                                                                                      |
 | - | -------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -141,6 +141,7 @@ Picked by the owner from a list of suggestions. None has a spec yet.
 | 5 | Albums                           | Gather clips (your own or friends') into a named album with one share link, e.g. "Best of the tournament" |
 | 6 | Draw on the clip                 | Arrows, circles and boxes placed on the video for part of a clip, on their own editor lane like subtitles; burned into exports and uploads |
 | 7 | Download all my clips            | A website button that downloads every clip you uploaded as one zip, as a backup or to leave |
+| 8 | Zoom the editor timeline         | Zoom in on the timeline (Ctrl+scroll or a slider) to place cuts, subtitles and markers precisely on long clips and recordings; scrolls sideways and follows the playhead. Added by the owner 2026-11-22 |
 
 ## Later: after v1
 

@@ -1271,6 +1271,54 @@ pub async fn export_copy(
     result
 }
 
+/// "New clip from this part": the editor's current trim of clip `id` (with its cuts, zooms,
+/// subtitles and volumes, saved or not) becomes a new clip titled `title` in the clips folder.
+/// The source clip and its file stay as they are. The new clip arrives as `clip-imported` too,
+/// so My clips shows it.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn make_part_clip(
+    app: AppHandle,
+    id: String,
+    title: String,
+    trim_start_ms: Option<u64>,
+    trim_end_ms: Option<u64>,
+    game_volume: f32,
+    mic_volume: f32,
+    voice_volume: Option<f32>,
+    master_volume: Option<f32>,
+    extra_volumes: Option<BTreeMap<u32, f32>>,
+    blur_video: Option<bool>,
+    removed_ranges: Option<Vec<crate::library::CutRange>>,
+    zoom_ranges: Option<Vec<crate::library::ZoomRange>>,
+    subtitles: Option<Vec<crate::library::SubtitleRange>>,
+    thumbnail_ms: Option<u64>,
+) -> Result<ClipView> {
+    let title = clean_title(&title)?;
+    let (clip, tools, dir) = {
+        let state = app.state::<AppState>();
+        let clip = lock(&state.library).get(&id)?;
+        let dir = lock(&state.settings).output_dir.clone();
+        (clip, state.tools.clone(), dir)
+    };
+    if !clip.path.is_file() {
+        return Err(AppError::FileMissing);
+    }
+    let tools = tools.ok_or(AppError::ToolsMissing)?;
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles);
+    let trim = crate::library::Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms };
+    crate::library::validate_cuts(trim, &edit.removed, clip.duration_ms)?;
+    let worker_app = app.clone();
+    let view = off_main(move || {
+        let state = worker_app.state::<AppState>();
+        crate::parts::make_part(&tools, &state.library, &clip, &edit, thumbnail_ms, &title, &dir)
+    })
+    .await?
+    .inspect_err(|e| crate::elog!("klipt: new clip from a part failed: {e}"))?;
+    emit(&app, crate::import::events::CLIP_IMPORTED, &view);
+    Ok(view)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

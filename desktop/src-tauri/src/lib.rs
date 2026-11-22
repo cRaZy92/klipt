@@ -20,6 +20,7 @@ pub mod library;
 pub mod logging;
 pub mod media_server;
 pub mod mp4_mute;
+pub mod parts;
 pub mod update;
 pub mod recorder;
 pub mod resources;
@@ -163,6 +164,7 @@ pub fn run() {
             commands::close_editor,
             commands::save_edit,
             commands::export_copy,
+            commands::make_part_clip,
             resources::resource_usage,
             tray::release_window,
             update::pending_update,

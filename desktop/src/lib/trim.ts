@@ -39,6 +39,21 @@ export function clampTrim(
   return { start: s, end: e };
 }
 
+/**
+ * The I key: the trim starts at `ms`. When the end isn't far enough after it, the end goes to the
+ * clip's end, so the next part of a long recording can be marked start first.
+ */
+export function markIn(trim: TrimRange, ms: number, duration: number): TrimRange {
+  const end = trim.end >= ms + MIN_TRIM_MS ? trim.end : duration;
+  return clampTrim(ms, end, duration, MIN_TRIM_MS, "end");
+}
+
+/** The O key: the trim ends at `ms`. When the start isn't far enough before it, it goes to 0. */
+export function markOut(trim: TrimRange, ms: number, duration: number): TrimRange {
+  const start = trim.start <= ms - MIN_TRIM_MS ? trim.start : 0;
+  return clampTrim(start, ms, duration, MIN_TRIM_MS, "start");
+}
+
 /** Where `ms` sits on a bar `width` pixels wide. */
 export function msToX(ms: number, duration: number, width: number): number {
   if (!(duration > 0) || !(width > 0) || !Number.isFinite(ms)) return 0;

@@ -573,6 +573,12 @@ export const api = {
   /** Resolves once the copy is written; progress arrives as `export-progress`. */
   exportCopy: (id: string, destPath: string, edit: EditInput) =>
     invoke<void>("export_copy", { id, destPath, ...edit }),
+  /**
+   * "New clip from this part": the trim of `edit` (with what's inside it) becomes a new clip
+   * titled `title`; the source stays as it is. The new clip also arrives as `clip-imported`.
+   */
+  makePartClip: (id: string, title: string, edit: EditInput, thumbnailMs: number | null) =>
+    invoke<ClipView>("make_part_clip", { id, title, ...edit, thumbnailMs }),
   /** What Klipt's processes use right now; made for polling about once a second. */
   resourceUsage: () => invoke<ResourceUsage>("resource_usage"),
   /** Closes the hidden window to free its memory; answers `release-window-check`. */

@@ -9,6 +9,7 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 2026-11-22 | Clips from parts         | Editor "New clip" makes the trimmed part (cuts, zooms, subtitles, volumes, thumbnail inside it) its own clip in the clips folder, game kept, source untouched; a lossless stream copy from the keyframe before the part, so it takes seconds on long recordings. I / O set the trim start / end at the playhead. Untested in the app and on Windows |
 | 2026-11-22 | Timeline zoom            | Zoom the editor timeline (Ctrl+scroll, the slider in the ruler's corner, + / − / 0) down to 1 s; scrollbar, Shift+scroll, follows the playhead; finer ruler labels and waveforms when zoomed (read straight from the samples on long recordings); drags held at an edge scroll along. Untested in the app and on Windows |
 | 2026-11-21 | Ready for a friend       | Log file on every PC; Report a problem / Suggest a feature (with system info and log) to the admin page; display names; change password (app and website) and admin password links; admin page shows last seen, app version, OS and GPU; hotkey hint for overlays that take shortcuts. Untested on Windows; server needs redeploy |
 | 2026-11-20 | Replace an online clip   | Re-uploading an uploaded clip can swap its video at the same link (`85ebbfa`). Untested in the app; server needs redeploy |
@@ -121,12 +122,12 @@ instead of "Are you sure?" (item 10).
 
 ## Planned: recording and multi-clip editing (chosen 2026-11-20)
 
-Asked for by the owner. Item 1 is built and merged to `main` (plan: `docs/superpowers/plans/2026-11-20-full-recording.md`); items 2 and 3 have no spec yet.
+Asked for by the owner. Item 1 is built and merged to `main` (plan: `docs/superpowers/plans/2026-11-20-full-recording.md`); item 2 is built (2026-11-22, no spec); item 3 has no spec yet.
 
 | # | Feature                          | What it means                                                                                      |
 | - | -------------------------------- | -------------------------------------------------------------------------------------------------- |
 | 1 | Full recording (start/stop) — **built 2026-11-20, on `main`; needs a Windows check** | Besides the replay buffer, a shortcut (default Ctrl+Alt+Backquote), a Record button in My clips and a tray item start and stop a normal recording of any length, saved to `<clips>/Recordings/` and into the library with a recording marker. Linux: gsr `-ro` + SIGRTMIN in the same process (one encoder). Windows: a libobs `ffmpeg_muxer` output sharing the replay buffer's encoders. Recordings follow the normal cleanup rule. Settings, pause, game exit and quit never cut a running recording |
-| 2 | Several clips from one recording | In the editor, mark several parts of one clip or recording and export each as its own clip (own title, game kept, own thumbnail), without touching the source |
+| 2 | Several clips from one recording — **built 2026-11-22; untested in the app** | One part at a time: set the trim (drag, or I / O at the playhead), press "New clip", name it, repeat. In the editor, mark several parts of one clip or recording and export each as its own clip (own title, game kept, own thumbnail), without touching the source |
 | 3 | Combine clips into one upload    | Pick several clips (e.g. from the multi-select bar in My clips) and join them in order into one video that uploads as a single clip; each part keeps its own trim. Moved here from "Merging clips in the editor" under Later |
 
 ## Planned: safety and editor additions (chosen 2026-11-20)

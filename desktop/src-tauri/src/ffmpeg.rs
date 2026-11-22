@@ -286,6 +286,60 @@ pub fn thumbnail_if<G>(tools: &Tools, input: &Path, out: &Path, at_ms: u64, want
     write_via_temp(tools, args, out, "tmp.jpg", &format!("no video frame at {at_ms} ms"), None, wanted)
 }
 
+/// The last video keyframe at or before `at_ms` (ms into the file), found by reading packet flags
+/// only (nothing is decoded), up to 30 s back. 0 when there is none in that window.
+pub fn keyframe_at_or_before(tools: &Tools, input: &Path, at_ms: u64) -> Result<u64> {
+    // ffprobe's times count from the file's start time; Klipt's ms count from the file's start.
+    let start_ms = probe_start_ms(tools, input)?;
+    let secs = |ms: u64| format!("{:.3}", (start_ms + ms) as f64 / 1000.0);
+    let mut args = os_args(["-v", "error", "-select_streams", "v:0", "-read_intervals"]);
+    args.push(format!("{}%{}", secs(at_ms.saturating_sub(30_000)), secs(at_ms + 1)).into());
+    args.extend(os_args(["-show_entries", "packet=pts_time,flags", "-of", "csv=p=0"]));
+    args.push(input.into());
+    let output = run("ffprobe", &tools.ffprobe, &args)?;
+    Ok(parse_keyframe_before(&String::from_utf8_lossy(&output.stdout), start_ms as f64, at_ms))
+}
+
+/// The file's start time in ms (`format.start_time`; 0 when it has none).
+fn probe_start_ms(tools: &Tools, input: &Path) -> Result<u64> {
+    let mut args = os_args(["-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0"]);
+    args.push(input.into());
+    let output = run("ffprobe", &tools.ffprobe, &args)?;
+    let secs: f64 = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0.0);
+    Ok(if secs.is_finite() && secs > 0.0 { (secs * 1000.0).round() as u64 } else { 0 })
+}
+
+/// From ffprobe's `pts_time,flags` lines: the latest keyframe at or before `at_ms` (rounded to
+/// whole ms, relative to `start_ms`), or 0.
+pub(crate) fn parse_keyframe_before(csv: &str, start_ms: f64, at_ms: u64) -> u64 {
+    csv.lines()
+        .filter_map(|line| {
+            let (pts, flags) = line.trim().split_once(',')?;
+            let ms = pts.parse::<f64>().ok()? * 1000.0 - start_ms;
+            (flags.starts_with('K') && ms.is_finite() && ms >= 0.0).then(|| ms.round() as u64)
+        })
+        .filter(|&ms| ms <= at_ms)
+        .max()
+        .unwrap_or(0)
+}
+
+/// Copies `from_ms..to_ms` of `input` (every audio track, the first video track) into `out`
+/// without re-encoding, replacing it atomically. `from_ms` should be a keyframe
+/// ([`keyframe_at_or_before`]): the copy starts there.
+pub fn copy_range(tools: &Tools, input: &Path, from_ms: u64, to_ms: u64, out: &Path) -> Result<()> {
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut args = os_args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-ss"]);
+    args.push(format!("{:.3}", from_ms as f64 / 1000.0).into());
+    args.push("-i".into());
+    args.push(input.into());
+    args.push("-t".into());
+    args.push(format!("{:.3}", to_ms.saturating_sub(from_ms) as f64 / 1000.0).into());
+    args.extend(os_args(["-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart"]));
+    write_via_temp(tools, args, out, "tmp.mp4", "ffmpeg wrote nothing", None, || Some(())).map(|_| ())
+}
+
 /// Copies audio track `track_index` (0 = game, 1 = mic) into an `.m4a` without re-encoding.
 pub fn demux_audio(tools: &Tools, input: &Path, track_index: u32, out: &Path) -> Result<()> {
     demux_audio_progress(tools, input, track_index, out, 0, &mut |_| {})

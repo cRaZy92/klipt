@@ -19,7 +19,7 @@
   import { exportFileName, formatSize, hueOf } from "../lib/format";
   import { editorStep, type EditorProgress } from "../lib/progress";
   import { frameUrl, previewIndex } from "../lib/filmstrip";
-  import { clampTrim, formatClock, savedTrim, type TrimRange } from "../lib/trim";
+  import { clampTrim, formatClock, markIn, markOut, savedTrim, type TrimRange } from "../lib/trim";
   import {
     clampToKept,
     keptLength,
@@ -213,6 +213,10 @@
   let removing = $state<ClipView | null>(null);
   let deleting = $state(false);
   let exportProgress = $state<number | null>(null);
+  /** "New clip from this part": the title being typed, while its dialog is open. */
+  let parting = $state<{ title: string; making: boolean } | null>(null);
+  /** Clips made from parts of this one since the editor opened (numbers the suggested titles). */
+  let partsMade = 0;
   let uploadOpen = $state(false);
 
   const job = $derived(uploads[clip.id]);
@@ -945,6 +949,15 @@
     else toast("Can't split here: too close to a split or the trim, or outside the trim", "error");
   }
 
+  /** I / O: the trim starts or ends at the playhead. */
+  function markHere(end: "in" | "out") {
+    if (editLocked || !data) return;
+    const next = end === "in" ? markIn(trim, position, duration) : markOut(trim, position, duration);
+    if (next.start === trim.start && next.end === trim.end) return;
+    trim = next;
+    timelineView = followView(timelineView, duration, end === "in" ? next.start : next.end);
+  }
+
   /** Adds a zoom at the playhead and picks it, so its box can be placed on the video. */
   function zoomHere() {
     if (editLocked) return;
@@ -1069,7 +1082,7 @@
     if (e.defaultPrevented) return;
     // Text fields and dialogs keep their keys, and a slider focused from the keyboard its arrows;
     // Space plays even on a focused button (its press is prevented, so it isn't clicked).
-    const action = editorKeyAction(e, keyTarget(e.target instanceof Element ? e.target : null), uploadOpen);
+    const action = editorKeyAction(e, keyTarget(e.target instanceof Element ? e.target : null), uploadOpen || parting !== null);
     if (!action) return;
     e.preventDefault();
     if (action.kind === "undo") undo();
@@ -1078,6 +1091,7 @@
     else if (action.kind === "split") splitHere();
     else if (action.kind === "zoom") zoomHere();
     else if (action.kind === "subtitle") subtitleHere();
+    else if (action.kind === "mark") markHere(action.end);
     else if (action.kind === "timelineZoom") zoomTimeline(action.direction);
     else if (action.kind === "delete") {
       if (selectedZoom !== null) removeZoomAt(selectedZoom);
@@ -1147,6 +1161,29 @@
       toast(errorMessage(e), "error");
     } finally {
       exportProgress = null;
+    }
+  }
+
+  /** Opens "New clip from this part" with a suggested title. */
+  function askPart() {
+    if (!data || !kept.length) return;
+    pause();
+    parting = { title: `${data.clip.title} – part ${partsMade + 1}`, making: false };
+  }
+
+  /** Makes the new clip from the trim as it is now; the editor stays on this clip. */
+  async function makePart(e: SubmitEvent) {
+    e.preventDefault();
+    if (!parting || parting.making || !parting.title.trim()) return;
+    parting.making = true;
+    try {
+      const made = await api.makePartClip(clip.id, parting.title.trim(), edit, savedThumb);
+      partsMade += 1;
+      parting = null;
+      toast(`“${made.title}” is in My clips`, "success");
+    } catch (err) {
+      if (parting) parting.making = false;
+      toast(errorMessage(err), "error");
     }
   }
 
@@ -1297,6 +1334,14 @@
           {:else}
             <Icon name="film" size={16} /> Export…
           {/if}
+        </button>
+        <button
+          class="btn"
+          onclick={askPart}
+          disabled={mediaError || !kept.length || parting?.making}
+          title={kept.length ? "Make a new clip from the trimmed part (I and O set the trim at the playhead). This clip stays as it is" : nothingKept}
+        >
+          <Icon name="scissors" size={16} /> New clip
         </button>
         <button class="btn btn-primary" onclick={onupload} disabled={busy || !kept.length} title={kept.length ? undefined : nothingKept}>
           {#if uploading}
@@ -1574,6 +1619,7 @@
       </TrackLanes>
       <p class="hints">
         <span><kbd>Space</kbd> play</span>
+        <span><kbd>I</kbd><kbd>O</kbd> trim start / end here</span>
         <span><kbd>S</kbd> split</span>
         <span><kbd>Z</kbd> zoom</span>
         <span><kbd>T</kbd> subtitle</span>
@@ -1588,6 +1634,29 @@
 
 {#if uploadOpen && data}
   <UploadDialog clip={data.clip} onclose={() => (uploadOpen = false)} />
+{/if}
+
+{#if parting}
+  <Modal title="New clip from this part" onclose={() => parting && !parting.making && (parting = null)}>
+    <form id="editor-part-form" onsubmit={makePart}>
+      <label class="field">
+        <span>Title</span>
+        <!-- svelte-ignore a11y_autofocus -->
+        <input class="input" bind:value={parting.title} maxlength="100" autofocus disabled={parting.making} />
+      </label>
+    </form>
+    <p class="part-info">
+      {formatClock(trim.start)} – {formatClock(trim.end)} · {formatTenths(keptLength(pieces, trim))} long.
+      Its cuts, zooms, subtitles and volumes come along, and the game stays {gameName ?? "unknown"}. This clip
+      stays as it is.
+    </p>
+    {#snippet footer()}
+      <button class="btn" onclick={() => (parting = null)} disabled={parting?.making}>Cancel</button>
+      <button class="btn btn-primary" type="submit" form="editor-part-form" disabled={parting?.making || !parting?.title.trim()}>
+        {#if parting?.making}<span class="spinner"></span> Making…{:else}Make clip{/if}
+      </button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if tagging}
@@ -1689,6 +1758,13 @@
 
   .unknown {
     font-style: italic;
+  }
+
+  .part-info {
+    margin-top: 0.75rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.45;
   }
 
   .actions {

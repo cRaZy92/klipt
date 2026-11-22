@@ -23,6 +23,8 @@ export type EditorKeyAction =
   | { kind: "zoom" }
   /** Adds a subtitle at the playhead. */
   | { kind: "subtitle" }
+  /** Starts (I) or ends (O) the trim at the playhead. */
+  | { kind: "mark"; end: "in" | "out" }
   /** Removes what is picked (the picked zoom or subtitle). */
   | { kind: "delete" }
   | { kind: "undo" }
@@ -52,6 +54,7 @@ export function editorKeyAction(e: EditorKey, target: KeyTarget, dialogOpen: boo
   if (key === "z" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "zoom" };
   if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "subtitle" };
   const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+  if (plain && (key === "i" || key === "o")) return { kind: "mark", end: key === "i" ? "in" : "out" };
   if (plain && (e.key === "+" || e.key === "=")) return { kind: "timelineZoom", direction: 1 };
   if (plain && (e.key === "-" || e.key === "_")) return { kind: "timelineZoom", direction: -1 };
   if (plain && e.key === "0") return { kind: "timelineZoom", direction: 0 };

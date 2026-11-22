@@ -26,6 +26,15 @@ describe("editorKeyAction", () => {
     expect(editorKeyAction(key("s"), "text", false)).toBeNull();
   });
 
+  it("I and O start and end the trim at the playhead, but not with modifiers or in a text field", () => {
+    expect(editorKeyAction(key("i"), "none", false)).toEqual({ kind: "mark", end: "in" });
+    expect(editorKeyAction(key("O", { shiftKey: true }), "control", false)).toEqual({ kind: "mark", end: "out" });
+    expect(editorKeyAction(key("i", { ctrlKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("o", { altKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("i"), "text", false)).toBeNull();
+    expect(editorKeyAction(key("o"), "none", true)).toBeNull();
+  });
+
   it("T adds a subtitle, but not with Ctrl, Alt or Super, nor in a text field", () => {
     expect(editorKeyAction(key("t"), "none", false)).toEqual({ kind: "subtitle" });
     expect(editorKeyAction(key("T", { shiftKey: true }), "control", false)).toEqual({ kind: "subtitle" });

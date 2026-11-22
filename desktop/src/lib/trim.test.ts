@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampPopupLeft, clampThumb, clampTrim, defaultThumb, formatClock, msToX, savedTrim, xToMs } from "./trim";
+import { clampPopupLeft, clampThumb, clampTrim, defaultThumb, formatClock, markIn, markOut, msToX, savedTrim, xToMs } from "./trim";
 
 describe("clampTrim", () => {
   it("keeps a valid range as it is", () => {
@@ -135,5 +135,23 @@ describe("clampPopupLeft", () => {
 
   it("pins it to the left edge when the area is narrower than the popup", () => {
     expect(clampPopupLeft(150, 120, 100, 180)).toBe(100);
+  });
+});
+
+describe("markIn and markOut", () => {
+  it("move one end of the trim to the playhead", () => {
+    expect(markIn({ start: 0, end: 8_000 }, 2_000, 10_000)).toEqual({ start: 2_000, end: 8_000 });
+    expect(markOut({ start: 2_000, end: 10_000 }, 6_000, 10_000)).toEqual({ start: 2_000, end: 6_000 });
+  });
+
+  it("let the other end go when it is in the way, so the next part can be marked", () => {
+    // The previous part was 1–3 s; the next starts at 5 s.
+    expect(markIn({ start: 1_000, end: 3_000 }, 5_000, 10_000)).toEqual({ start: 5_000, end: 10_000 });
+    expect(markOut({ start: 5_000, end: 10_000 }, 4_000, 10_000)).toEqual({ start: 0, end: 4_000 });
+  });
+
+  it("keep the minimum length at the clip's edges", () => {
+    expect(markIn({ start: 0, end: 10_000 }, 9_900, 10_000)).toEqual({ start: 9_500, end: 10_000 });
+    expect(markOut({ start: 0, end: 10_000 }, 100, 10_000)).toEqual({ start: 0, end: 500 });
   });
 });

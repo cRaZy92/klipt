@@ -28,7 +28,9 @@ export type EditorKeyAction =
   | { kind: "undo" }
   | { kind: "redo" }
   /** Moves the playhead one frame, or one second. */
-  | { kind: "step"; direction: -1 | 1; second: boolean };
+  | { kind: "step"; direction: -1 | 1; second: boolean }
+  /** Zooms the timeline in (1), out (-1) or back to the whole clip (0). */
+  | { kind: "timelineZoom"; direction: -1 | 0 | 1 };
 
 /**
  * The editor's action for a key press on `target`, or null when the key is left to the page.
@@ -49,6 +51,10 @@ export function editorKeyAction(e: EditorKey, target: KeyTarget, dialogOpen: boo
   if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "split" };
   if (key === "z" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "zoom" };
   if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "subtitle" };
+  const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+  if (plain && (e.key === "+" || e.key === "=")) return { kind: "timelineZoom", direction: 1 };
+  if (plain && (e.key === "-" || e.key === "_")) return { kind: "timelineZoom", direction: -1 };
+  if (plain && e.key === "0") return { kind: "timelineZoom", direction: 0 };
   if ((e.key === "Delete" || e.key === "Backspace") && !ctrl && !e.altKey && target !== "slider") return { kind: "delete" };
   return null;
 }

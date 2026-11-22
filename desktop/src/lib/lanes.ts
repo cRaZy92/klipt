@@ -3,7 +3,8 @@
 
 import type { Piece } from "./cuts";
 import { formatDuration } from "./format";
-import { msToX, type TrimRange } from "./trim";
+import { fullView, viewPct, viewSpan, type TimeView } from "./timelineView";
+import { formatClock, type TrimRange } from "./trim";
 
 /** A stretch of a lane, in percent of its width. */
 export interface Span {
@@ -11,20 +12,37 @@ export interface Span {
   width: number;
 }
 
-/** How far apart the ruler's labels are: 5 s under 30 s, 30 s over 3 min, else 10 s. */
-export function rulerStep(durationMs: number): number {
-  if (durationMs < 30_000) return 5000;
-  if (durationMs > 180_000) return 30_000;
-  return 10_000;
+/** Finer steps for a zoomed-in timeline, and coarser ones for long recordings. */
+const FINE_STEPS = [100, 200, 500, 1000, 2000];
+const LONG_STEPS = [30_000, 60_000, 120_000, 300_000, 600_000, 900_000, 1_800_000, 3_600_000];
+
+/**
+ * How far apart the ruler's labels are for a timeline showing `spanMs`: under 10 s, the finest of
+ * 0.1–2 s that gives at most 10 labels; 5 s under 30 s; 10 s up to 3 min; over that, the finest of
+ * 30 s–1 h that gives at most 20.
+ */
+export function rulerStep(spanMs: number): number {
+  if (spanMs < 10_000) return FINE_STEPS.find((s) => spanMs / s <= 10) ?? 2000;
+  if (spanMs < 30_000) return 5000;
+  if (spanMs <= 180_000) return 10_000;
+  return LONG_STEPS.find((s) => spanMs / s <= 20) ?? LONG_STEPS[LONG_STEPS.length - 1];
 }
 
-/** The ruler's labels from 0, one per step (none at the clip's very end, where it wouldn't fit). */
-export function rulerTicks(durationMs: number): { ms: number; pct: number; label: string }[] {
-  if (!(durationMs > 0)) return [];
-  const step = rulerStep(durationMs);
+/**
+ * The ruler's labels over `view` (the whole clip by default), one per step from 0 (none at the
+ * clip's very end, where it wouldn't fit). Steps under a second label tenths.
+ */
+export function rulerTicks(
+  durationMs: number,
+  view: TimeView = fullView(durationMs),
+): { ms: number; pct: number; label: string }[] {
+  const span = view.to - view.from;
+  if (!(durationMs > 0) || !(span > 0)) return [];
+  const step = rulerStep(span);
+  const label = step < 1000 ? formatClock : formatDuration;
   const ticks = [];
-  for (let ms = 0; ms < durationMs; ms += step) {
-    ticks.push({ ms, pct: msToX(ms, durationMs, 100), label: formatDuration(ms) });
+  for (let ms = Math.ceil(view.from / step) * step; ms < Math.min(view.to, durationMs); ms += step) {
+    ticks.push({ ms, pct: viewPct(ms, view), label: label(ms) });
   }
   return ticks;
 }
@@ -38,17 +56,22 @@ export function toggleMute(volume: number, remembered: number | null): { volume:
   return { volume: remembered && remembered > 0 ? remembered : 100, remembered: null };
 }
 
-/** What a lane dims (outside the trim) and shades (removed parts inside it), as TrimBar does. */
-export function laneShading(duration: number, trim: TrimRange, pieces: Piece[]): { dims: Span[]; cuts: Span[] } {
-  const pct = (ms: number) => msToX(ms, duration, 100);
-  const dims = [
-    { left: 0, width: pct(trim.start) },
-    { left: pct(trim.end), width: 100 - pct(trim.end) },
-  ];
+/**
+ * What a lane dims (outside the trim) and shades (removed parts inside it), as TrimBar does, as
+ * far as it is inside `view` (the whole clip by default).
+ */
+export function laneShading(
+  duration: number,
+  trim: TrimRange,
+  pieces: Piece[],
+  view: TimeView = fullView(duration),
+): { dims: Span[]; cuts: Span[] } {
+  if (!(duration > 0)) return { dims: [], cuts: [] };
+  const span = (from: number, to: number) => viewSpan(from, to, view);
+  const dims = [span(0, trim.start), span(trim.end, duration)].filter((d): d is Span => d !== null);
   const cuts = pieces.flatMap((p) => {
-    const from = Math.max(p.start, trim.start);
-    const to = Math.min(p.end, trim.end);
-    return p.removed && to > from && duration > 0 ? [{ left: pct(from), width: pct(to) - pct(from) }] : [];
+    const part = p.removed ? span(Math.max(p.start, trim.start), Math.min(p.end, trim.end)) : null;
+    return part ? [part] : [];
   });
   return { dims, cuts };
 }

@@ -49,7 +49,7 @@ describe("tiles", () => {
   it("covers the track with ceil(track / tile) tiles, each with its middle's time", () => {
     const t = tiles(1000, 100, 10_000);
     expect(t).toHaveLength(10);
-    expect(t[0]).toEqual({ leftPct: 0, widthPct: 10, ms: 500 });
+    expect(t[0]).toEqual({ i: 0, leftPct: 0, widthPct: 10, ms: 500 });
     expect(t[9].ms).toBe(9500);
   });
 
@@ -59,6 +59,22 @@ describe("tiles", () => {
     expect(t[2].leftPct).toBeCloseTo(80);
     expect(t[2].widthPct).toBeCloseTo(40);
     expect(t[2].ms).toBe(9000);
+  });
+
+  it("shows only the tiles inside a zoomed-in view, fixed in time so they slide when it pans", () => {
+    // 1000 px showing 2–4 s: a 100 px tile is 200 ms long.
+    const t = tiles(1000, 100, 10_000, { from: 2_050, to: 4_050 });
+    expect(t[0]).toMatchObject({ i: 10, ms: 2_100 });
+    expect(t[0].leftPct).toBeCloseTo(-2.5);
+    expect(t[0].widthPct).toBeCloseTo(10);
+    expect(t.at(-1)!.i).toBe(20);
+    expect(t).toHaveLength(11);
+  });
+
+  it("never adds a tile past the clip's end through rounding", () => {
+    const t = tiles(300, 100, 1000);
+    expect(t).toHaveLength(3);
+    expect(t.every((x) => x.ms < 1000)).toBe(true);
   });
 
   it("is empty for a track with no width or tiles with no width", () => {

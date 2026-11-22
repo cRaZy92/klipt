@@ -2,8 +2,24 @@
   import type { Snippet } from "svelte";
   import type { Piece } from "../lib/cuts";
   import { blockLayout, laneShading, rulerTicks } from "../lib/lanes";
-  import { msToX, xToMs, type TrimRange } from "../lib/trim";
-  import { peaks as bucketPeaks } from "../lib/waveform";
+  import type { TrimRange } from "../lib/trim";
+  import {
+    fullView,
+    inView,
+    isZoomed,
+    maxScale,
+    panView,
+    scaleToSlider,
+    scrollThumb,
+    sliderToScale,
+    viewAt,
+    viewMs,
+    viewPct,
+    viewScale,
+    zoomView,
+    type TimeView,
+  } from "../lib/timelineView";
+  import { windowPeaks } from "../lib/waveform";
   import type { SubtitleRange, ZoomRange } from "../lib/api";
   import { moveZoom, rampMs, resizeZoom } from "../lib/zoom";
   import { moveSubtitle, resizeSubtitle } from "../lib/subtitles";
@@ -48,6 +64,8 @@
     onsubtitleremove,
     onsubtitleedit,
     onlanedown,
+    view,
+    onview,
     video,
   }: {
     /** The clip's length in ms. */
@@ -97,16 +115,29 @@
      * (which can remove a subtitle and shift the others' indices).
      */
     onlanedown?: () => void;
+    /** The stretch of the clip the lanes show (the timeline's zoom). */
+    view: TimeView;
+    /** The user zoomed or scrolled the timeline. */
+    onview: (view: TimeView) => void;
     /** The video lane: the TrimBar. */
     video: Snippet;
   } = $props();
 
-  const ticks = $derived(rulerTicks(duration));
-  const shading = $derived(laneShading(duration, trim, pieces));
+  const ticks = $derived(rulerTicks(duration, view));
+  const shading = $derived(laneShading(duration, trim, pieces, view));
+  /** Zoomed in: the lanes clip what runs off screen and a scrollbar shows under them. */
+  const zoomed = $derived(isZoomed(view, duration));
+  /** Where `ms` is on the lanes, in percent (outside 0–100 when off screen). */
+  const pct = (ms: number) => viewPct(ms, view);
   /** The Zoom and Subtitles rows show only while they have something on them. */
   const extraRows = $derived((zooms.length > 0 ? 1 : 0) + (subtitles.length > 0 ? 1 : 0));
-  /** Ruler, video, zoom and subtitles (when used), one row per track: the playhead spans all but the first two. */
-  const rows = $derived(["auto", "auto", ...Array(extraRows).fill("auto"), ...tracks.map(() => "auto")].join(" "));
+  /**
+   * Ruler, video, zoom and subtitles (when used), one row per track, and the scrollbar while
+   * zoomed in: the playhead spans the rows from zoom to the last track.
+   */
+  const rows = $derived(
+    ["auto", "auto", ...Array(extraRows).fill("auto"), ...tracks.map(() => "auto"), ...(zoomed ? ["auto"] : [])].join(" "),
+  );
 
   const level = (v: number) => (v === 0 ? "Off" : `${v}%`);
 
@@ -115,7 +146,7 @@
 
   function msAt(e: PointerEvent, area: HTMLElement): number {
     const rect = area.getBoundingClientRect();
-    return xToMs(e.clientX - rect.left, duration, rect.width);
+    return viewMs(e.clientX - rect.left, rect.width, view);
   }
 
   // Like the video lane's track: the pointer seeks, and a drag scrubs.
@@ -144,7 +175,8 @@
   /** The lanes' width in px (the ruler's), to lay out short blocks. */
   let laneWidth = $state(0);
   /** How a block from `startMs` to `endMs` is laid out on the lane. */
-  const layoutOf = (startMs: number, endMs: number) => blockLayout(((endMs - startMs) / Math.max(1, duration)) * laneWidth);
+  const layoutOf = (startMs: number, endMs: number) =>
+    blockLayout(((endMs - startMs) / Math.max(1, view.to - view.from)) * laneWidth);
   /** Whether a press at `x` on `block` grabs an edge (resizes) or the middle (moves). */
   function grabbed(block: HTMLElement, x: number): "move" | "start" | "end" {
     const r = block.getBoundingClientRect();
@@ -255,8 +287,81 @@
     }
   }
 
-  /** Draws `peaks` across the canvas in device pixels, again whenever the canvas is resized. */
-  function waveform(canvas: HTMLCanvasElement, initial: Float32Array | null) {
+  /** The ruler's time area: where the pointer is in time, for zooming around it. */
+  let rulerArea = $state<HTMLElement>();
+
+  /** The point to zoom around from the slider or buttons: the playhead while on screen, else the middle. */
+  const zoomAnchor = () => (inView(position, view) ? position : (view.from + view.to) / 2);
+  const canZoom = $derived(maxScale(duration) > 1);
+  const scale = $derived(viewScale(view, duration));
+
+  function zoomTo(next: number) {
+    onview(zoomView(view, duration, next, zoomAnchor()));
+  }
+
+  /**
+   * Ctrl+scroll (or a pinch) zooms around the pointer; while zoomed in, a sideways scroll (or
+   * Shift+scroll) moves along the clip. A plain scroll is left to the page. Not passive, so the
+   * page doesn't scroll (or zoom) as well.
+   */
+  function wheel(node: HTMLElement) {
+    function onwheel(e: WheelEvent) {
+      if (!rulerArea || !(duration > 0)) return;
+      const rect = rulerArea.getBoundingClientRect();
+      const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? rect.width : 1;
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (!canZoom) return;
+        const anchor = viewMs(e.clientX - rect.left, rect.width, view);
+        onview(zoomView(view, duration, scale * Math.exp(-e.deltaY * unit * 0.0025), anchor));
+        return;
+      }
+      if (!zoomed) return;
+      const sideways = e.shiftKey ? e.deltaX || e.deltaY : Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
+      if (!sideways) return;
+      e.preventDefault();
+      onview(panView(view, duration, ((sideways * unit) / rect.width) * (view.to - view.from)));
+    }
+    node.addEventListener("wheel", onwheel, { passive: false });
+    return { destroy: () => node.removeEventListener("wheel", onwheel) };
+  }
+
+  /** The scrollbar: dragging its thumb (or pressing beside it) moves along the clip. */
+  let scrollTrack = $state<HTMLElement>();
+  let scrollDrag: { x: number; from: number } | null = $state(null);
+  const thumbBox = $derived(scrollThumb(view, duration));
+
+  function scrollDown(e: PointerEvent) {
+    if (e.button !== 0 || !scrollTrack) return;
+    e.preventDefault();
+    const rect = scrollTrack.getBoundingClientRect();
+    let from = view.from;
+    // Beside the thumb: centre the view there first, then drag on from it.
+    if (!(e.target as HTMLElement).closest(".scroll-thumb")) {
+      const at = ((e.clientX - rect.left) / rect.width) * duration;
+      const next = viewAt(view, duration, at - (view.to - view.from) / 2);
+      onview(next);
+      from = next.from;
+    }
+    scrollTrack.setPointerCapture(e.pointerId);
+    scrollDrag = { x: e.clientX, from };
+  }
+
+  function scrollMove(e: PointerEvent) {
+    if (!scrollDrag || !scrollTrack) return;
+    const width = scrollTrack.getBoundingClientRect().width;
+    if (width > 0) onview(viewAt(view, duration, scrollDrag.from + ((e.clientX - scrollDrag.x) / width) * duration));
+  }
+
+  function scrollUp() {
+    scrollDrag = null;
+  }
+
+  /**
+   * Draws the part of `peaks` the view shows across the canvas in device pixels, again whenever
+   * the canvas is resized or the view moves.
+   */
+  function waveform(canvas: HTMLCanvasElement, initial: { peaks: Float32Array | null; from: number; to: number }) {
     let current = initial;
     function draw() {
       const dpr = window.devicePixelRatio || 1;
@@ -267,13 +372,13 @@
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, w, h);
-      if (!current?.length || !w || !h) return;
+      if (!current.peaks?.length || !w || !h) return;
       // More buckets than pixels: the loudest per pixel; fewer: each pixel takes its bucket's.
-      const fit = current.length >= w ? bucketPeaks([current], w) : null;
+      const fit = windowPeaks(current.peaks, current.from, current.to, w);
       ctx.fillStyle = getComputedStyle(canvas).color;
       const mid = h / 2;
       for (let x = 0; x < w; x++) {
-        const v = fit ? fit[x] : current[Math.floor((x * current.length) / w)];
+        const v = fit[x];
         const half = Math.max(dpr / 2, Math.min(1, v) * mid);
         ctx.fillRect(x, mid - half, 1, half * 2);
       }
@@ -282,8 +387,8 @@
     resized.observe(canvas);
     draw();
     return {
-      update(next: Float32Array | null) {
-        if (next === current) return;
+      update(next: { peaks: Float32Array | null; from: number; to: number }) {
+        if (next.peaks === current.peaks && next.from === current.from && next.to === current.to) return;
         current = next;
         draw();
       },
@@ -294,10 +399,42 @@
   }
 </script>
 
-<div class="lanes" class:locked style:grid-template-rows={rows}>
-  <div class="label ruler-label"></div>
+<div class="lanes" class:locked class:zoomed style:grid-template-rows={rows} use:wheel>
+  <div class="label ruler-label">
+    <div class="timeline-zoom" title="Zoom the timeline (Ctrl+scroll, + and −)">
+      <button
+        class="zoom-step"
+        aria-label="Zoom the timeline out"
+        disabled={!canZoom || scale <= 1}
+        onclick={() => zoomTo(scale / 2)}
+      >
+        <Icon name="zoomOut" size={13} />
+      </button>
+      <input
+        class="range"
+        type="range"
+        min="0"
+        max="1000"
+        step="1"
+        value={Math.round(scaleToSlider(scale, duration) * 1000)}
+        disabled={!canZoom}
+        style:--fill="{scaleToSlider(scale, duration) * 100}%"
+        aria-label="Timeline zoom"
+        aria-valuetext="{scale < 10 ? scale.toFixed(1) : Math.round(scale)}×"
+        oninput={(e) => zoomTo(sliderToScale(Number(e.currentTarget.value) / 1000, duration))}
+      />
+      <button
+        class="zoom-step"
+        aria-label="Zoom the timeline in"
+        disabled={!canZoom || scale >= maxScale(duration)}
+        onclick={() => zoomTo(scale * 2)}
+      >
+        <Icon name="zoom" size={13} />
+      </button>
+    </div>
+  </div>
   <div class="ruler" aria-hidden="true">
-    <div class="area" bind:clientWidth={laneWidth}>
+    <div class="area" bind:this={rulerArea} bind:clientWidth={laneWidth}>
       {#each ticks as t (t.ms)}
         <span style:left="{t.pct}%">{t.label}</span>
       {/each}
@@ -354,8 +491,8 @@
           aria-label="Zoom {z.zoom.toFixed(1)}× from {(z.startMs / 1000).toFixed(1)} s"
           aria-pressed={selectedZoom === i}
           title="Drag to move, drag an edge to make it longer or shorter, Delete to remove"
-          style:left="{msToX(z.startMs, duration, 100)}%"
-          style:width="{msToX(z.endMs, duration, 100) - msToX(z.startMs, duration, 100)}%"
+          style:left="{pct(z.startMs)}%"
+          style:width="{pct(z.endMs) - pct(z.startMs)}%"
           onpointerdown={(e) => zoomDown(e, i)}
           onpointermove={zoomMove}
           onpointerup={zoomUp}
@@ -427,8 +564,8 @@
           aria-label="Subtitle “{s.text}” from {(s.startMs / 1000).toFixed(1)} s"
           aria-pressed={selectedSubtitle === i}
           title="Double-click to edit the text, drag to move, drag an edge to make it longer or shorter, Delete to remove"
-          style:left="{msToX(s.startMs, duration, 100)}%"
-          style:width="{msToX(s.endMs, duration, 100) - msToX(s.startMs, duration, 100)}%"
+          style:left="{pct(s.startMs)}%"
+          style:width="{pct(s.endMs) - pct(s.startMs)}%"
           onpointerdown={(e) => subDown(e, i)}
           onpointermove={subMove}
           onpointerup={subUp}
@@ -509,7 +646,7 @@
         onpointercancel={release}
         onlostpointercapture={release}
       >
-        <canvas class="wave {t.key.startsWith('track-') ? 'track' : t.key}" class:muted={t.muted} use:waveform={t.peaks}></canvas>
+        <canvas class="wave {t.key.startsWith('track-') ? 'track' : t.key}" class:muted={t.muted} use:waveform={{ peaks: t.peaks, from: view.from / Math.max(1, duration), to: view.to / Math.max(1, duration) }}></canvas>
         {#each shading.dims as d, i (i)}
           <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
         {/each}
@@ -521,9 +658,40 @@
   {/each}
 
 
-  {#if tracks.length}
+  {#if zoomed}
+    <div class="label scroll-label">
+      <button class="btn btn-sm show-all" title="Show the whole clip (0)" onclick={() => onview(fullView(duration))}>
+        Show all
+      </button>
+    </div>
+    <div class="scroll">
+      <!-- A pointer target only: the keyboard moves along the clip with the playhead. -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="scroll-track"
+        bind:this={scrollTrack}
+        onpointerdown={scrollDown}
+        onpointermove={scrollMove}
+        onpointerup={scrollUp}
+        onpointercancel={scrollUp}
+        onlostpointercapture={scrollUp}
+      >
+        {#if duration > 0}
+          <span class="scroll-mark" style:left="{(position / duration) * 100}%"></span>
+        {/if}
+        <div
+          class="scroll-thumb"
+          class:dragging={scrollDrag !== null}
+          style:left="{thumbBox.left}%"
+          style:width="{thumbBox.width}%"
+        ></div>
+      </div>
+    </div>
+  {/if}
+
+  {#if tracks.length && inView(position, view)}
     <div class="playhead-span" style:grid-row="3 / span {tracks.length + extraRows}" aria-hidden="true">
-      <div class="playhead" style:left="{msToX(position, duration, 100)}%"></div>
+      <div class="playhead" style:left="{pct(position)}%"></div>
     </div>
   {/if}
 </div>
@@ -645,8 +813,111 @@
 
   .ruler-label,
   .ruler {
-    height: 1.4rem;
+    height: 1.6rem;
     padding: 0;
+  }
+
+  /* The timeline's zoom: − slider + in the ruler's corner. */
+  .timeline-zoom {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 100%;
+    padding: 0 0.5rem;
+  }
+
+  .timeline-zoom .range {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .zoom-step {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 1.2rem;
+    height: 1.2rem;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .zoom-step:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+
+  .zoom-step:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* Zoomed in: blocks running off screen are cut at the lane's edge. */
+  .zoomed .lane.zoom .area {
+    overflow: hidden;
+  }
+
+  /* The scrollbar under the lanes while zoomed in. */
+  .scroll-label {
+    padding: 0.25rem 0.5rem;
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+  }
+
+  .show-all {
+    height: 1.5rem;
+    padding: 0 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .scroll {
+    position: relative;
+    border-top: 1px solid var(--border);
+  }
+
+  .scroll-track {
+    position: absolute;
+    top: 50%;
+    right: var(--inset);
+    left: var(--inset);
+    height: 0.7rem;
+    border-radius: 999px;
+    background: var(--surface-2);
+    cursor: pointer;
+    transform: translateY(-50%);
+    touch-action: none;
+  }
+
+  .scroll-thumb {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    min-width: 1.5rem;
+    box-sizing: border-box;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: var(--accent-soft);
+    cursor: grab;
+  }
+
+  .scroll-thumb.dragging {
+    cursor: grabbing;
+  }
+
+  /* Where the playhead is in the whole clip. */
+  .scroll-mark {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: #fff;
+    opacity: 0.7;
+    pointer-events: none;
   }
 
   .ruler {

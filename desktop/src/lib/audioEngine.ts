@@ -3,7 +3,10 @@
 
 import { clipMsAt, schedule, segmentAt, type Segment, AUDIO_LEAD_MS } from "./playSchedule";
 import type { TrimRange } from "./trim";
-import { peaks } from "./waveform";
+import { peaks, poolPeaks } from "./waveform";
+
+/** The finest waveform kept per track; coarser ones are pooled from it (a multiple of 4096). */
+export const FINE_PEAK_BUCKETS = 2 ** 18;
 
 const LEAD_S = AUDIO_LEAD_MS / 1000;
 
@@ -65,7 +68,10 @@ export class AudioEngine {
     return results.filter((k): k is string => k !== null);
   }
 
-  /** Waveform peaks of a loaded track, cached per key and bucket count; null if not loaded. */
+  /**
+   * Waveform peaks of a loaded track, cached per key and bucket count; null if not loaded. The
+   * samples are read once, into FINE_PEAK_BUCKETS; a count that divides it is pooled from that.
+   */
   peaks(key: string, buckets: number): Float32Array | null {
     const track = this.tracks.get(key);
     if (!track) return null;
@@ -75,7 +81,13 @@ export class AudioEngine {
       const channels = Array.from({ length: track.buffer.numberOfChannels }, (_, i) =>
         track.buffer.getChannelData(i),
       );
-      cached = peaks(channels, buckets);
+      const fineId = `${key}:${FINE_PEAK_BUCKETS}`;
+      let fine = this.peakCache.get(fineId);
+      if (!fine && FINE_PEAK_BUCKETS % buckets === 0) {
+        fine = peaks(channels, FINE_PEAK_BUCKETS);
+        this.peakCache.set(fineId, fine);
+      }
+      cached = (fine && poolPeaks(fine, buckets)) ?? peaks(channels, buckets);
       this.peakCache.set(id, cached);
     }
     return cached;

@@ -94,6 +94,15 @@ describe("editorKeyAction", () => {
     }
   });
 
+  it("+ and − zoom the timeline, 0 shows the whole clip; not with Ctrl or in a text field", () => {
+    expect(editorKeyAction(key("+", { shiftKey: true }), "none", false)).toEqual({ kind: "timelineZoom", direction: 1 });
+    expect(editorKeyAction(key("="), "none", false)).toEqual({ kind: "timelineZoom", direction: 1 });
+    expect(editorKeyAction(key("-"), "control", false)).toEqual({ kind: "timelineZoom", direction: -1 });
+    expect(editorKeyAction(key("0"), "none", false)).toEqual({ kind: "timelineZoom", direction: 0 });
+    expect(editorKeyAction(key("-", { ctrlKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("0"), "text", false)).toBeNull();
+  });
+
   it("other keys aren't the editor's", () => {
     expect(editorKeyAction(key("Enter"), "none", false)).toBeNull();
     expect(editorKeyAction(key("a"), "none", false)).toBeNull();

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { clampPopupLeft, clampThumb, clampTrim, defaultThumb, formatClock, MIN_TRIM_MS, msToX, xToMs } from "../lib/trim";
+  import { clampPopupLeft, clampThumb, clampTrim, defaultThumb, formatClock, MIN_TRIM_MS } from "../lib/trim";
+  import { fullView, inView, viewMs, viewPct, viewSpan, type TimeView } from "../lib/timelineView";
   import { canRemove, clampToKept, deleteSplit, keptRanges, moveSplit, toggle, type Piece } from "../lib/cuts";
   import { frameUrl, previewIndex, tiles } from "../lib/filmstrip";
   import Icon from "./Icon.svelte";
@@ -30,6 +31,7 @@
     onscrubstart,
     onscrubend,
     locked = false,
+    view = null,
   }: {
     /** The clip's length in ms. */
     duration: number;
@@ -55,7 +57,11 @@
     onscrubend?: () => void;
     /** The edit can't change now (the clip is uploading or exporting): only the playhead moves. */
     locked?: boolean;
+    /** The stretch of the clip the timeline shows (zoomed in); null = the whole clip. */
+    view?: TimeView | null;
   } = $props();
+
+  const shownView = $derived(view ?? fullView(duration));
 
   let track = $state<HTMLElement>();
   /** A handle, the playhead, or the split after piece `n`. */
@@ -65,7 +71,7 @@
   let brokenTiles = $state(new Set<number>());
   const filmTiles = $derived(
     strip
-      ? tiles(trackWidth, (trackHeight * 16) / 9, duration).flatMap((t) => {
+      ? tiles(trackWidth, (trackHeight * 16) / 9, duration, shownView).flatMap((t) => {
           const index = previewIndex(t.ms, strip.ready);
           return index === null || brokenTiles.has(index) ? [] : [{ ...t, index, src: frameUrl(strip.dir, index) }];
         })
@@ -102,7 +108,15 @@
     };
   });
 
-  const pct = (ms: number) => msToX(ms, duration, 100);
+  /** Where `ms` is on the bar, in percent (outside 0–100 when zoomed in and off screen). */
+  const pct = (ms: number) => viewPct(ms, shownView);
+  /** The part of a stretch that is on screen; null when none is. */
+  const part = (from: number, to: number) => viewSpan(from, to, shownView);
+  /** Whether a marker at `ms` is on screen. */
+  const onScreen = (ms: number) => inView(ms, shownView);
+  const dimLeft = $derived(part(0, start));
+  const dimRight = $derived(part(end, duration));
+  const selection = $derived(part(start, end));
   const keptParts = $derived(keptRanges(pieces, { start, end }));
   const thumbAt = $derived(
     clampToKept(thumb === null ? defaultThumb({ start, end }) : clampThumb(thumb, { start, end }), keptParts),
@@ -113,9 +127,12 @@
       .map((p, i) => ({ ...p, i, from: Math.max(p.start, start), to: Math.min(p.end, end) }))
       .filter((p) => p.to > p.from),
   );
-  /** Split lines inside the trim: the boundary after piece `i`. */
+  /** Split lines inside the trim and on screen: the boundary after piece `i`. */
   const splits = $derived(
-    pieces.slice(0, -1).map((p, i) => ({ i, at: p.end })).filter((s) => s.at > start && s.at < end),
+    pieces
+      .slice(0, -1)
+      .map((p, i) => ({ i, at: p.end }))
+      .filter((s) => s.at > start && s.at < end && onScreen(s.at)),
   );
 
   function moveSplitTo(i: number, ms: number) {
@@ -154,7 +171,7 @@
 
   function msAt(e: PointerEvent): number {
     const rect = track!.getBoundingClientRect();
-    return xToMs(e.clientX - rect.left, duration, rect.width);
+    return viewMs(e.clientX - rect.left, rect.width, shownView);
   }
 
   /** Moves one handle, keeping the other in place and the cut at least MIN_TRIM_MS long. */
@@ -265,7 +282,7 @@
   >
     {#if filmTiles.length}
       <div class="film" aria-hidden="true">
-        {#each filmTiles as t (t.leftPct)}
+        {#each filmTiles as t (t.i)}
           <img
             src={t.src}
             alt=""
@@ -278,19 +295,26 @@
         {/each}
       </div>
     {/if}
-    <div class="dim left" style:left="0" style:width="{pct(start)}%"></div>
-    <div class="dim" style:left="{pct(end)}%" style:right="0"></div>
-    <div class="selection" style:left="{pct(start)}%" style:width="{pct(end) - pct(start)}%"></div>
+    {#if dimLeft}
+      <div class="dim" class:left={dimLeft.left === 0 && pct(0) >= 0} style:left="{dimLeft.left}%" style:width="{dimLeft.width}%"></div>
+    {/if}
+    {#if dimRight}
+      <div class="dim" class:right={pct(duration) <= 100} style:left="{dimRight.left}%" style:width="{dimRight.width}%"></div>
+    {/if}
+    {#if selection}
+      <div class="selection" style:left="{selection.left}%" style:width="{selection.width}%"></div>
+    {/if}
     {#each shown as p (p.i)}
-      {#if p.removed}
-        <div class="cut" style:left="{pct(p.from)}%" style:width="{pct(p.to) - pct(p.from)}%"></div>
+      {@const visible = part(p.from, p.to)}
+      {#if p.removed && visible}
+        <div class="cut" style:left="{visible.left}%" style:width="{visible.width}%"></div>
       {/if}
-      {#if shown.length > 1}
+      {#if shown.length > 1 && visible}
         {@const allowed = canRemove(pieces, p.i, { start, end })}
         <button
           class="piece-toggle"
           class:removed={p.removed}
-          style:left="{(pct(p.from) + pct(p.to)) / 2}%"
+          style:left="{visible.left + visible.width / 2}%"
           disabled={!allowed || locked}
           aria-label={p.removed ? "Keep this part" : "Remove this part"}
           title={!allowed ? "Keep at least part of the clip" : p.removed ? "Keep this part" : "Remove this part"}
@@ -335,11 +359,14 @@
         </button>
       </div>
     {/each}
-    <div class="playhead" style:left="{pct(position)}%"></div>
+    {#if onScreen(position)}
+      <div class="playhead" style:left="{pct(position)}%"></div>
+    {/if}
 
     {#each [["start", start], ["end", end]] as const as [handle, value] (handle)}
       <div
         class="handle {handle}"
+        class:off={!onScreen(value)}
         style:left="{pct(value)}%"
         role="slider"
         tabindex="0"
@@ -365,6 +392,7 @@
       class="thumb-mark"
       class:picked={thumb !== null}
       class:active={thumbActive}
+      class:off={!onScreen(thumbAt)}
       bind:this={thumbEl}
       onpointerenter={() => (thumbHover = true)}
       onpointerleave={() => (thumbHover = false)}
@@ -390,7 +418,7 @@
     >
       <Icon name="image" size={13} />
     </div>
-    {#if thumbActive}
+    {#if thumbActive && onScreen(thumbAt)}
       <div class="thumb-pop" use:toBody style:left="{pop.left}px" style:top="{pop.top}px" aria-hidden="true">
         {#if thumbPicture}<img src={thumbPicture} alt="" decoding="async" />{/if}
         <span>Thumbnail · {formatClock(thumbAt)}</span>
@@ -644,6 +672,17 @@
 
   .dim.left {
     border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  }
+
+  .dim.right {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+
+  /* Zoomed in: a handle or the thumbnail marker off screen keeps its place (and focus) unseen. */
+  .handle.off,
+  .thumb-mark.off {
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .selection {

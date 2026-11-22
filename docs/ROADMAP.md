@@ -9,6 +9,7 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 2026-11-22 | Timeline zoom            | Zoom the editor timeline (Ctrl+scroll, the slider in the ruler's corner, + / − / 0) down to 1 s; scrollbar, Shift+scroll, follows the playhead; finer ruler labels and waveforms when zoomed. Untested in the app and on Windows |
 | 2026-11-21 | Ready for a friend       | Log file on every PC; Report a problem / Suggest a feature (with system info and log) to the admin page; display names; change password (app and website) and admin password links; admin page shows last seen, app version, OS and GPU; hotkey hint for overlays that take shortcuts. Untested on Windows; server needs redeploy |
 | 2026-11-20 | Replace an online clip   | Re-uploading an uploaded clip can swap its video at the same link (`85ebbfa`). Untested in the app; server needs redeploy |
 | 2026-11-20 | Editor subtitles         | Typed subtitles (T key, own lane), burned into exports and uploads with libass. Untested in the app and on Windows |
@@ -130,7 +131,8 @@ Asked for by the owner. Item 1 is built and merged to `main` (plan: `docs/superp
 
 ## Planned: safety and editor additions (chosen 2026-11-20)
 
-Picked by the owner from a list of suggestions (item 8 added 2026-11-22). None has a spec yet.
+Picked by the owner from a list of suggestions (item 8 added 2026-11-22). None has a spec yet, except
+item 8, which is built (see "Where Klipt is today").
 
 | # | Feature                          | What it means                                                                                      |
 | - | -------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -141,7 +143,7 @@ Picked by the owner from a list of suggestions (item 8 added 2026-11-22). None h
 | 5 | Albums                           | Gather clips (your own or friends') into a named album with one share link, e.g. "Best of the tournament" |
 | 6 | Draw on the clip                 | Arrows, circles and boxes placed on the video for part of a clip, on their own editor lane like subtitles; burned into exports and uploads |
 | 7 | Download all my clips            | A website button that downloads every clip you uploaded as one zip, as a backup or to leave |
-| 8 | Zoom the editor timeline         | Zoom in on the timeline (Ctrl+scroll or a slider) to place cuts, subtitles and markers precisely on long clips and recordings; scrolls sideways and follows the playhead. Added by the owner 2026-11-22 |
+| 8 | ~~Zoom the editor timeline~~ (done 2026-11-22) | Zoom in on the timeline (Ctrl+scroll or a slider) to place cuts, subtitles and markers precisely on long clips and recordings; scrolls sideways and follows the playhead. Added by the owner 2026-11-22 |
 
 ## Later: after v1
 

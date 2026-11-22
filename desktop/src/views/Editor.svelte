@@ -3,7 +3,8 @@
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount } from "../lib/api";
   import type { RemoveWhere } from "../lib/removal";
-  import { AudioEngine } from "../lib/audioEngine";
+  import { AudioEngine, FINE_PEAK_BUCKETS } from "../lib/audioEngine";
+  import { followView, fullView, inView, viewScale, zoomView, type TimeView } from "../lib/timelineView";
   import {
     cutSeekAhead,
     schedule,
@@ -148,6 +149,28 @@
     return { left: (stageWidth - width) / 2, top: (stageHeight - height) / 2, width, height };
   });
   let playing = $state(false);
+  /** The stretch of the clip the timeline shows: the whole clip until it is zoomed in. */
+  let timelineView = $state<TimeView>({ from: 0, to: 0 });
+  // The timeline follows the playhead: when it runs (or jumps) off screen, the page turns. The
+  // view isn't read here, so scrolling away while paused stays where it was put.
+  $effect(() => {
+    const ms = position;
+    untrack(() => {
+      const next = followView(timelineView, duration, ms);
+      if (next !== timelineView) timelineView = next;
+    });
+  });
+
+  /** + and − zoom the timeline around the playhead (the middle when it is off screen); 0 shows it all. */
+  function zoomTimeline(direction: -1 | 0 | 1) {
+    if (direction === 0) {
+      timelineView = fullView(duration);
+      return;
+    }
+    const anchor = inView(position, timelineView) ? position : (timelineView.from + timelineView.to) / 2;
+    const scale = viewScale(timelineView, duration) * (direction > 0 ? 2 : 0.5);
+    timelineView = zoomView(timelineView, duration, scale, anchor);
+  }
   let position = $state(0);
   /**
    * The picked zoom's box is up on the video: paused inside that zoom. The picture then shows
@@ -378,6 +401,7 @@
     try {
       const d = await api.openEditor(clip.id);
       duration = d.durationMs;
+      timelineView = fullView(d.durationMs);
       trim = clampTrim(d.clip.trimStartMs ?? 0, d.clip.trimEndMs ?? d.durationMs, d.durationMs);
       pieces = piecesFromRanges(d.clip.removedRanges ?? [], d.durationMs);
       gameVolume = percent(d.clip.gameVolume);
@@ -422,9 +446,13 @@
 
   /** How many waveform buckets the lanes get (each lane fits them to its width in pixels). */
   const PEAK_BUCKETS = 4096;
+  /** Zoomed in, the waveforms get finer (doubling per doubling of the zoom, up to the engine's finest). */
+  const peakBuckets = $derived(
+    Math.min(FINE_PEAK_BUCKETS, PEAK_BUCKETS * 2 ** Math.ceil(Math.log2(viewScale(timelineView, duration)))),
+  );
   /** Each track's waveform, once the audio is decoded (null for a track that failed). */
   const lanePeaks = $derived<Record<string, Float32Array | null>>(
-    audioReady && data ? Object.fromEntries(audioTracks(data).map((t) => [t.key, engine.peaks(t.key, PEAK_BUCKETS)])) : {},
+    audioReady && data ? Object.fromEntries(audioTracks(data).map((t) => [t.key, engine.peaks(t.key, peakBuckets)])) : {},
   );
 
   /** A track's slider (0–100) by its engine key. */
@@ -882,6 +910,8 @@
   function onhandlemove(_handle: "start" | "end" | "thumb" | "split", ms: number) {
     // Show the frame under the handle while paused; while playing, the audio clock moves it.
     if (!playing) seek(ms);
+    // A handle moved from the keyboard stays on screen.
+    timelineView = followView(timelineView, duration, ms);
   }
 
   function splitHere() {
@@ -1025,6 +1055,7 @@
     else if (action.kind === "split") splitHere();
     else if (action.kind === "zoom") zoomHere();
     else if (action.kind === "subtitle") subtitleHere();
+    else if (action.kind === "timelineZoom") zoomTimeline(action.direction);
     else if (action.kind === "delete") {
       if (selectedZoom !== null) removeZoomAt(selectedZoom);
       else if (selectedSubtitle !== null) removeSubtitleAt(selectedSubtitle);
@@ -1496,6 +1527,8 @@
         onsubtitleremove={removeSubtitleAt}
         onsubtitleedit={editSubtitle}
         {onlanedown}
+        view={timelineView}
+        onview={(v) => (timelineView = v)}
       >
         {#snippet video()}
           <TrimBar
@@ -1511,6 +1544,7 @@
             {onscrubstart}
             {onscrubend}
             locked={editLocked}
+            view={timelineView}
           />
         {/snippet}
       </TrackLanes>
@@ -1521,6 +1555,7 @@
         <span><kbd>T</kbd> subtitle</span>
         <span><kbd>←</kbd><kbd>→</kbd> one frame</span>
         <span><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> one second</span>
+        <span><kbd>+</kbd><kbd>−</kbd> or <kbd>Ctrl</kbd>+scroll zoom the timeline</span>
         <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
       </p>
     </div>

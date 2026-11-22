@@ -25,23 +25,33 @@ export function previewIndex(ms: number, ready: number): number | null {
 }
 
 /**
- * The tiles that cover a track `trackWidthPx` wide, each `tileWidthPx` wide (the last may run past
- * the end). `ms` is the time at the middle of the part of the tile that is on the track.
+ * The tiles that cover a track `trackWidthPx` wide showing `view` of the clip (the whole clip by
+ * default), each `tileWidthPx` wide. Tiles are fixed in time, so they slide when the view pans;
+ * the last may run past the clip's end. `ms` is the time at the middle of the tile's part inside
+ * the clip, `i` its number from the clip's start.
  */
 export function tiles(
   trackWidthPx: number,
   tileWidthPx: number,
   durationMs: number,
-): { leftPct: number; widthPct: number; ms: number }[] {
-  if (!(trackWidthPx > 0) || !(tileWidthPx > 0)) return [];
-  const count = Math.ceil(trackWidthPx / tileWidthPx);
-  return Array.from({ length: count }, (_, i) => {
-    const left = i * tileWidthPx;
-    const visibleMiddle = (left + Math.min(left + tileWidthPx, trackWidthPx)) / 2;
-    return {
-      leftPct: (left / trackWidthPx) * 100,
+  view: { from: number; to: number } = { from: 0, to: durationMs },
+): { i: number; leftPct: number; widthPct: number; ms: number }[] {
+  const span = view.to - view.from;
+  if (!(trackWidthPx > 0) || !(tileWidthPx > 0) || !(span > 0)) return [];
+  const tileMs = (tileWidthPx / trackWidthPx) * span;
+  const first = Math.max(0, Math.floor(view.from / tileMs));
+  // Rounding must not add a tile that starts at the end.
+  const last = Math.ceil(Math.min(view.to, durationMs) / tileMs - 1e-9);
+  const out = [];
+  for (let i = first; i < last; i++) {
+    const start = i * tileMs;
+    const end = Math.min(start + tileMs, durationMs);
+    out.push({
+      i,
+      leftPct: ((start - view.from) / span) * 100,
       widthPct: (tileWidthPx / trackWidthPx) * 100,
-      ms: (visibleMiddle / trackWidthPx) * durationMs,
-    };
-  });
+      ms: (start + end) / 2,
+    });
+  }
+  return out;
 }

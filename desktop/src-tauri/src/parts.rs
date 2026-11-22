@@ -257,6 +257,18 @@ mod tests {
     }
 
     #[test]
+    fn muted_parts_move_with_the_part() {
+        let part = |track, start_ms, end_ms| AudioRange { track, start_ms, end_ms, level: 0.25 };
+        let source = Edit {
+            audio: vec![part(0, 1_000, 2_000), part(0, 2_100, 3_000), part(1, 7_900, 9_000), part(1, 5_000, 6_000)],
+            ..edit(Some(2_200), Some(8_000))
+        };
+        let got = part_edit(&source, 2_200, 8_000, 2_000, 6_020);
+        // Before the part: gone; across its start: clipped; 100 ms left at the end: too short, gone.
+        assert_eq!(got.audio, vec![part(0, 200, 1_000), part(1, 3_000, 4_000)]);
+    }
+
+    #[test]
     fn a_part_reaching_the_end_has_no_trim_end() {
         let got = part_edit(&edit(Some(1_000), None), 1_000, 6_000, 1_000, 5_000);
         assert_eq!((got.trim_start_ms, got.trim_end_ms), (None, None));

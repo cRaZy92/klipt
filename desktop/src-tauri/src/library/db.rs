@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::{AudioRange, Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
+use super::{AudioRange, PendingUpload, Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
 use super::{MAX_SUBTITLE_CHARS, MIN_AUDIO_RANGE_MS, MAX_ZOOM, MIN_SUBTITLE_MS, MIN_ZOOM, MIN_ZOOM_MS};
 use crate::errors::{AppError, Result};
 
@@ -86,6 +86,17 @@ const MIGRATIONS: &[&str] = &["
     -- Parts of audio tracks muted or turned down in the editor: JSON list of
     -- {\"track\", \"startMs\", \"endMs\", \"level\"} (ms into the file).
     ALTER TABLE clips ADD COLUMN audio_ranges TEXT NOT NULL DEFAULT '[]';
+", "
+    -- Uploads started but not finished, so they carry on after a restart. `tagged` is a JSON
+    -- list of usernames; `queued_at` is Unix ms.
+    CREATE TABLE pending_uploads (
+        clip_id    TEXT PRIMARY KEY,
+        title      TEXT NOT NULL,
+        visibility TEXT NOT NULL,
+        tagged     TEXT NOT NULL DEFAULT '[]',
+        replace    INTEGER NOT NULL DEFAULT 0,
+        queued_at  INTEGER NOT NULL
+    );
 "];
 
 /// Queries that select more after these read them from index 33 on.
@@ -485,10 +496,55 @@ impl Library {
             remove_if_present(&clip.path)?;
         }
         self.conn.execute("DELETE FROM clips WHERE id = ?1", [id])?;
+        self.remove_pending_upload(id)?;
         if let Err(e) = remove_if_present(&self.thumb_path(id)) {
             crate::elog!("klipt: can't delete the thumbnail of clip {id}: {e}");
         }
         Ok(())
+    }
+
+    /// Remembers an upload until it finishes. A retry updates its settings but keeps its place.
+    pub fn add_pending_upload(&self, p: &PendingUpload) -> Result<()> {
+        let visibility = match p.visibility {
+            crate::upload::Visibility::Feed => "feed",
+            crate::upload::Visibility::Link => "link",
+        };
+        self.conn.execute(
+            "INSERT INTO pending_uploads (clip_id, title, visibility, tagged, replace, queued_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(clip_id) DO UPDATE SET title = excluded.title, visibility = excluded.visibility,
+                 tagged = excluded.tagged, replace = excluded.replace",
+            params![p.clip_id, p.title, visibility, serde_json::to_string(&p.tagged)?, p.replace, p.queued_at_ms],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_pending_upload(&self, clip_id: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM pending_uploads WHERE clip_id = ?1", [clip_id])?;
+        Ok(())
+    }
+
+    pub fn clear_pending_uploads(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM pending_uploads", [])?;
+        Ok(())
+    }
+
+    /// Unfinished uploads, oldest first.
+    pub fn pending_uploads(&self) -> Result<Vec<PendingUpload>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT clip_id, title, visibility, tagged, replace, queued_at FROM pending_uploads ORDER BY queued_at, clip_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, bool>(4)?, row.get::<_, i64>(5)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (clip_id, title, visibility, tagged, replace, queued_at_ms) = row?;
+            let visibility = if visibility == "feed" { crate::upload::Visibility::Feed } else { crate::upload::Visibility::Link };
+            let tagged = serde_json::from_str(&tagged).unwrap_or_default();
+            out.push(PendingUpload { clip_id, title, visibility, tagged, replace, queued_at_ms });
+        }
+        Ok(out)
     }
 
     /// Runs an UPDATE of one clip; zero changed rows means the clip doesn't exist.
@@ -835,6 +891,68 @@ mod tests {
         assert!(f.lib.pending_syncs().unwrap().is_empty());
         f.lib.apply_server("srv-1", &server).unwrap();
         assert_eq!(f.lib.get(&c.id).unwrap().title, "Website");
+    }
+
+    fn pending(id: &str, title: &str, at: i64) -> PendingUpload {
+        PendingUpload {
+            clip_id: id.into(),
+            title: title.into(),
+            visibility: crate::upload::Visibility::Link,
+            tagged: vec!["sam".into()],
+            replace: true,
+            queued_at_ms: at,
+        }
+    }
+
+    #[test]
+    fn pending_uploads_round_trip_oldest_first() {
+        let f = Fixture::new();
+        let a = f.add("a.mp4", 1, None);
+        let b = f.add("b.mp4", 2, None);
+        f.lib.add_pending_upload(&pending(&b.id, "B", 200)).unwrap();
+        f.lib.add_pending_upload(&pending(&a.id, "A", 100)).unwrap();
+        let got = f.lib.pending_uploads().unwrap();
+        assert_eq!(got, vec![pending(&a.id, "A", 100), pending(&b.id, "B", 200)]);
+    }
+
+    #[test]
+    fn pending_upload_retry_keeps_queue_place() {
+        let f = Fixture::new();
+        let a = f.add("a.mp4", 1, None);
+        f.lib.add_pending_upload(&pending(&a.id, "Old", 100)).unwrap();
+        f.lib.add_pending_upload(&pending(&a.id, "New", 300)).unwrap();
+        let got = f.lib.pending_uploads().unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].title.as_str(), got[0].queued_at_ms), ("New", 100));
+    }
+
+    #[test]
+    fn removing_a_pending_upload() {
+        let f = Fixture::new();
+        let a = f.add("a.mp4", 1, None);
+        f.lib.add_pending_upload(&pending(&a.id, "A", 100)).unwrap();
+        f.lib.remove_pending_upload(&a.id).unwrap();
+        assert!(f.lib.pending_uploads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_clip_drops_its_pending_upload() {
+        let f = Fixture::new();
+        let a = f.add("a.mp4", 1, None);
+        f.lib.add_pending_upload(&pending(&a.id, "A", 100)).unwrap();
+        f.lib.remove(&a.id, false).unwrap();
+        assert!(f.lib.pending_uploads().unwrap().is_empty());
+    }
+
+    #[test]
+    fn clear_pending_uploads_empties_the_table() {
+        let f = Fixture::new();
+        let a = f.add("a.mp4", 1, None);
+        let b = f.add("b.mp4", 2, None);
+        f.lib.add_pending_upload(&pending(&a.id, "A", 100)).unwrap();
+        f.lib.add_pending_upload(&pending(&b.id, "B", 200)).unwrap();
+        f.lib.clear_pending_uploads().unwrap();
+        assert!(f.lib.pending_uploads().unwrap().is_empty());
     }
 
     #[test]

@@ -230,3 +230,18 @@ impl Default for Volumes {
         Volumes { game: 1.0, mic: 1.0, voice: 1.0, master: 1.0, extra: BTreeMap::new() }
     }
 }
+
+/// An upload started but not finished, remembered so it carries on after a restart.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingUpload {
+    pub clip_id: String,
+    pub title: String,
+    pub visibility: crate::upload::Visibility,
+    /// Friends in the clip, by username.
+    pub tagged: Vec<String>,
+    /// Replace the video at the clip's existing link.
+    pub replace: bool,
+    /// Unix ms when it was first queued.
+    pub queued_at_ms: i64,
+}

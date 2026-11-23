@@ -6,6 +6,16 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type Visibility = "feed" | "link";
+
+/** An upload started but not finished; it carries on after a restart. */
+export interface PendingUpload {
+  clipId: string;
+  title: string;
+  visibility: Visibility;
+  tagged: string[];
+  replace: boolean;
+  queuedAtMs: number;
+}
 export type Sort = "newestFirst" | "oldestFirst";
 
 /** A part removed in the editor, in ms into the video file. */
@@ -550,6 +560,8 @@ export const api = {
   downloadUpload: (id: string) => invoke<ClipView>("download_upload", { id }),
   copyShareLink: (id: string) => invoke<string>("copy_share_link", { id }),
   /** `replace`: swap the video at the clip's existing link instead of making a new one. */
+  pendingUploads: () => invoke<PendingUpload[]>("pending_uploads"),
+  resumePendingUploads: () => invoke<void>("resume_pending_uploads"),
   uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = [], replace = false) =>
     invoke<void>("upload_clip", { id, title, visibility, tagged, replace }),
   /** The server's users, for tagging friends in a clip. */

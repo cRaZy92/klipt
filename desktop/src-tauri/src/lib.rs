@@ -33,6 +33,7 @@ pub mod sound;
 pub mod state;
 pub mod tray;
 pub mod upload;
+pub mod upload_resume;
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
@@ -102,6 +103,8 @@ pub fn run() {
             update::start(app.handle());
             cleanup::start(app.handle());
             feed_watch::start(app.handle());
+            app.manage(upload_resume::Resuming::default());
+            upload_resume::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -128,6 +131,8 @@ pub fn run() {
             commands::clips_folder_size,
             commands::save_clip_now,
             commands::toggle_full_recording,
+            upload_resume::pending_uploads,
+            upload_resume::resume_pending_uploads,
             commands::get_full_recording,
             commands::take_screenshot,
             commands::list_clips,

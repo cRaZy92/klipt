@@ -4,7 +4,7 @@
   import { menu } from "./lib/a11y";
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
-  import { isBusy, resumeAfterLogin, stopUploadsForLogout, uploads, watchUploads } from "./lib/uploads.svelte";
+  import { isBusy, loadPendingUploads, resumeAfterLogin, stopUploadsForLogout, uploads, watchUploads } from "./lib/uploads.svelte";
   import { importing, watchImports } from "./lib/imports.svelte";
   import { forgetCache } from "./lib/cache";
   import { keepScroll } from "./lib/keepScroll";
@@ -70,6 +70,7 @@
       .pendingUpdate()
       .then((u) => u && !update && (update = { ...u, installing: false }))
       .catch(() => {});
+    void loadPendingUploads();
     const stops = [
       on("save-busy", () => toast("Already saving a clip…")),
       on("recorder-error", (e) => toast(e.message, "error")),

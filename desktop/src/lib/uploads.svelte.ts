@@ -197,6 +197,30 @@ export function resumeAfterLogin() {
   for (const job of Object.values(uploads)) {
     if (job.status === "needsLogin") void startUpload(job.id, job.title, job.visibility);
   }
+  // Uploads left over from an earlier run that waited for the login.
+  void api.resumePendingUploads().catch(() => {});
+}
+
+/**
+ * Shows the uploads left unfinished by an earlier run (the core carries them on by itself) as
+ * waiting cards, with their titles. Called at startup.
+ */
+export async function loadPendingUploads() {
+  let rows;
+  try {
+    rows = await api.pendingUploads();
+  } catch {
+    return;
+  }
+  for (const row of rows) {
+    requested[row.clipId] = { title: row.title, visibility: row.visibility };
+    taggedFor[row.clipId] = row.tagged;
+    replaceFor[row.clipId] = row.replace;
+    // An event that arrived meanwhile is newer.
+    if (!uploads[row.clipId]) {
+      uploads[row.clipId] = { id: row.clipId, title: row.title, visibility: row.visibility, status: "queued", sent: 0, total: 0 };
+    }
+  }
 }
 
 let onUnauthorized: (() => void) | null = null;

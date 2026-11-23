@@ -6,7 +6,7 @@
   import ImportPanel from "../components/ImportPanel.svelte";
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
-  import { formatElapsed } from "../lib/elapsed";
+  import { recordingLabel } from "../lib/elapsed";
   import type { RemoveWhere } from "../lib/removal";
   import { combinable, MAX_COMBINE } from "../lib/combine";
   import { keepShown, selectClick } from "../lib/selection";
@@ -84,6 +84,8 @@
   let saving = $state(false);
   /** When the running full recording started (Unix ms), or null. */
   let recordingSince = $state<number | null>(null);
+  /** The running recording's file size so far, once known. */
+  let recordingBytes = $state<number | null>(null);
   /** Debounces the Record button between a press and the recorder's answer. */
   let recordPending = $state(false);
   let recordClock = $state(Date.now());
@@ -297,11 +299,14 @@
       on("full-recording-started", ({ startedAtMs }) => {
         answered = true;
         recordingSince = startedAtMs;
+        recordingBytes = null;
         setRecordPending(false);
       }),
+      on("full-recording-status", ({ sizeBytes }) => (recordingBytes = sizeBytes)),
       on("full-recording-stopped", () => {
         answered = true;
         recordingSince = null;
+        recordingBytes = null;
         setRecordPending(false);
       }),
       on("recorder-error", () => setRecordPending(false)),
@@ -565,7 +570,7 @@
             : "Stop the recording and add it to My clips"}
         >
           {#if recordingSince !== null}
-            <span class="stop-square"></span> Stop · {formatElapsed(recordClock - recordingSince)}
+            <span class="stop-square"></span> Stop · {recordingLabel(recordClock - recordingSince, recordingBytes)}
           {:else}
             <Icon name="record" size={16} /> Record
           {/if}

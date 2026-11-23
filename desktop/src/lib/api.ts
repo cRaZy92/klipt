@@ -662,6 +662,8 @@ export interface Events {
   "full-recording-started": { startedAtMs: number };
   /** The full recording ended; its `clip-saved` (if any) follows. */
   "full-recording-stopped": null;
+  /** Every few seconds while a full recording runs (null: not known yet). */
+  "full-recording-status": { sizeBytes: number | null; freeBytes: number | null };
   "recorder-error": AppError;
   "hotkey-bound": {
     display: string;

@@ -59,7 +59,8 @@ pub fn disk_action(free_bytes: Option<u64>, warned: bool) -> DiskAction {
 }
 
 fn format_gb(bytes: u64) -> String {
-    format!("{:.1} GB", bytes as f64 / 1e9)
+    // As the app shows sizes (formatSize): GB of 1024³ bytes.
+    format!("{:.1} GB", bytes as f64 / (1u64 << 30) as f64)
 }
 
 const START_FAILURE_CODES: &[&str] = &["start_failed", "no_encoder", "no_display", "obs_load_failed"];

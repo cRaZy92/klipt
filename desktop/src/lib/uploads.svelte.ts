@@ -206,6 +206,8 @@ export function resumeAfterLogin() {
   void api.resumePendingUploads().catch(() => {});
 }
 
+export const INTERRUPTED_MESSAGE = "The upload stopped. Klipt tries again every few minutes.";
+
 /**
  * Shows the uploads left unfinished by an earlier run (the core carries them on by itself) as
  * waiting cards, with their titles. Called at startup.
@@ -223,7 +225,17 @@ export async function loadPendingUploads() {
     replaceFor[row.clipId] = row.replace;
     // An event that arrived meanwhile is newer.
     if (!uploads[row.clipId]) {
-      uploads[row.clipId] = { id: row.clipId, title: row.title, visibility: row.visibility, status: "queued", sent: 0, total: 0 };
+      const status: UploadStatus =
+        row.status === "running" ? "starting" : row.status === "waiting" ? "failed" : row.status;
+      uploads[row.clipId] = {
+        id: row.clipId,
+        title: row.title,
+        visibility: row.visibility,
+        status,
+        sent: 0,
+        total: 0,
+        ...(status === "failed" ? { message: INTERRUPTED_MESSAGE } : {}),
+      };
     }
   }
 }

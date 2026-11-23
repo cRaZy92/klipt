@@ -15,6 +15,9 @@ export interface PendingUpload {
   tagged: string[];
   replace: boolean;
   queuedAtMs: number;
+  /** What the core does with it: running, queued for its resume pass, waiting for a login, or
+   * stopped and tried again in a while. */
+  status: "running" | "queued" | "needsLogin" | "waiting";
 }
 export type Sort = "newestFirst" | "oldestFirst";
 

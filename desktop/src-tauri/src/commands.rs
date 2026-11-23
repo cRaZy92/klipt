@@ -778,11 +778,20 @@ fn forget_pending_upload(app: &AppHandle, id: &str) {
     }
 }
 
+fn emit_failed(app: &AppHandle, id: &str, e: &AppError, stale: bool) {
+    emit(app, events::UPLOAD_FAILED, serde_json::json!({ "id": id, "code": e.code(), "message": e.user_message(), "stale": stale }));
+}
+
+/// `upload-failed` for an upload that ended before it ran (the resume pass found it can't).
+pub(crate) fn emit_upload_failed(app: &AppHandle, id: &str, e: &AppError) {
+    emit_failed(app, id, e, false);
+}
+
 /// Announces the uploads finished so far once nothing more is queued: a notification, or (the
 /// window in front) the toast for the window to show, which is returned.
 fn announce_finished(app: &AppHandle, more: bool, copied: bool) -> Option<serde_json::Value> {
-    let pending = lock(&app.state::<AppState>().library).pending_uploads().map(|p| p.len()).unwrap_or(0);
-    let still_queued = pending + app.state::<Uploads>().count() + usize::from(more);
+    let resume_left = app.try_state::<crate::upload_resume::Resuming>().map(|r| r.left()).unwrap_or(0);
+    let still_queued = upload_notice::still_queued(app.state::<Uploads>().count(), more, resume_left);
     let finished = app.state::<upload_notice::UploadBatch>().take_if_idle(still_queued)?;
     let focused = app.get_webview_window(crate::tray::MAIN_WINDOW).and_then(|w| w.is_focused().ok()).unwrap_or(false);
     // With the link copied by itself, only a single upload says so.
@@ -865,11 +874,7 @@ pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> Upl
                     Err(e) => crate::elog!("klipt: can't forget the expired login: {e}"),
                 }
             }
-            emit(
-                &app,
-                events::UPLOAD_FAILED,
-                serde_json::json!({ "id": id, "code": e.code(), "message": e.user_message(), "stale": stale }),
-            );
+            emit_failed(&app, &id, &e, stale);
             // The last of several failed: the ones before it still get their summary.
             if let Some(toast) = announce_finished(&app, more, false) {
                 emit(&app, events::UPLOAD_SUMMARY, toast);

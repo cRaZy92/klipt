@@ -41,6 +41,13 @@ pub fn finish_notice(finished: &[Finished], still_queued: usize, focused: bool, 
     }
 }
 
+/// How many uploads are still to run before a summary is due: those running, the window's next
+/// bulk clip (`more`) and the rows the resume pass has yet to try. Remembered uploads that wait
+/// for a connection don't count, or they'd hold every later notice back.
+pub fn still_queued(running: usize, more: bool, resume_left: usize) -> usize {
+    running + usize::from(more) + resume_left
+}
+
 /// The uploads finished since the queue was last empty.
 #[derive(Default)]
 pub struct UploadBatch(Mutex<Vec<Finished>>);
@@ -119,6 +126,16 @@ mod tests {
             finish_notice(&all, 0, true, false),
             Notice::Toast { title: "3 clips uploaded".into(), link: String::new(), copied: false }
         );
+    }
+
+    #[test]
+    fn only_uploads_still_to_run_hold_the_notice() {
+        // A remembered upload that failed for want of a connection isn't counted: only running
+        // ones, the window's next bulk clip and the resume pass's rows still to go.
+        assert_eq!(still_queued(0, false, 0), 0);
+        assert_eq!(still_queued(1, false, 0), 1);
+        assert_eq!(still_queued(0, true, 0), 1);
+        assert_eq!(still_queued(0, false, 2), 2);
     }
 
     #[test]

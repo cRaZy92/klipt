@@ -240,6 +240,8 @@ pub mod events {
     pub const FULL_RECORDING_STARTED: &str = "full-recording-started";
     /// No payload. The recording's `clip-saved` (if any) follows.
     pub const FULL_RECORDING_STOPPED: &str = "full-recording-stopped";
+    /// Payload: `{ sizeBytes, freeBytes }` (each may be null), every few seconds while recording.
+    pub const FULL_RECORDING_STATUS: &str = "full-recording-status";
 }
 
 /// Starts the supervisor for the app: the platform backend, game detection in `data_dir`, the
@@ -265,6 +267,7 @@ pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) ->
         wall_clock_ms: Box::new(|| {
             SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
         }),
+        disk: Box::new(|dir, since_ms| crate::disk::reading(dir, since_ms)),
         sink: Box::new(move |event| {
             // Sound, notifications and the tray icon: the window is usually hidden while gaming.
             crate::feedback::on_supervisor_event(&sink_app, &event);
@@ -283,6 +286,10 @@ pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) ->
                     sink_app.emit(events::FULL_RECORDING_STARTED, serde_json::json!({ "startedAtMs": started_at_ms }))
                 }
                 SupervisorEvent::FullRecordingStopped => sink_app.emit(events::FULL_RECORDING_STOPPED, ()),
+                SupervisorEvent::FullRecordingStatus { size_bytes, free_bytes } => sink_app.emit(
+                    events::FULL_RECORDING_STATUS,
+                    serde_json::json!({ "sizeBytes": size_bytes, "freeBytes": free_bytes }),
+                ),
             };
             if let Err(e) = sent {
                 crate::elog!("klipt: can't send a recorder event to the UI: {e}");

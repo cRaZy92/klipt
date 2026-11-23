@@ -22,7 +22,7 @@ pub const RECORDING_STARTED_TEXT: &str = "Recording started";
 
 /// Errors that end or prevent a full recording: always told, the window is usually hidden.
 pub fn is_recording_problem(code: &str) -> bool {
-    matches!(code, "full_recording_lost" | "full_recording_failed")
+    matches!(code, "full_recording_lost" | "full_recording_failed" | "disk_low" | "disk_full_stopped")
 }
 
 /// The app icon, for notifications on Linux.

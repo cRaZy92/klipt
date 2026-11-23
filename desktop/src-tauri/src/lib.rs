@@ -5,6 +5,7 @@ pub mod cleanup;
 pub mod combine;
 pub mod commands;
 pub mod diagnostics;
+pub mod disk;
 pub mod editor;
 pub mod errors;
 pub mod export;

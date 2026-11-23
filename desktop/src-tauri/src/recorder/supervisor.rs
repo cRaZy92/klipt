@@ -4,13 +4,14 @@
 //! [`Supervisor`] is a synchronous state machine driven by [`Input`]s, so tests can drive it with
 //! a fake backend and a fake clock. [`SupervisorHandle::spawn`] runs it on its own thread.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use super::{AudioDevice, Display, RecordConfig, RecorderBackend, RecorderEvent};
+use crate::disk::DiskReading;
 use crate::errors::{AppError, Result};
 use crate::games::Detected;
 use crate::library::ClipView;
@@ -34,6 +35,33 @@ pub const FULL_RECORDING_START_TIMEOUT: Duration = Duration::from_secs(10);
 pub const FULL_RECORDING_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Backend error codes that mean the recording never started.
+/// How often a running full recording's size and the free disk space are checked.
+pub const DISK_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+/// Free space under which the user is warned (once per recording).
+pub const DISK_WARN_BYTES: u64 = 5_000_000_000;
+/// Free space under which the recording is stopped, so its file is finished while it still fits.
+pub const DISK_STOP_BYTES: u64 = 1_000_000_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskAction {
+    Nothing,
+    Warn,
+    Stop,
+}
+
+/// What a disk check during a full recording leads to. Unknown free space: nothing.
+pub fn disk_action(free_bytes: Option<u64>, warned: bool) -> DiskAction {
+    match free_bytes {
+        Some(free) if free < DISK_STOP_BYTES => DiskAction::Stop,
+        Some(free) if free < DISK_WARN_BYTES && !warned => DiskAction::Warn,
+        _ => DiskAction::Nothing,
+    }
+}
+
+fn format_gb(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
+}
+
 const START_FAILURE_CODES: &[&str] = &["start_failed", "no_encoder", "no_display", "obs_load_failed"];
 
 /// Monotonic time since some fixed start.
@@ -88,6 +116,8 @@ pub enum SupervisorEvent {
     FullRecordingStarted { started_at_ms: i64 },
     /// The full recording ended, for any reason. Its `ClipSaved` (if any) follows.
     FullRecordingStopped,
+    /// Every few seconds while a full recording runs: its size so far and the free disk space.
+    FullRecordingStatus { size_bytes: Option<u64>, free_bytes: Option<u64> },
 }
 
 /// Everything the supervisor needs from the outside world.
@@ -99,6 +129,9 @@ pub struct Deps {
     pub sink: Box<dyn FnMut(SupervisorEvent) + Send>,
     /// Unix time in ms, for when a full recording started.
     pub wall_clock_ms: Box<dyn Fn() -> i64 + Send>,
+    /// The size of the recording in the clips folder (changed since the given Unix ms) and the
+    /// free space on its drive.
+    pub disk: Box<dyn FnMut(&Path, i64) -> DiskReading + Send>,
 }
 
 pub enum Input {
@@ -150,6 +183,10 @@ struct FullRecording {
     /// The game when the recording was asked for.
     game: Detected,
     started_at_ms: Option<i64>,
+    /// When the size and free space are next checked (while running).
+    next_disk_check: Option<Duration>,
+    /// The low-disk warning was given.
+    warned_low: bool,
 }
 
 struct PendingSave {
@@ -200,6 +237,7 @@ pub fn friendly_message(code: &str) -> String {
             "The recording stopped unexpectedly. What was recorded so far may be in the Recordings folder."
         }
         "full_recording_failed" => "Klipt couldn't start the recording.",
+        "disk_full_stopped" => "Recording stopped: the disk is almost full",
         _ => "Something went wrong with recording.",
     }
     .into()
@@ -337,7 +375,8 @@ impl Supervisor {
         let full_stop = match self.full.as_ref().map(|f| f.phase) {
             Some(FullPhase::Stopping { deadline } | FullPhase::Starting { deadline }) => Some(deadline),
             Some(FullPhase::WaitingForBackend { start_at }) => start_at,
-            _ => None,
+            Some(FullPhase::Running) => self.full.as_ref().and_then(|f| f.next_disk_check),
+            None => None,
         };
         [restart, self.next_poll, self.pending_save.as_ref().map(|p| p.deadline), full_stop]
             .into_iter()
@@ -384,12 +423,12 @@ impl Supervisor {
             State::Running { since } if self.now() >= since + FULL_RECORDING_READY_AFTER => self.start_full(game),
             State::Running { since } => {
                 let start_at = Some(since + FULL_RECORDING_READY_AFTER);
-                self.full = Some(FullRecording { phase: FullPhase::WaitingForBackend { start_at }, game, started_at_ms: None });
+                self.full = Some(FullRecording { phase: FullPhase::WaitingForBackend { start_at }, game, started_at_ms: None, next_disk_check: None, warned_low: false });
             }
             State::Idle => {
                 // "While a game runs" with no game: start the recorder for this recording.
                 let phase = FullPhase::WaitingForBackend { start_at: None };
-                self.full = Some(FullRecording { phase, game, started_at_ms: None });
+                self.full = Some(FullRecording { phase, game, started_at_ms: None, next_disk_check: None, warned_low: false });
                 self.restarts = 0;
                 self.start_backend();
                 if !self.is_recording() {
@@ -405,7 +444,7 @@ impl Supervisor {
         match self.backend.start_full_recording() {
             Ok(()) => {
                 let phase = FullPhase::Starting { deadline: self.now() + FULL_RECORDING_START_TIMEOUT };
-                self.full = Some(FullRecording { phase, game, started_at_ms: None });
+                self.full = Some(FullRecording { phase, game, started_at_ms: None, next_disk_check: None, warned_low: false });
             }
             Err(e) => {
                 crate::elog!("klipt: can't start a full recording: {e}");
@@ -491,6 +530,35 @@ impl Supervisor {
 
     fn emit_error(&mut self, code: &str) {
         self.emit(SupervisorEvent::Error { code: code.into(), message: friendly_message(code) });
+    }
+
+    /// Reports the running recording's size and the free space; warns when the disk runs low and
+    /// stops the recording cleanly before it fills.
+    fn check_disk(&mut self, now: Duration) {
+        let Some(full) = self.full.as_mut() else { return };
+        full.next_disk_check = Some(now + DISK_CHECK_INTERVAL);
+        let (since, warned) = (full.started_at_ms.unwrap_or(0), full.warned_low);
+        let reading = (self.deps.disk)(&self.cfg.output_dir, since);
+        self.emit(SupervisorEvent::FullRecordingStatus { size_bytes: reading.recording_bytes, free_bytes: reading.free_bytes });
+        match disk_action(reading.free_bytes, warned) {
+            DiskAction::Nothing => {}
+            DiskAction::Warn => {
+                if let Some(full) = self.full.as_mut() {
+                    full.warned_low = true;
+                }
+                let left = format_gb(reading.free_bytes.unwrap_or(0));
+                crate::elog!("klipt: the disk is almost full ({left} left) during a recording");
+                self.emit(SupervisorEvent::Error {
+                    code: "disk_low".into(),
+                    message: format!("Disk almost full: {left} left. The recording stops at 1 GB."),
+                });
+            }
+            DiskAction::Stop => {
+                crate::elog!("klipt: stopping the recording: the disk is almost full");
+                self.emit_error("disk_full_stopped");
+                self.stop_full();
+            }
+        }
     }
 
     fn start_backend(&mut self) {
@@ -624,6 +692,9 @@ impl Supervisor {
                     self.start_full(full.game);
                 }
             }
+            Some(FullPhase::Running) if self.full.as_ref().and_then(|f| f.next_disk_check).is_some_and(|t| t <= now) => {
+                self.check_disk(now);
+            }
             _ => {}
         }
         if self.pending_save.as_ref().is_some_and(|p| p.deadline <= now) {
@@ -707,6 +778,7 @@ impl Supervisor {
                     let started_at_ms = (self.deps.wall_clock_ms)();
                     full.phase = FullPhase::Running;
                     full.started_at_ms = Some(started_at_ms);
+                    full.next_disk_check = Some(self.deps.clock.now() + DISK_CHECK_INTERVAL);
                     self.emit(SupervisorEvent::FullRecordingStarted { started_at_ms });
                 }
                 _ => crate::elog!("klipt: a full recording started that wasn't asked for"),
@@ -956,6 +1028,7 @@ mod tests {
         game: Arc<Mutex<Detected>>,
         processed: Arc<Mutex<Vec<SavedClip>>>,
         events: Arc<Mutex<Vec<SupervisorEvent>>>,
+        disk: Arc<Mutex<DiskReading>>,
     }
 
     impl World {
@@ -967,6 +1040,7 @@ mod tests {
                 game: Default::default(),
                 processed: Default::default(),
                 events: Default::default(),
+                disk: Arc::new(Mutex::new(DiskReading { recording_bytes: None, free_bytes: Some(100 * GB) })),
             }
         }
 
@@ -983,6 +1057,10 @@ mod tests {
                 }),
                 sink: Box::new(move |e| events.lock().unwrap().push(e)),
                 wall_clock_ms: Box::new(|| WALL_MS),
+                disk: {
+                    let disk = self.disk.clone();
+                    Box::new(move |_dir: &Path, _since_ms: i64| *disk.lock().unwrap())
+                },
             }
         }
 
@@ -1092,6 +1170,85 @@ mod tests {
 
     fn recording_saved(path: &str) -> RecorderEvent {
         RecorderEvent::FullRecordingSaved { path: path.into(), duration_ms: Some(600_000) }
+    }
+
+    const GB: u64 = 1_000_000_000;
+
+    fn set_disk(w: &World, recording_bytes: Option<u64>, free_bytes: Option<u64>) {
+        *w.disk.lock().unwrap() = DiskReading { recording_bytes, free_bytes };
+    }
+
+    fn tick_after(w: &World, s: &mut Supervisor, by: Duration) {
+        w.clock.advance(by);
+        assert!(s.handle(Input::Tick));
+    }
+
+    fn statuses(w: &World) -> Vec<(Option<u64>, Option<u64>)> {
+        w.events()
+            .into_iter()
+            .filter_map(|e| match e {
+                SupervisorEvent::FullRecordingStatus { size_bytes, free_bytes } => Some((size_bytes, free_bytes)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn disk_action_by_free_space() {
+        assert_eq!(disk_action(None, false), DiskAction::Nothing);
+        assert_eq!(disk_action(Some(6 * GB), false), DiskAction::Nothing);
+        assert_eq!(disk_action(Some(4 * GB), false), DiskAction::Warn);
+        assert_eq!(disk_action(Some(4 * GB), true), DiskAction::Nothing);
+        assert_eq!(disk_action(Some(GB - 1), false), DiskAction::Stop);
+        assert_eq!(disk_action(Some(GB - 1), true), DiskAction::Stop);
+    }
+
+    #[test]
+    fn full_recording_reports_size_every_5s() {
+        let w = World::new();
+        let mut s = recording(&w);
+        assert!(s.next_deadline().is_some_and(|d| d <= w.clock.now() + DISK_CHECK_INTERVAL));
+        set_disk(&w, Some(3 * GB), Some(50 * GB));
+        tick_after(&w, &mut s, DISK_CHECK_INTERVAL);
+        set_disk(&w, Some(4 * GB), Some(49 * GB));
+        tick_after(&w, &mut s, DISK_CHECK_INTERVAL);
+        assert_eq!(statuses(&w), vec![(Some(3 * GB), Some(50 * GB)), (Some(4 * GB), Some(49 * GB))]);
+        assert!(w.error_codes().is_empty());
+    }
+
+    #[test]
+    fn low_disk_warns_once() {
+        let w = World::new();
+        let mut s = recording(&w);
+        set_disk(&w, Some(GB), Some(4 * GB));
+        tick_after(&w, &mut s, DISK_CHECK_INTERVAL);
+        tick_after(&w, &mut s, DISK_CHECK_INTERVAL);
+        assert_eq!(w.error_codes(), vec!["disk_low".to_string()]);
+        assert_eq!(w.full_stops(), 0);
+    }
+
+    #[test]
+    fn full_disk_stops_the_recording_cleanly() {
+        let w = World::new();
+        let mut s = recording(&w);
+        set_disk(&w, Some(GB), Some(GB / 2));
+        tick_after(&w, &mut s, DISK_CHECK_INTERVAL);
+        assert_eq!(w.full_stops(), 1);
+        assert!(w.error_codes().contains(&"disk_full_stopped".to_string()));
+        // Stopping: no second stop while the file is finished.
+        tick_after(&w, &mut s, DISK_CHECK_INTERVAL);
+        assert_eq!(w.full_stops(), 1);
+    }
+
+    #[test]
+    fn unknown_free_space_never_stops() {
+        let w = World::new();
+        let mut s = recording(&w);
+        set_disk(&w, Some(2 * GB), None);
+        tick_after(&w, &mut s, DISK_CHECK_INTERVAL);
+        assert_eq!(statuses(&w), vec![(Some(2 * GB), None)]);
+        assert!(w.error_codes().is_empty());
+        assert_eq!(w.full_stops(), 0);
     }
 
     /// Always mode, the backend started, a full recording running.

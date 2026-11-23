@@ -95,6 +95,19 @@ impl From<UploadError> for AppError {
 }
 
 impl AppError {
+    /// Whether an upload that ended with this error should carry on at the next launch: the
+    /// connection or the login went away, not a refusal of this clip.
+    pub fn keeps_upload_queued(&self) -> bool {
+        match self {
+            AppError::Network(_) | AppError::Unauthorized | AppError::Io(_) => true,
+            AppError::ServerError(detail) => {
+                let status: u16 = detail.split(' ').next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                matches!(status, 0 | 408 | 429) || status >= 500
+            }
+            _ => false,
+        }
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             AppError::ClipNotFound(_) => "clip_not_found",
@@ -222,5 +235,30 @@ mod tests {
         }]);
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["fields"][0]["field"], "fps");
+    }
+
+    #[test]
+    fn upload_failures_that_wait_for_next_launch() {
+        for e in [
+            AppError::Network("x".into()),
+            AppError::Unauthorized,
+            AppError::ServerError("503 busy".into()),
+            AppError::ServerError("0 bad_location".into()),
+            AppError::ServerError("429 slow".into()),
+            AppError::ServerError("408 timeout".into()),
+            AppError::Io(std::io::Error::other("connection reset")),
+        ] {
+            assert!(e.keeps_upload_queued(), "{e:?}");
+        }
+        for e in [
+            AppError::ServerError("413 too_big".into()),
+            AppError::InvalidVideo("x".into()),
+            AppError::FileMissing,
+            AppError::ToolFailed { tool: "ffmpeg", detail: "x".into() },
+            AppError::ClipNotFound("c".into()),
+            AppError::Refused("no".into()),
+        ] {
+            assert!(!e.keeps_upload_queued(), "{e:?}");
+        }
     }
 }

@@ -183,6 +183,11 @@ impl Uploads {
     pub fn is_active(&self, id: &str) -> bool {
         lock(&self.0).contains(id)
     }
+
+    /// How many clips are uploading or exporting.
+    pub fn count(&self) -> usize {
+        lock(&self.0).len()
+    }
 }
 
 impl Drop for UploadGuard {
@@ -474,6 +479,10 @@ pub async fn logout(app: AppHandle) -> Result<()> {
             }
         }
     }
+    // Logging out means "don't carry on": unfinished uploads aren't resumed at the next launch.
+    if let Err(e) = lock(&app.state::<AppState>().library).clear_pending_uploads() {
+        crate::elog!("klipt: can't forget unfinished uploads at logout: {e}");
+    }
     auth::clear(&data_dir)
 }
 
@@ -658,7 +667,7 @@ struct ProgressEvent<'a> {
     phase: &'static str,
 }
 
-struct Job {
+pub(crate) struct Job {
     clip: Clip,
     title: String,
     visibility: Visibility,
@@ -694,19 +703,51 @@ fn start_upload(
     tagged: Option<Vec<String>>,
     replace: Option<bool>,
 ) -> Result<()> {
+    let (job, guard) = prepare_upload(&app, &id, &title, visibility, tagged, replace)?;
+    tauri::async_runtime::spawn(run_job(app, job, guard));
+    Ok(())
+}
+
+/// How an upload ended.
+pub enum UploadEnd {
+    Done { share_url: String, replaced: bool, title: String },
+    Failed,
+}
+
+/// Checks a clip can upload, claims it and remembers the upload (so it carries on after a
+/// restart). The job runs with [`run_job`].
+pub(crate) fn prepare_upload(
+    app: &AppHandle,
+    id: &str,
+    title: &str,
+    visibility: Visibility,
+    tagged: Option<Vec<String>>,
+    replace: Option<bool>,
+) -> Result<(Job, UploadGuard)> {
     let state = app.state::<AppState>();
     let uploads = app.state::<Uploads>();
-    let title = clean_title(&title)?;
+    let title = clean_title(title)?;
     let tagged: Vec<String> =
         tagged.unwrap_or_default().into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).take(20).collect();
-    let clip = lock(&state.library).get(&id)?;
+    let clip = lock(&state.library).get(id)?;
     if !clip.path.is_file() {
         return Err(AppError::FileMissing);
     }
     let tools = state.tools.clone().ok_or(AppError::ToolsMissing)?;
     let auth = auth::load(&state.data_dir).ok_or(AppError::Unauthorized)?;
-    let cache_dir = cache_dir(&app)?;
-    let guard = uploads.try_begin(&id)?;
+    let cache_dir = cache_dir(app)?;
+    let guard = uploads.try_begin(id)?;
+    let pending = crate::library::PendingUpload {
+        clip_id: id.to_string(),
+        title: title.clone(),
+        visibility,
+        tagged: tagged.clone(),
+        replace: replace.unwrap_or(false),
+        queued_at_ms: now_ms(),
+    };
+    if let Err(e) = lock(&state.library).add_pending_upload(&pending) {
+        crate::elog!("klipt: can't remember the upload of clip {id}: {e}");
+    }
     // A screenshot's picture can't be swapped on the server: it goes up as a new one.
     let replaces = if replace.unwrap_or(false) && clip.kind == crate::library::ClipKind::Clip {
         clip.server_clip_id.clone()
@@ -714,64 +755,84 @@ fn start_upload(
         None
     };
     let job = Job { clip, title, visibility, tagged, replaces, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
-    tauri::async_runtime::spawn(async move {
-        let id = job.clip.id.clone();
-        let cache_dir = job.cache_dir.clone();
-        let (data_dir, token) = (job.data_dir.clone(), job.auth.token.clone());
-        // The work runs in its own task so a panic anywhere in it still ends in `upload-failed`
-        // instead of a card stuck on "Uploading…".
-        let worker_app = app.clone();
-        let result = match tauri::async_runtime::spawn(async move { run_upload(&worker_app, &job).await }).await {
-            Ok(result) => result,
-            Err(e) => Err(AppError::Internal(format!("upload task failed: {e}"))),
-        };
-        // Free the clip before telling the UI, so a "Try again" right away isn't refused.
-        drop(guard);
-        match result {
-            Ok((share_url, replaced)) => {
-                let copied = match copy_text(&app, &share_url) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        crate::elog!("klipt: can't copy the share link: {e}");
-                        false
-                    }
-                };
-                // The upload is the end of the clip's editing: its cached audio and strip go.
-                // Waits for the strip's ffmpeg to stop first, so it can't hold files being deleted.
-                let cleanup_app = app.clone();
-                let (cleanup_id, cleanup_cache) = (id.clone(), cache_dir.clone());
-                let cleanup = tauri::async_runtime::spawn_blocking(move || {
-                    cleanup_app.state::<crate::filmstrip::Jobs>().stop(&cleanup_id);
-                    editor::remove_edit_cache(&cleanup_cache, &cleanup_id);
-                })
-                .await;
-                if let Err(e) = cleanup {
-                    crate::elog!("klipt: cleanup after the upload of clip {id} failed: {e}");
+    Ok((job, guard))
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+fn forget_pending_upload(app: &AppHandle, id: &str) {
+    let result = lock(&app.state::<AppState>().library).remove_pending_upload(id);
+    if let Err(e) = result {
+        crate::elog!("klipt: can't forget the finished upload of clip {id}: {e}");
+    }
+}
+
+/// Runs a prepared upload to its end and tells the UI (`upload-done` / `upload-failed`).
+pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> UploadEnd {
+    let id = job.clip.id.clone();
+    let title = job.title.clone();
+    let cache_dir = job.cache_dir.clone();
+    let (data_dir, token) = (job.data_dir.clone(), job.auth.token.clone());
+    // The work runs in its own task so a panic anywhere in it still ends in `upload-failed`
+    // instead of a card stuck on "Uploading…".
+    let worker_app = app.clone();
+    let result = match tauri::async_runtime::spawn(async move { run_upload(&worker_app, &job).await }).await {
+        Ok(result) => result,
+        Err(e) => Err(AppError::Internal(format!("upload task failed: {e}"))),
+    };
+    // Free the clip before telling the UI, so a "Try again" right away isn't refused.
+    drop(guard);
+    match result {
+        Ok((share_url, replaced)) => {
+            forget_pending_upload(&app, &id);
+            let copied = match copy_text(&app, &share_url) {
+                Ok(()) => true,
+                Err(e) => {
+                    crate::elog!("klipt: can't copy the share link: {e}");
+                    false
                 }
-                emit(&app, events::UPLOAD_DONE, serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied, "replaced": replaced }));
+            };
+            // The upload is the end of the clip's editing: its cached audio and strip go.
+            // Waits for the strip's ffmpeg to stop first, so it can't hold files being deleted.
+            let cleanup_app = app.clone();
+            let (cleanup_id, cleanup_cache) = (id.clone(), cache_dir.clone());
+            let cleanup = tauri::async_runtime::spawn_blocking(move || {
+                cleanup_app.state::<crate::filmstrip::Jobs>().stop(&cleanup_id);
+                editor::remove_edit_cache(&cleanup_cache, &cleanup_id);
+            })
+            .await;
+            if let Err(e) = cleanup {
+                crate::elog!("klipt: cleanup after the upload of clip {id} failed: {e}");
             }
-            Err(e) => {
-                crate::elog!("klipt: upload of clip {id} failed: {e}");
-                // `stale`: the login this upload used was already replaced (another upload hit
-                // 401 first and the user logged in again, or they logged out): the UI just
-                // retries with the current login instead of asking for it again.
-                let mut stale = false;
-                if matches!(e, AppError::Unauthorized) {
-                    // The token is dead. The clip, its edit and the upload progress stay.
-                    match clear_auth_if_current(&data_dir, &token) {
-                        Ok(cleared) => stale = !cleared,
-                        Err(e) => crate::elog!("klipt: can't forget the expired login: {e}"),
-                    }
-                }
-                emit(
-                    &app,
-                    events::UPLOAD_FAILED,
-                    serde_json::json!({ "id": id, "code": e.code(), "message": e.user_message(), "stale": stale }),
-                );
-            }
+            emit(&app, events::UPLOAD_DONE, serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied, "replaced": replaced }));
+            UploadEnd::Done { share_url, replaced, title }
         }
-    });
-    Ok(())
+        Err(e) => {
+            crate::elog!("klipt: upload of clip {id} failed: {e}");
+            if !e.keeps_upload_queued() {
+                forget_pending_upload(&app, &id);
+            }
+            // `stale`: the login this upload used was already replaced (another upload hit
+            // 401 first and the user logged in again, or they logged out): the UI just
+            // retries with the current login instead of asking for it again.
+            let mut stale = false;
+            if matches!(e, AppError::Unauthorized) {
+                // The token is dead. The clip, its edit and the upload progress stay.
+                match clear_auth_if_current(&data_dir, &token) {
+                    Ok(cleared) => stale = !cleared,
+                    Err(e) => crate::elog!("klipt: can't forget the expired login: {e}"),
+                }
+            }
+            emit(
+                &app,
+                events::UPLOAD_FAILED,
+                serde_json::json!({ "id": id, "code": e.code(), "message": e.user_message(), "stale": stale }),
+            );
+            UploadEnd::Failed
+        }
+    }
 }
 
 /// Forgets the saved login only if it is still the one with `token`; returns whether it did. An

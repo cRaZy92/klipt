@@ -35,7 +35,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio = { version = "1.54.1", features = ["fs", "io-util", "time", "rt", "macros", "sync"] }
 uuid = { version = "1.29.2", features = ["v4"] }
 # Settings → Resources: the app's own processes (RAM, CPU; GPU on Windows, see below).
-sysinfo = { version = "0.40.4", default-features = false, features = ["system", "disk"] }
+sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 # The same version tauri-plugin-notification uses: to name the app and give it its icon on Linux
 # (feedback::notify), and for notifications with a button (feedback::notify_with_copy).
 notify-rust = "4.19.0"
@@ -69,4 +69,4 @@ nvml-wrapper = "0.13.0"
 # Same version Tauri uses; only to end the web process of a released window (tray::release_window).
 webkit2gtk = "=2.0.2"
 ashpd = { version = "0.12.3", features = ["tokio"] }
-nix = { version = "0.31.3", features = ["process", "signal"] }
+nix = { version = "0.31.3", features = ["process", "signal", "fs"] }

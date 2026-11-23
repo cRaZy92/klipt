@@ -1,6 +1,6 @@
 # Klipt roadmap
 
-As of 2026-11-22. Update this file when an item is done or a plan changes.
+As of 2026-11-23. Update this file when an item is done or a plan changes.
 
 All of v1 is built for Windows and Linux, and every desktop change pushed to `main` ships itself as a
 signed Windows release. What's missing is mostly proof on real machines and with real friends, not code.
@@ -9,6 +9,7 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 2026-11-23 | Uploads and recording safety | Uploads cut off by quitting, a crash or sleep carry on at the next launch (or after logging in), one after another; ones the server refused or whose clip is gone don't. A finished upload no longer overwrites the clipboard: the toast (window in front) or system notification has a **Copy link** button, several in a row get one "N clips uploaded"; Settings → General "Copy the link by itself when an upload finishes" (off) brings back the old way. A full recording shows its size on the Record button; under 5 GB free it warns once, under 1 GB it stops cleanly. Untested in the app and on Windows |
 | 2026-11-22 | Albums                   | Gather clips (yours or friends', link-only ones too) into a named album with one link, `/a/<id>`, that anyone with it can watch, like a clip's share link. Website: an Albums page, "Add to album" on a clip's page (tick albums, or make one), and the album page plays the clip picked with the whole list beside it; its owner renames, deletes, reorders and removes clips. App: "Add to album" in the clip player and the ⋯ menus of uploaded clips, and "Album" in My clips' selection bar. Up to 200 clips; a deleted clip leaves its albums. Untested in the app; server needs redeploy |
 | 2026-11-22 | Mute part of a lane      | Shift+drag on a sound lane (or its new button, from the playhead) mutes that part of the track; its level button sets it to 25% or 50% instead. The parts move, resize and undo like subtitles, play that way in the editor, and uploads, exports, new clips from parts and combined clips turn the track down at the same moments (30 ms fades; the video isn't cut). Untested in the app and on Windows |
 | 2026-11-22 | Combine clips            | "Combine" in My clips' selection bar joins 2–50 clips (each with its trim, cuts, zooms, subtitles and volumes) in a chosen order into one new clip, then opens its upload ("Just combine" keeps it local). Each clip is exported as for an upload, then joined and encoded once more, scaled to the biggest clip's size (others centred on black) at the highest frame rate; the game is the one most clips have; the sources stay. Untested in the app and on Windows |
@@ -135,15 +136,16 @@ Asked for by the owner. Item 1 is built and merged to `main` (plan: `docs/superp
 
 ## Planned: safety and editor additions (chosen 2026-11-20)
 
-Picked by the owner from a list of suggestions (item 8 added 2026-11-22). Items 2, 5 and 8 are built
-(see "Where Klipt is today"); the rest have no spec yet.
+Picked by the owner from a list of suggestions (item 8 added 2026-11-22). Items 1–5 and 8 are built
+(see "Where Klipt is today"; spec `docs/superpowers/specs/2026-11-22-uploads-and-recording-safety-design.md`);
+the rest have no spec yet.
 
 | # | Feature                          | What it means                                                                                      |
 | - | -------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 1 | Recording safety                 | While a full recording runs, show its length and size; warn when the disk runs low, and stop the recording cleanly before the disk fills so the file isn't lost |
+| 1 | ~~Recording safety~~ (done 2026-11-23) | While a full recording runs, show its length and size; warn when the disk runs low, and stop the recording cleanly before the disk fills so the file isn't lost |
 | 2 | ~~Mute or duck part of a lane~~ (done 2026-11-22) | In the editor, drag over part of one audio lane (game, mic, voice chat) to silence it or turn it down, without cutting the video; kept in exports and uploads |
-| 3 | Uploads survive a restart        | An upload cut off by quitting Klipt, a crash or sleep resumes on the next launch (tus already resumes; the desktop keeps the queue) |
-| 4 | Copy link when the upload is done | Closing the editor while an upload runs still copies the share link to the clipboard when it finishes, with a notification |
+| 3 | ~~Uploads survive a restart~~ (done 2026-11-23) | An upload cut off by quitting Klipt, a crash or sleep resumes on the next launch (tus already resumes; the desktop keeps the queue) |
+| 4 | ~~Copy link when the upload is done~~ (done 2026-11-23: on a button, owner's choice) | Closing the editor while an upload runs still copies the share link to the clipboard when it finishes, with a notification |
 | 5 | ~~Albums~~ (done 2026-11-22)     | Gather clips (your own or friends') into a named album with one share link, e.g. "Best of the tournament" |
 | 6 | Draw on the clip                 | Arrows, circles and boxes placed on the video for part of a clip, on their own editor lane like subtitles; burned into exports and uploads |
 | 7 | Download all my clips            | A website button that downloads every clip you uploaded as one zip, as a backup or to leave |

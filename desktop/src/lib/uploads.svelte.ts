@@ -1,7 +1,7 @@
 // Uploads in progress, shared by the library cards and the upload dialog. The Rust core does the
 // work; this mirrors its `upload-*` events.
 
-import { api, errorCode, errorMessage, on, type UploadPhase, type Visibility } from "./api";
+import { api, errorCode, errorMessage, on, type UploadPhase, type UploadToast, type Visibility } from "./api";
 import { RateMeter, transferDetail } from "./progress";
 import { toast } from "./toasts.svelte";
 
@@ -107,8 +107,6 @@ function settled(id: string): Promise<void> {
   });
 }
 
-/** Clips uploading as part of `uploadInTurn`: their own "Link copied!" toasts are skipped. */
-export const inBulk = new Set<string>();
 
 /**
  * Uploads several clips one after another (each exports with ffmpeg first, so not all at once).
@@ -117,14 +115,15 @@ export const inBulk = new Set<string>();
 export async function uploadInTurn(list: { id: string; title: string }[], visibility: Visibility): Promise<number> {
   const todo = list.filter(({ id }) => !isBusy(uploads[id]));
   for (const { id, title } of todo) {
-    inBulk.add(id);
     uploads[id] = { id, title, visibility, status: "queued", sent: 0, total: 0 };
   }
   let uploaded = 0;
-  for (const { id, title } of todo) {
+  for (const [index, { id, title }] of todo.entries()) {
     // Stopped meanwhile (logout) or waiting for a login: its turn is skipped.
     if (uploads[id]?.status !== "queued") continue;
-    await startUpload(id, title, visibility);
+    // More to come: the core holds its "uploaded" notice for one summary at the end.
+    const more = todo.slice(index + 1).some((rest) => uploads[rest.id]?.status === "queued");
+    await startUpload(id, title, visibility, undefined, undefined, more);
     // "Already uploading": the core is on it after all, and its events will say when it ends.
     if (uploads[id]?.status === "queued") uploads[id] = { ...uploads[id], status: "starting" };
     await settled(id);
@@ -137,7 +136,6 @@ export async function uploadInTurn(list: { id: string; title: string }[], visibi
       }
     }
   }
-  for (const { id } of todo) inBulk.delete(id);
   return uploaded;
 }
 
@@ -150,14 +148,21 @@ const replaceFor: Record<string, boolean> = {};
  * Starts (or retries, resuming where it stopped) an upload. `tagged` and `replace` are kept for
  * retries.
  */
-export async function startUpload(id: string, title: string, visibility: Visibility, tagged?: string[], replace?: boolean) {
+export async function startUpload(
+  id: string,
+  title: string,
+  visibility: Visibility,
+  tagged?: string[],
+  replace?: boolean,
+  more = false,
+) {
   stoppedByLogout.delete(id);
   requested[id] = { title, visibility };
   if (tagged) taggedFor[id] = tagged;
   if (replace !== undefined) replaceFor[id] = replace;
   const previous = uploads[id];
   try {
-    await api.uploadClip(id, title, visibility, taggedFor[id] ?? [], replaceFor[id] ?? false);
+    await api.uploadClip(id, title, visibility, taggedFor[id] ?? [], replaceFor[id] ?? false, more);
   } catch (e) {
     // "Already uploading" means the core is still on it: leave what's shown alone; its
     // progress events keep updating the card.
@@ -234,7 +239,8 @@ const meters = new Map<string, RateMeter>();
  */
 export function watchUploads(handlers: {
   unauthorized: () => void;
-  done: (shareUrl: string, copied: boolean, replaced: boolean) => void;
+  /** The core asks the window (it's in front) to show this notice. */
+  notice: (toast: UploadToast) => void;
 }) {
   onUnauthorized = handlers.unauthorized;
   const stops = [
@@ -251,13 +257,14 @@ export function watchUploads(handlers: {
       }
       uploads[id] = { ...jobFor(id), status: phase, sent, total, rate };
     }),
-    on("upload-done", ({ id, shareUrl, copied, replaced }) => {
+    on("upload-summary", (toast) => handlers.notice(toast)),
+    on("upload-done", ({ id, shareUrl, copied, replaced, toast }) => {
       meters.delete(id);
       // It finished before the logout reached the server: it's uploaded after all.
       stoppedByLogout.delete(id);
       const job = uploads[id];
       if (job) uploads[id] = { ...job, status: "done", shareUrl, copied, replaced };
-      if (!inBulk.has(id)) handlers.done(shareUrl, copied, replaced);
+      if (toast) handlers.notice(toast);
       settle(id);
     }),
     on("upload-failed", ({ id, code, message, stale }) => {

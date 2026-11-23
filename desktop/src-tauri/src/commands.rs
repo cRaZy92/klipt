@@ -16,6 +16,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::editor;
+use crate::upload_notice;
 use crate::errors::{AppError, Result};
 use crate::export::{self, Edit};
 use crate::filmstrip;
@@ -34,11 +35,14 @@ pub mod events {
     /// Payload: `{ id, sent, total, phase }`, phase `exporting` | `uploading` | `finalizing`.
     /// While exporting, `sent`/`total` are thousandths of the export.
     pub const UPLOAD_PROGRESS: &str = "upload-progress";
-    /// Payload: `{ id, shareUrl, copied }`; `copied` says whether the link is on the clipboard.
+    /// Payload: `{ id, shareUrl, copied, replaced, toast }`; `copied` says whether the link is on the
+    /// clipboard; `toast` (`{ title, link, copied }` or null) is the notice for the window to show.
     pub const UPLOAD_DONE: &str = "upload-done";
     /// Payload: `{ id, code, message }`. `unauthorized` means the user must log in again;
     /// the upload resumes from where it stopped when `upload_clip` is called again.
     pub const UPLOAD_FAILED: &str = "upload-failed";
+    /// Payload: `{ title, link, copied }`: the summary toast of uploads that ended with a failure.
+    pub const UPLOAD_SUMMARY: &str = "upload-summary";
     /// Payload: `{ id, progress }`, progress 0..=1 of an "Export copy…".
     pub const EXPORT_PROGRESS: &str = "export-progress";
     /// Payload: progress 0..=1 of a "Combine" (one runs at a time from the UI).
@@ -651,7 +655,7 @@ pub async fn copy_text_to_clipboard(app: AppHandle, text: String) -> Result<()> 
     off_main(move || copy_text(&app, &text)).await?
 }
 
-fn copy_text(app: &AppHandle, text: &str) -> Result<()> {
+pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<()> {
     app.clipboard().write_text(text).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
 }
 
@@ -679,6 +683,8 @@ pub(crate) struct Job {
     tools: Tools,
     data_dir: PathBuf,
     cache_dir: PathBuf,
+    /// The window has more clips queued after this one (a bulk upload): no notice of its own.
+    more: bool,
 }
 
 /// Starts uploading a clip: export (trim + mix), resumable upload, finalize. Returns once the
@@ -691,8 +697,9 @@ pub async fn upload_clip(
     visibility: Visibility,
     tagged: Option<Vec<String>>,
     replace: Option<bool>,
+    more: Option<bool>,
 ) -> Result<()> {
-    off_main(move || start_upload(app, id, title, visibility, tagged, replace)).await?
+    off_main(move || start_upload(app, id, title, visibility, tagged, replace, more.unwrap_or(false))).await?
 }
 
 fn start_upload(
@@ -702,8 +709,10 @@ fn start_upload(
     visibility: Visibility,
     tagged: Option<Vec<String>>,
     replace: Option<bool>,
+    more: bool,
 ) -> Result<()> {
-    let (job, guard) = prepare_upload(&app, &id, &title, visibility, tagged, replace)?;
+    let (mut job, guard) = prepare_upload(&app, &id, &title, visibility, tagged, replace)?;
+    job.more = more;
     tauri::async_runtime::spawn(run_job(app, job, guard));
     Ok(())
 }
@@ -754,7 +763,7 @@ pub(crate) fn prepare_upload(
     } else {
         None
     };
-    let job = Job { clip, title, visibility, tagged, replaces, auth, tools, data_dir: state.data_dir.clone(), cache_dir };
+    let job = Job { clip, title, visibility, tagged, replaces, auth, tools, data_dir: state.data_dir.clone(), cache_dir, more: false };
     Ok((job, guard))
 }
 
@@ -769,10 +778,32 @@ fn forget_pending_upload(app: &AppHandle, id: &str) {
     }
 }
 
+/// Announces the uploads finished so far once nothing more is queued: a notification, or (the
+/// window in front) the toast for the window to show, which is returned.
+fn announce_finished(app: &AppHandle, more: bool, copied: bool) -> Option<serde_json::Value> {
+    let pending = lock(&app.state::<AppState>().library).pending_uploads().map(|p| p.len()).unwrap_or(0);
+    let still_queued = pending + app.state::<Uploads>().count() + usize::from(more);
+    let finished = app.state::<upload_notice::UploadBatch>().take_if_idle(still_queued)?;
+    let focused = app.get_webview_window(crate::tray::MAIN_WINDOW).and_then(|w| w.is_focused().ok()).unwrap_or(false);
+    // With the link copied by itself, only a single upload says so.
+    let auto_copy = copied && finished.len() == 1;
+    match upload_notice::finish_notice(&finished, 0, focused, auto_copy) {
+        upload_notice::Notice::Toast { title, link, copied } => {
+            Some(serde_json::json!({ "title": title, "link": link, "copied": copied }))
+        }
+        upload_notice::Notice::System { title, body, link, .. } => {
+            crate::feedback::notify_with_copy(app, &title, &body, link);
+            None
+        }
+        upload_notice::Notice::Nothing => None,
+    }
+}
+
 /// Runs a prepared upload to its end and tells the UI (`upload-done` / `upload-failed`).
 pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> UploadEnd {
     let id = job.clip.id.clone();
     let title = job.title.clone();
+    let more = job.more;
     let cache_dir = job.cache_dir.clone();
     let (data_dir, token) = (job.data_dir.clone(), job.auth.token.clone());
     // The work runs in its own task so a panic anywhere in it still ends in `upload-failed`
@@ -787,13 +818,15 @@ pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> Upl
     match result {
         Ok((share_url, replaced)) => {
             forget_pending_upload(&app, &id);
-            let copied = match copy_text(&app, &share_url) {
-                Ok(()) => true,
-                Err(e) => {
-                    crate::elog!("klipt: can't copy the share link: {e}");
-                    false
-                }
-            };
+            let auto_copy = lock(&app.state::<AppState>().settings).copy_link_on_upload;
+            let copied = auto_copy
+                && match copy_text(&app, &share_url) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        crate::elog!("klipt: can't copy the share link: {e}");
+                        false
+                    }
+                };
             // The upload is the end of the clip's editing: its cached audio and strip go.
             // Waits for the strip's ffmpeg to stop first, so it can't hold files being deleted.
             let cleanup_app = app.clone();
@@ -806,7 +839,14 @@ pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> Upl
             if let Err(e) = cleanup {
                 crate::elog!("klipt: cleanup after the upload of clip {id} failed: {e}");
             }
-            emit(&app, events::UPLOAD_DONE, serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied, "replaced": replaced }));
+            let batch = app.state::<upload_notice::UploadBatch>();
+            batch.push(upload_notice::Finished { title: title.clone(), link: share_url.clone(), replaced });
+            let toast = announce_finished(&app, more, copied);
+            emit(
+                &app,
+                events::UPLOAD_DONE,
+                serde_json::json!({ "id": id, "shareUrl": share_url, "copied": copied, "replaced": replaced, "toast": toast }),
+            );
             UploadEnd::Done { share_url, replaced, title }
         }
         Err(e) => {
@@ -830,6 +870,10 @@ pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> Upl
                 events::UPLOAD_FAILED,
                 serde_json::json!({ "id": id, "code": e.code(), "message": e.user_message(), "stale": stale }),
             );
+            // The last of several failed: the ones before it still get their summary.
+            if let Some(toast) = announce_finished(&app, more, false) {
+                emit(&app, events::UPLOAD_SUMMARY, toast);
+            }
             UploadEnd::Failed
         }
     }

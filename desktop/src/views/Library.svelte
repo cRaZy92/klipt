@@ -364,11 +364,11 @@
     const { clips, visibility } = bulkUpload;
     bulkUpload = null;
     clearSelection();
-    const done = await uploadInTurn(
+    // The core announces them when the last one ends ("3 clips uploaded").
+    await uploadInTurn(
       clips.map((c) => ({ id: c.id, title: uploadTitle(c) })),
       visibility,
     );
-    if (done > 0) toast(`Uploaded ${done === 1 ? "1 clip" : `${done} clips`}. Copy a link from its card to share it.`, "success");
   }
 
   /** A combine finished: show the new clip, and open its upload when that was asked for. */

@@ -164,6 +164,8 @@ export interface Settings {
   editorCacheGb: number;
   /** A system notification when a friend shares a clip. */
   friendNotifications: boolean;
+  /** Copy the share link as soon as an upload finishes (else a Copy link button). */
+  copyLinkOnUpload: boolean;
   /** Voice chat apps recorded on their own track (Linux); empty = recorded with the game. */
   voiceApps: string[];
 }
@@ -265,6 +267,15 @@ export interface UploadDone {
   copied: boolean;
   /** The video at the clip's existing link was replaced (the link is the same). */
   replaced: boolean;
+  /** The notice for the window to show (it's in front); null: a system notification or nothing. */
+  toast: UploadToast | null;
+}
+
+/** "Clip uploaded" with a Copy link button (`link` empty: no button). */
+export interface UploadToast {
+  title: string;
+  link: string;
+  copied: boolean;
 }
 
 export interface UploadFailed {
@@ -562,8 +573,8 @@ export const api = {
   /** `replace`: swap the video at the clip's existing link instead of making a new one. */
   pendingUploads: () => invoke<PendingUpload[]>("pending_uploads"),
   resumePendingUploads: () => invoke<void>("resume_pending_uploads"),
-  uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = [], replace = false) =>
-    invoke<void>("upload_clip", { id, title, visibility, tagged, replace }),
+  uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = [], replace = false, more = false) =>
+    invoke<void>("upload_clip", { id, title, visibility, tagged, replace, more }),
   /** The server's users, for tagging friends in a clip. */
   listUsers: () => invoke<{ username: string; displayName?: string }[]>("list_users"),
   /** One page of the feed; `search` matches title, game and uploader on the server. */
@@ -663,6 +674,7 @@ export interface Events {
   "upload-progress": UploadProgress;
   "upload-done": UploadDone;
   "upload-failed": UploadFailed;
+  "upload-summary": UploadToast;
   "export-progress": ExportProgress;
   /** How far a "Combine" is, 0..1. */
   "combine-progress": number;

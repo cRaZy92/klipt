@@ -6,6 +6,13 @@ export interface Toast {
   id: number;
   kind: ToastKind;
   message: string;
+  /** A button on the toast, e.g. "Copy link". */
+  action?: ToastAction;
+}
+
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 let nextId = 1;
@@ -17,12 +24,12 @@ export function dismissToast(id: number) {
   if (index >= 0) toasts.splice(index, 1);
 }
 
-/** Shows a toast; errors stay longer. The same message isn't stacked twice. */
-export function toast(message: string, kind: ToastKind = "info") {
+/** Shows a toast; errors and ones with a button stay longer. The same message isn't stacked twice. */
+export function toast(message: string, kind: ToastKind = "info", action?: ToastAction) {
   const existing = toasts.find((t) => t.message === message);
   if (existing) dismissToast(existing.id);
   const id = nextId++;
-  toasts.push({ id, kind, message });
+  toasts.push(action ? { id, kind, message, action } : { id, kind, message });
   if (toasts.length > 4) toasts.shift();
-  setTimeout(() => dismissToast(id), kind === "error" ? 8000 : 3500);
+  setTimeout(() => dismissToast(id), kind === "error" || action ? 8000 : 3500);
 }

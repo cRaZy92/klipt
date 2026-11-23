@@ -87,6 +87,54 @@ pub fn notify(app: &AppHandle, title: &str, body: Option<&str>) {
     }
 }
 
+/// A system notification with a "Copy link" button when `link` is given; clicking it puts the
+/// link on the clipboard. Without a link it's an ordinary [`notify`].
+pub fn notify_with_copy(app: &AppHandle, title: &str, body: &str, link: Option<String>) {
+    let Some(link) = link else {
+        notify(app, title, Some(body));
+        return;
+    };
+    #[cfg(target_os = "linux")]
+    let notification = {
+        let icon = app.path().app_data_dir().map_err(|e| e.to_string()).and_then(|dir| notification_icon(&dir).map_err(|e| e.to_string()));
+        match icon {
+            Ok(icon) => linux_notification(title, Some(body), &icon),
+            Err(e) => {
+                crate::elog!("klipt: no icon for notifications ({e}); using the default");
+                let mut n = notify_rust::Notification::new();
+                n.appname("Klipt").summary(title).body(body);
+                n
+            }
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let notification = {
+        let mut n = notify_rust::Notification::new();
+        n.summary(title).body(body);
+        // Windows names the app by its id only when installed (as tauri-plugin-notification does);
+        // a development build shows as PowerShell.
+        #[cfg(windows)]
+        if !cfg!(debug_assertions) {
+            n.app_id(&app.config().identifier);
+        }
+        n
+    };
+    let mut notification = notification;
+    notification.action("copy", "Copy link");
+    let app = app.clone();
+    // Waiting for the click blocks: on its own thread, as long as the notification is up.
+    std::thread::spawn(move || match notification.show() {
+        Ok(handle) => handle.wait_for_action(|action| {
+            if action == "copy" {
+                if let Err(e) = crate::commands::copy_text(&app, &link) {
+                    crate::elog!("klipt: can't copy the share link: {e}");
+                }
+            }
+        }),
+        Err(e) => crate::elog!("klipt: can't show a notification: {e}"),
+    });
+}
+
 /// Reacts to a supervisor event before it goes to the UI.
 pub fn on_supervisor_event(app: &AppHandle, event: &SupervisorEvent) {
     if let Some(tray) = app.try_state::<Tray>() {

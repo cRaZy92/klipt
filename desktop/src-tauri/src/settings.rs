@@ -83,6 +83,8 @@ pub struct Settings {
     pub editor_cache_gb: f32,
     /// A system notification when a friend uploads a clip.
     pub friend_notifications: bool,
+    /// Copy the share link to the clipboard as soon as an upload finishes (else a Copy button).
+    pub copy_link_on_upload: bool,
     /// Voice chat apps (as PipeWire names them) recorded on their own track, so a clip can be
     /// shared without friends' voices. Linux only; empty = no separate track.
     pub voice_apps: Vec<String>,
@@ -141,6 +143,7 @@ impl Default for Settings {
             cleanup_days: 30,
             editor_cache_gb: 2.0,
             friend_notifications: true,
+            copy_link_on_upload: false,
             voice_apps: vec!["discord".into(), "vesktop".into()],
         }
     }

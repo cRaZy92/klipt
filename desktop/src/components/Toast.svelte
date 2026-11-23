@@ -8,6 +8,16 @@
     <div class="toast {t.kind}" role={t.kind === "error" ? "alert" : "status"}>
       <span class="dot"><Icon name={t.kind === "error" ? "alert" : "check"} size={16} /></span>
       <span class="text">{t.message}</span>
+      {#if t.action}
+        {@const action = t.action}
+        <button
+          class="btn btn-sm action"
+          onclick={() => {
+            dismissToast(t.id);
+            action.run();
+          }}>{action.label}</button
+        >
+      {/if}
       <button class="close" aria-label="Dismiss" onclick={() => dismissToast(t.id)}>
         <Icon name="close" size={14} />
       </button>
@@ -48,6 +58,10 @@
       opacity: 0;
       transform: translateX(14px);
     }
+  }
+
+  .action {
+    flex: none;
   }
 
   .dot {

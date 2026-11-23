@@ -25,6 +25,7 @@ const defaults: Settings = {
   cleanupDays: 30,
   editorCacheGb: 2,
   friendNotifications: true,
+  copyLinkOnUpload: false,
   voiceApps: ["discord", "vesktop"],
 };
 

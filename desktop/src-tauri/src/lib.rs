@@ -33,6 +33,7 @@ pub mod sound;
 pub mod state;
 pub mod tray;
 pub mod upload;
+pub mod upload_notice;
 pub mod upload_resume;
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
@@ -83,6 +84,7 @@ pub fn run() {
             app.manage(media_server::MediaServer::start()?);
             app.manage(state);
             app.manage(commands::Uploads::default());
+            app.manage(upload_notice::UploadBatch::default());
             app.manage(filmstrip::Jobs::default());
             app.manage(hotkey::HotkeyStatusState::default());
             // Development builds start in the tray, like an autostart launch, while

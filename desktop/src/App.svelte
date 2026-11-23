@@ -114,14 +114,20 @@
           account = null;
           loginNotice = "Your session has expired. Log in again and your upload will continue.";
         },
-        done: (_url, copied, replaced) =>
+        notice: ({ title, link, copied }) =>
           toast(
-            replaced
-              ? "Video replaced — the link stays the same."
-              : copied
-                ? "Link copied!"
-                : "Uploaded! Use “Copy link” on the clip to share it.",
+            copied ? "Link copied!" : title,
             "success",
+            link
+              ? {
+                  label: "Copy link",
+                  run: () =>
+                    api
+                      .copyText(link)
+                      .then(() => toast("Link copied!", "success"))
+                      .catch((e) => toast(errorMessage(e), "error")),
+                }
+              : undefined,
           ),
       }),
     ];

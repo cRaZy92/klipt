@@ -434,6 +434,7 @@
     saveSound: "general",
     saveNotification: "general",
     friendNotifications: "general",
+    copyLinkOnUpload: "general",
   };
   const tabOf = (field: string): Tab => FIELD_TAB[field] ?? "recording";
   const tabsWithErrors = $derived(new Set(Object.keys(fieldErrors).map(tabOf)));
@@ -935,6 +936,15 @@
         <input type="checkbox" role="switch" bind:checked={draft.friendNotifications} />
         <span class="switch" aria-hidden="true"></span>
         <span><strong>Notify me when a friend shares a clip</strong><small>Klipt checks the feed every few minutes.</small></span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" role="switch" bind:checked={draft.copyLinkOnUpload} />
+        <span class="switch" aria-hidden="true"></span>
+        <span
+          ><strong>Copy the link by itself when an upload finishes</strong><small
+            >Off: the notification has a Copy link button instead.</small
+          ></span
+        >
       </label>
     </section>
 

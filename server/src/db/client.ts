@@ -25,6 +25,10 @@ export async function runMigrations(
 
 export async function createDb(databaseUrl: string): Promise<Db> {
   const pool = new pg.Pool({ connectionString: databaseUrl });
+  // An idle connection dropping (Postgres restarted, network blip) is emitted here. Without a
+  // listener Node treats it as an unhandled 'error' event and the whole server exits, cutting off
+  // uploads and compression. The pool opens a new connection for the next query by itself.
+  pool.on('error', (err) => console.error(`database: an idle connection failed (${err.message}); the next query reconnects`));
   return drizzlePg(pool, { schema });
 }
 

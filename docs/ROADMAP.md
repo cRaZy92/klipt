@@ -1,6 +1,6 @@
 # Klipt roadmap
 
-As of 2026-11-23. Update this file when an item is done or a plan changes.
+As of 2026-11-24. Update this file when an item is done or a plan changes.
 
 All of v1 is built for Windows and Linux, and every desktop change pushed to `main` ships itself as a
 signed Windows release. What's missing is mostly proof on real machines and with real friends, not code.
@@ -9,6 +9,7 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 2026-11-24 | Server stability | A dropped database connection no longer stops the server. The data disk keeps `MIN_FREE_MB` (default 2 GB) free: new uploads wait (the app retries them), compression and embed copies hold back, and the admin page shows free space. Expired logins, password links and unused invites are cleaned up hourly; clips, logins and uploads are indexed by user. Server needs redeploy; the desktop's 507 message is untested |
 | 2026-11-23 | Uploads and recording safety | Uploads cut off by quitting, a crash or sleep carry on at the next launch (or after logging in), one after another; ones the server refused or whose clip is gone don't. A finished upload no longer overwrites the clipboard: the toast (window in front) or system notification has a **Copy link** button, several in a row get one "N clips uploaded"; Settings → General "Copy the link by itself when an upload finishes" (off) brings back the old way. A full recording shows its size on the Record button; under 5 GB free it warns once, under 1 GB it stops cleanly. Untested in the app and on Windows |
 | 2026-11-22 | Albums                   | Gather clips (yours or friends', link-only ones too) into a named album with one link, `/a/<id>`, that anyone with it can watch, like a clip's share link. Website: an Albums page, "Add to album" on a clip's page (tick albums, or make one), and the album page plays the clip picked with the whole list beside it; its owner renames, deletes, reorders and removes clips. App: "Add to album" in the clip player and the ⋯ menus of uploaded clips, and "Album" in My clips' selection bar. Up to 200 clips; a deleted clip leaves its albums. Untested in the app; server needs redeploy |
 | 2026-11-22 | Mute part of a lane      | Shift+drag on a sound lane (or its new button, from the playhead) mutes that part of the track; its level button sets it to 25% or 50% instead. The parts move, resize and undo like subtitles, play that way in the editor, and uploads, exports, new clips from parts and combined clips turn the track down at the same moments (30 ms fades; the video isn't cut). Untested in the app and on Windows |

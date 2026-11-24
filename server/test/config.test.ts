@@ -8,6 +8,7 @@ describe('loadConfig', () => {
     expect(c.port).toBe(3000);
     expect(c.dataDir).toBe('/data');
     expect(c.maxUploadBytes).toBe(2048 * 1024 * 1024);
+    expect(c.minFreeBytes).toBe(2048 * 1024 * 1024);
     expect(c.secureCookies).toBe(true);
     expect(c.trustProxyHops).toBe(1);
     expect(c.transcode).toEqual({ enabled: true, crf: 23, preset: 'medium', threads: 2 });
@@ -18,6 +19,13 @@ describe('loadConfig', () => {
     const base = { BASE_URL: 'http://localhost', DATABASE_URL: 'postgres://x' };
     expect(loadConfig({ ...base, SHARE_SIGNUP: 'off' }).shareSignup).toBe(false);
     expect(() => loadConfig({ ...base, SHARE_SIGNUP: 'no' })).toThrow(/SHARE_SIGNUP/);
+  });
+
+  it('reads the free-space margin and refuses a negative one', () => {
+    const base = { BASE_URL: 'http://localhost', DATABASE_URL: 'postgres://x' };
+    expect(loadConfig({ ...base, MIN_FREE_MB: '0' }).minFreeBytes).toBe(0);
+    expect(loadConfig({ ...base, MIN_FREE_MB: '512' }).minFreeBytes).toBe(512 * 1024 * 1024);
+    expect(() => loadConfig({ ...base, MIN_FREE_MB: '-1' })).toThrow(/MIN_FREE_MB/);
   });
 
   it('reads the compression settings and refuses bad ones', () => {

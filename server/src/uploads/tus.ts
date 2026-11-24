@@ -9,9 +9,11 @@ import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
 import { uploads } from '../db/schema.js';
 import type { AuthUser } from '../auth/sessions.js';
+import type { DiskGuard } from '../disk.js';
 
 const UPLOAD_PATH = '/api/uploads';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DISK_FULL = { status_code: 507, body: 'The server is low on disk space\n' };
 
 const tusDir = (dataDir: string) => join(dataDir, 'tus');
 export const tusFilePath = (dataDir: string, id: string) => join(tusDir(dataDir), id);
@@ -64,7 +66,7 @@ export async function cleanupStaleUploads(
 
 export async function mountTus(
   app: FastifyInstance,
-  { db, config }: { db: Db; config: Pick<Config, 'dataDir' | 'maxUploadBytes' | 'baseUrl'> },
+  { db, config, disk }: { db: Db; config: Pick<Config, 'dataDir' | 'maxUploadBytes' | 'baseUrl'>; disk: DiskGuard },
 ): Promise<void> {
   const directory = tusDir(config.dataDir);
   await mkdir(directory, { recursive: true });
@@ -80,6 +82,13 @@ export async function mountTus(
     async onIncomingRequest(req, uploadId) {
       const user = userOf(req);
       if (!user) throw { status_code: 401, body: 'Unauthorized\n' };
+      // 507 is a 5xx, so the desktop app keeps the upload and tries it again later.
+      if (req.method === 'POST') {
+        const length = Number(req.headers.get('upload-length') ?? 0);
+        if (!(await disk.roomFor(Number.isFinite(length) ? length : 0))) throw DISK_FULL;
+      } else if (req.method === 'PATCH' && (await disk.belowFloor())) {
+        throw DISK_FULL;
+      }
       // POST creates a new upload (its fresh id has no row yet). Every other method must target an
       // unfinished upload the caller owns; anything else (unknown ids, other users' uploads,
       // finalized tombstones, sidecar names like `<id>.json`) never reaches the file store.

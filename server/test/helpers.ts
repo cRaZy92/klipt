@@ -20,7 +20,7 @@ export interface TestApp {
 }
 
 export async function makeTestApp(
-  opts: { maxUploadMb?: number; logStream?: { write(line: string): void }; transcode?: boolean; shareSignup?: boolean } = {},
+  opts: { maxUploadMb?: number; minFreeMb?: number; logStream?: { write(line: string): void }; transcode?: boolean; shareSignup?: boolean } = {},
 ): Promise<TestApp> {
   const dataDir = await mkdtemp(join(tmpdir(), 'klipt-test-'));
   const env: Record<string, string> = {
@@ -29,6 +29,8 @@ export async function makeTestApp(
     DATA_DIR: dataDir,
     // Off unless a test is about compression: a background ffmpeg would change clips under other tests.
     TRANSCODE: opts.transcode ? 'on' : 'off',
+    // No free-space margin unless a test is about it: the test machine's disk may be nearly full.
+    MIN_FREE_MB: String(opts.minFreeMb ?? 0),
   };
   if (opts.maxUploadMb !== undefined) env.MAX_UPLOAD_MB = String(opts.maxUploadMb);
   if (opts.shareSignup !== undefined) env.SHARE_SIGNUP = opts.shareSignup ? 'on' : 'off';

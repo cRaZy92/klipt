@@ -150,6 +150,10 @@ export interface AdminStats {
   users: number;
   clips: number;
   storageBytes: number;
+  /** Free space on the server's data disk; null when it can't be read. */
+  freeBytes: number | null;
+  /** Under MIN_FREE_MB free: new uploads and compression wait. */
+  diskLow: boolean;
 }
 
 export type Visibility = 'feed' | 'link';

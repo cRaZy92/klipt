@@ -265,6 +265,7 @@ code { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; f
 .stat { background: var(--surface); padding: 16px 18px; min-width: 0; }
 .stat b { display: block; font: 750 1.75rem/1.15 var(--font-display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .stat span { color: var(--text-muted); font-size: .85rem; }
+.stat.low b, .stat.low span { color: var(--danger-text); }
 .stat.top { grid-column: span 2; }
 .stat.top b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.25rem; line-height: 1.6; }
 .stat.top a:hover b { color: var(--accent-text); }

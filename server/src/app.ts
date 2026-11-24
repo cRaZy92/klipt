@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { Transcoder } from './clips/transcoder.js';
 import { EmbedBackfill } from './clips/embed.js';
 import { ServerErrorPage } from './web/pages/serverError.js';
+import { DiskGuard } from './disk.js';
 
 export interface AppDeps {
   config: Config;
@@ -46,10 +47,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
   app.decorate('config', deps.config);
   app.decorate('db', deps.db);
+  const disk = new DiskGuard(deps.config.dataDir, deps.config.minFreeBytes);
+  app.decorate('disk', disk);
   const transcoder = new Transcoder({
     db: deps.db,
     clipsDir: join(deps.config.dataDir, 'clips'),
     log: app.log,
+    disk,
     ...deps.config.transcode,
   });
   app.decorate('transcoder', transcoder);
@@ -62,6 +66,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       clipsDir: join(deps.config.dataDir, 'clips'),
       threads: deps.config.transcode.threads,
       log: app.log,
+      disk,
     });
     app.decorate('embedBackfill', backfill);
     app.addHook('onReady', () => backfill.start());
@@ -87,7 +92,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await authRoutes(app);
   await adminRoutes(app);
   await feedbackRoutes(app);
-  await mountTus(app, { db: deps.db, config: deps.config });
+  await mountTus(app, { db: deps.db, config: deps.config, disk });
   await clipRoutes(app);
   await albumRoutes(app);
   await webRoutes(app);
@@ -100,6 +105,7 @@ declare module 'fastify' {
     config: Config;
     db: Db;
     transcoder: Transcoder;
+    disk: DiskGuard;
     /** Present when background media work is on. */
     embedBackfill?: EmbedBackfill;
   }

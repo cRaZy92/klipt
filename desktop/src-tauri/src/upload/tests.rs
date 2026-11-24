@@ -232,6 +232,19 @@ async fn gives_up_with_network_after_five_retries() {
 }
 
 #[tokio::test]
+async fn a_server_low_on_disk_is_retried_and_says_so() {
+    let server = MockServer::start().await;
+    created(&server).mount(&server).await;
+    Mock::given(method("PATCH")).respond_with(ResponseTemplate::new(507)).expect(6).mount(&server).await;
+    Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200).insert_header("Upload-Offset", "0")).mount(&server).await;
+    let (_d, f) = file();
+    let client = ApiClient::new(&server.uri()).unwrap();
+    let err = tus::upload_with(&client, "tok", &f, None, |_, _| {}, |_, _| {}, &fast(64)).await.unwrap_err();
+    // A Network error keeps the upload queued for the next try.
+    assert!(matches!(&err, UploadError::Api(ApiError::Network(d)) if d.contains("disk space")), "{err:?}");
+}
+
+#[tokio::test]
 async fn unauthorized_patch_fails_immediately_without_retries() {
     let server = MockServer::start().await;
     created(&server).mount(&server).await;

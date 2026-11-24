@@ -217,7 +217,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     if (!guard(req, reply)) return reply;
     if (!req.user!.isAdmin) return notFound(req, reply);
     const [stats, inviteList, userList, transcodes, activity, games, reports] = await Promise.all([
-      getAdminStats(db),
+      getAdminStats(db, app.disk),
       listActiveInvites(db, config.baseUrl),
       listAdminUsers(db),
       getTranscodes(db, app.transcoder),

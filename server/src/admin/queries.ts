@@ -2,6 +2,7 @@ import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { AdminStats, AdminTranscodes, AdminUser, FeedbackItem, Invite, TranscodeJob } from '@klipt/shared';
 import { transcodeCounts, type Transcoder } from '../clips/transcoder.js';
 import type { Db } from '../db/client.js';
+import type { DiskGuard } from '../disk.js';
 import { clips, feedback, invites, sessions, users } from '../db/schema.js';
 import { displayNameOf } from '../clips/repo.js';
 
@@ -63,12 +64,13 @@ export async function listAdminUsers(db: Db): Promise<AdminUser[]> {
   }));
 }
 
-export async function getAdminStats(db: Db): Promise<AdminStats> {
+export async function getAdminStats(db: Db, disk: DiskGuard): Promise<AdminStats> {
   const [u] = await db.select({ n: sql<number>`count(*)::int` }).from(users);
   const [c] = await db
     .select({ n: sql<number>`count(*)::int`, bytes: sql<number>`coalesce(sum(${clips.sizeBytes}), 0)::float8` })
     .from(clips);
-  return { users: u!.n, clips: c!.n, storageBytes: Number(c!.bytes) };
+  const { freeBytes, low } = await disk.status();
+  return { users: u!.n, clips: c!.n, storageBytes: Number(c!.bytes), freeBytes, diskLow: low };
 }
 
 const ACTIVE_LIMIT = 50;

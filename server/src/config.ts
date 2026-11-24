@@ -6,6 +6,8 @@ export interface Config {
   dataDir: string;
   port: number;
   maxUploadBytes: number;
+  /** Free space the data disk keeps: new uploads and compressions wait while they'd go below it. */
+  minFreeBytes: number;
   adminUsername?: string;
   adminPassword?: string;
   secureCookies: boolean;
@@ -27,6 +29,7 @@ const envSchema = z.object({
   DATA_DIR: z.preprocess(emptyToUndefined, z.string().default('/data')),
   PORT: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(65535).default(3000)),
   MAX_UPLOAD_MB: z.preprocess(emptyToUndefined, z.coerce.number().positive().default(2048)),
+  MIN_FREE_MB: z.preprocess(emptyToUndefined, z.coerce.number().min(0).default(2048)),
   TRUST_PROXY_HOPS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(10).default(1)),
   ADMIN_USERNAME: z.preprocess(emptyToUndefined, z.string().optional()),
   ADMIN_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
@@ -53,6 +56,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     dataDir: e.DATA_DIR,
     port: e.PORT,
     maxUploadBytes: Math.floor(e.MAX_UPLOAD_MB * 1024 * 1024),
+    minFreeBytes: Math.floor(e.MIN_FREE_MB * 1024 * 1024),
     adminUsername: e.ADMIN_USERNAME,
     adminPassword: e.ADMIN_PASSWORD,
     trustProxyHops: e.TRUST_PROXY_HOPS,

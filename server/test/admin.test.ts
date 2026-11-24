@@ -130,6 +130,8 @@ describe('admin + registration', () => {
       users: 2,
       clips: 2,
       storageBytes: 5_000_000_010,
+      freeBytes: expect.any(Number),
+      diskLow: false,
     });
   });
 

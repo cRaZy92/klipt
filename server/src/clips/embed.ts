@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { desc, eq } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import type { Db } from '../db/client.js';
+import type { DiskGuard } from '../disk.js';
 import { clips } from '../db/schema.js';
 import { embedFileName, mediaFileName } from './files.js';
 import { encodeEmbed, probeVideo } from './media.js';
@@ -107,11 +108,14 @@ export async function hasEmbed(clipsDir: string, id: string): Promise<boolean> {
  * newest first, one at a time, in the background. An old copy is served until its replacement is
  * ready. Clips too long for a copy are passed over; a failed one is tried again next start.
  */
+/** Room one embed copy needs (they're about 8 MB). */
+const EMBED_ROOM_BYTES = 32 * 1024 * 1024;
+
 export class EmbedBackfill {
   private stopped = false;
   private running: Promise<void> | null = null;
 
-  constructor(private opts: { db: Db; clipsDir: string; threads: number; log: FastifyBaseLogger }) {}
+  constructor(private opts: { db: Db; clipsDir: string; threads: number; log: FastifyBaseLogger; disk?: DiskGuard }) {}
 
   start(): void {
     this.running = this.run().catch((err) => this.opts.log.error({ err }, 'embed backfill crashed'));
@@ -146,6 +150,10 @@ export class EmbedBackfill {
     for (const row of rows) {
       if (this.stopped) return;
       if (!embedPlan(row)) continue;
+      if (this.opts.disk && !(await this.opts.disk.roomFor(EMBED_ROOM_BYTES))) {
+        log.warn('embed backfill: stopped, the disk is low on space (tried again next start)');
+        break;
+      }
       if (row.embedVersion >= EMBED_VERSION && (await hasEmbed(clipsDir, row.id))) continue;
       const source = join(clipsDir, mediaFileName(row));
       if (!(await stat(source).catch(() => null))) continue; // deleted meanwhile

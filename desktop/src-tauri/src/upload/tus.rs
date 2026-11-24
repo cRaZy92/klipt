@@ -80,6 +80,8 @@ impl From<ApiError> for Fail {
     fn from(e: ApiError) -> Self {
         match e {
             ApiError::Network(d) => Fail::Retry(d),
+            // 507: the server is short of disk space (it refuses uploads before it fills).
+            ApiError::Server { status: 507, .. } => Fail::Retry("the server is low on disk space (507)".into()),
             ApiError::Server { status, .. } if status >= 500 => Fail::Retry(format!("server answered {status}")),
             e => Fail::Fatal(e.into()),
         }

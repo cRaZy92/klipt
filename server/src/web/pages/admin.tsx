@@ -236,6 +236,15 @@ export function AdminPage(props: {
         <div class="stat"><b>{stats.users}</b><span>users</span></div>
         <div class="stat"><b>{stats.clips}</b><span>clips</span></div>
         <div class="stat"><b>{formatGB(stats.storageBytes)}</b><span>storage</span></div>
+        {stats.freeBytes !== null && (
+          <div
+            class={stats.diskLow ? 'stat low' : 'stat'}
+            title={stats.diskLow ? 'Low on disk space: new uploads and compression wait until there is more room' : 'Free space on the server\'s data disk'}
+          >
+            <b>{formatGB(stats.freeBytes)}</b>
+            <span>{stats.diskLow ? 'free, uploads wait' : 'free'}</span>
+          </div>
+        )}
         <div class="stat"><b>{thisWeek}</b><span>{thisWeek === 1 ? 'clip this week' : 'clips this week'}</span></div>
       </div>
 

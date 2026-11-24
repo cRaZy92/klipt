@@ -111,7 +111,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(204).send();
   });
 
-  app.get('/api/admin/stats', opts, async (): Promise<AdminStats> => getAdminStats(db));
+  app.get('/api/admin/stats', opts, async (): Promise<AdminStats> => getAdminStats(db, app.disk));
 
   app.get('/api/admin/transcodes', opts, async (): Promise<AdminTranscodes> => getTranscodes(db, app.transcoder));
 

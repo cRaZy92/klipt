@@ -14,6 +14,7 @@ Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, up
    | `ADMIN_PASSWORD` | Password of the admin account (at least 8 characters). |
    | `POSTGRES_PASSWORD` | Any long random password for the database. Set it once: changing it after the first deploy has no effect, because the `pgdata` volume is already initialised with the old password. |
    | `MAX_UPLOAD_MB` | Optional. Largest clip allowed, default `2048`. |
+   | `MIN_FREE_MB` | Optional. Free space kept on the data disk, default `2048`. Below it the server refuses new uploads (the app tries them again later) and holds compression back; below a quarter of it, uploads already running pause too. The admin page shows the free space. `0` turns this off. |
    | `KLIPT_PORT` | Optional. Host port the server is published on, default `3260`. Point your tunnel or proxy (e.g. Pangolin) at `<host IP>:<KLIPT_PORT>`. |
    | `TRANSCODE` | Optional. `on` (default) re-encodes uploaded clips to H.264 in the background so they take much less space and still play everywhere (older iPhones too); `off` stores uploads as they are. Progress is on the admin page. |
    | `TRANSCODE_CRF` | Optional. Compression quality, default `23`. Lower is better quality and bigger files (`20` ≈ near the original, `26` ≈ noticeably smaller). |

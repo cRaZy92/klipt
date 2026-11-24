@@ -7,6 +7,7 @@ import type { Db } from '../db/client.js';
 import { clips } from '../db/schema.js';
 import { embedFileName, MEDIA_FILE, mediaFileName, videoFileName } from './files.js';
 import { probeVideo, transcodeH264 } from './media.js';
+import type { DiskGuard } from '../disk.js';
 
 type ClipRow = typeof clips.$inferSelect;
 
@@ -21,6 +22,10 @@ export interface TranscoderOptions {
   threads: number;
   /** How long a replaced file is kept for viewers who are mid-play (ms). */
   oldFileGraceMs?: number;
+  /** Holds compression back while the disk has no room for another copy of the clip. */
+  disk?: DiskGuard;
+  /** How long to wait before looking for space again (ms). */
+  diskRetryMs?: number;
 }
 
 /** The job ffmpeg is on right now. */
@@ -49,6 +54,8 @@ export class Transcoder {
   /** Deleted mid-job: the job must not write its result back. */
   private cancelled = new Set<string>();
   private timers = new Set<NodeJS.Timeout>();
+  /** Set while the queue waits for disk space. */
+  private spaceTimer: NodeJS.Timeout | null = null;
 
   constructor(private opts: TranscoderOptions) {}
 
@@ -105,6 +112,7 @@ export class Transcoder {
     await this.running;
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
+    this.spaceTimer = null;
   }
 
   private async loop(): Promise<void> {
@@ -115,8 +123,39 @@ export class Transcoder {
         if (this.wanted) continue;
         return;
       }
+      if (!(await this.roomFor(job))) {
+        // Back in the queue as it was; the clip keeps playing from its upload meanwhile.
+        await this.opts.db
+          .update(clips)
+          .set({ transcodeState: 'queued', transcodeStartedAt: null })
+          .where(and(eq(clips.id, job.id), eq(clips.transcodeState, 'running')));
+        this.waitForSpace();
+        return;
+      }
       await this.process(job);
     }
+  }
+
+  /** Whether the compressed copy (at most about the upload's size) fits beside the upload. */
+  private async roomFor(job: ClipRow): Promise<boolean> {
+    if (!this.opts.disk) return true;
+    const size = await stat(join(this.opts.clipsDir, mediaFileName(job))).then((s) => s.size, () => null);
+    // A missing file fails in process() and is marked there.
+    return size === null || (await this.opts.disk.roomFor(size));
+  }
+
+  /** Looks again later; a new upload (kick) looks sooner. */
+  private waitForSpace(): void {
+    if (this.spaceTimer || this.stopped) return;
+    this.opts.log.warn('transcode: waiting, the disk is low on space');
+    const t = setTimeout(() => {
+      this.timers.delete(t);
+      this.spaceTimer = null;
+      this.kick();
+    }, this.opts.diskRetryMs ?? 10 * 60 * 1000);
+    t.unref();
+    this.timers.add(t);
+    this.spaceTimer = t;
   }
 
   private async claimNext(): Promise<ClipRow | null> {

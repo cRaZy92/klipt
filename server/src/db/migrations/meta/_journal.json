@@ -85,6 +85,13 @@
       "when": 1795319793670,
       "tag": "0011_albums",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795489978097,
+      "tag": "0012_user_indexes",
+      "breakpoints": true
     }
   ]
 }

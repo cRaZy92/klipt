@@ -14,7 +14,9 @@ export const users = pgTable('users', {
   createdAt: ts('created_at').notNull().defaultNow(),
 });
 
-export const sessions = pgTable('sessions', {
+export const sessions = pgTable(
+  'sessions',
+  {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').notNull().unique(),
@@ -27,7 +29,9 @@ export const sessions = pgTable('sessions', {
   appVersion: text('app_version'),
   os: text('os'),
   gpu: text('gpu'),
-});
+  },
+  (t) => [index('sessions_user_idx').on(t.userId)],
+);
 
 /** A one-time link an admin makes so a user can set a new password. */
 export const passwordResets = pgTable('password_resets', {
@@ -68,7 +72,9 @@ export const invites = pgTable('invites', {
   revokedAt: ts('revoked_at'),
 });
 
-export const uploads = pgTable('uploads', {
+export const uploads = pgTable(
+  'uploads',
+  {
   id: text('id').primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: ts('created_at').notNull().defaultNow(),
@@ -79,7 +85,9 @@ export const uploads = pgTable('uploads', {
   finalizingAt: ts('finalizing_at'),
   /** Set once finalized: the row stays as a tombstone so a retried finalize can return the clip. */
   clipId: text('clip_id').references(() => clips.id, { onDelete: 'cascade' }),
-});
+  },
+  (t) => [index('uploads_user_idx').on(t.userId)],
+);
 
 export const clips = pgTable(
   'clips',
@@ -120,6 +128,7 @@ export const clips = pgTable(
   },
   (t) => [
     index('clips_created_idx').on(t.createdAt.desc(), t.id.desc()),
+    index('clips_user_idx').on(t.userId, t.createdAt.desc()),
     index('clips_game_idx').on(t.gameName),
     index('clips_transcode_idx').on(t.transcodeState),
   ],

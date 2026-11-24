@@ -3,6 +3,7 @@ import { createDb, runMigrations } from './db/client.js';
 import { ensureAdmin } from './admin/bootstrap.js';
 import { buildApp } from './app.js';
 import { cleanupStaleUploads } from './uploads/tus.js';
+import { cleanupExpired } from './cleanup.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -26,6 +27,12 @@ async function main(): Promise<void> {
       if (n > 0) app.log.info(`removed ${n} stale uploads`);
     } catch (err) {
       app.log.error({ err }, 'stale upload cleanup failed');
+    }
+    try {
+      const n = await cleanupExpired(db, new Date());
+      if (n.sessions + n.passwordResets + n.invites > 0) app.log.info(n, 'removed expired logins, password links and invites');
+    } catch (err) {
+      app.log.error({ err }, 'expired record cleanup failed');
     }
   };
   await cleanup();

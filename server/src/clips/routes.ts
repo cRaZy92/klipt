@@ -12,6 +12,7 @@ import { assertPlayable, makeThumbnail, MediaError, probeImage, probeVideo, remu
 import { newClipId } from './ids.js';
 import { embedFileName, MEDIA_FILE, mediaFileName, videoFileName } from './files.js';
 import { createEmbed, EMBED_VERSION } from './embed.js';
+import { addAlbumClip, AlbumFullError, getAlbum, UnknownClipError } from '../albums/repo.js';
 import {
   getClip,
   getUserStorage,
@@ -115,6 +116,11 @@ const finalizeBody = z.object({
    * compilations that the usual compression would make blocky.
    */
   quality: z.enum(['standard', 'high']).optional(),
+  /**
+   * Your albums to put the clip in. One that's gone, full or not yours is skipped: the upload
+   * still goes through.
+   */
+  albums: z.array(z.string().regex(/^[A-Za-z0-9_-]{12}$/)).max(20).optional(),
 });
 
 /**
@@ -346,10 +352,22 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         .where(and(eq(uploads.id, body.uploadId), eq(uploads.userId, user.id)));
       return row;
     };
+    const addToAlbums = async (clipId: string) => {
+      for (const albumId of new Set(body.albums ?? [])) {
+        try {
+          const album = await getAlbum(db, albumId);
+          if (album?.album.userId === user.id) await addAlbumClip(db, albumId, clipId);
+        } catch (err) {
+          if (!(err instanceof AlbumFullError) && !(err instanceof UnknownClipError)) throw err;
+        }
+      }
+    };
     // A finalized upload is kept as a tombstone, so a client that lost the 201 can retry and learn its clip.
     const sendFinalized = async (clipId: string) => {
       const found = await getClip(db, clipId, user.id);
       if (!found) return reply.code(404).send({ error: 'not_found' });
+      // The request that made it may have stopped before its albums (adding twice changes nothing).
+      await addToAlbums(clipId);
       return reply.code(200).send(toClip(found, config.baseUrl));
     };
 
@@ -521,6 +539,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       app.transcoder.removeLater(...Array.from({ length: version }, (_, v) => join(clipsDir, videoFileName(id, v))));
     }
     if (row.transcodeState === 'queued') app.transcoder.kick();
+    await addToAlbums(row.id);
     const created = await getClip(db, row.id, user.id);
     if (target && created) {
       return reply.code(200).send(toClip(created, config.baseUrl));

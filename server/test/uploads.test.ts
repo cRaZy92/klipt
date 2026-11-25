@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { count, eq } from 'drizzle-orm';
-import { clips, uploads } from '../src/db/schema.js';
+import { MAX_ALBUM_CLIPS } from '@klipt/shared';
+import { albumClips, clips, uploads } from '../src/db/schema.js';
 import { cleanupStaleUploads } from '../src/uploads/tus.js';
 import { createUser, makeCorruptVideo, makeFixtureVideo, listenOrigin, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
 
@@ -54,6 +55,44 @@ describe('uploads and finalize', () => {
     const res = await finalize(uploadId, { tagged: ['Bob'] });
     expect(res.statusCode).toBe(201);
     expect(res.json().tagged).toEqual(['bob']);
+  });
+
+  it("finalize puts the clip in your albums; someone else's, a full or a missing one is skipped", async () => {
+    const other = await createUser(t.db, { username: 'bob' });
+    const bobHeaders = (await sessionFor(t.db, other.id)).headers;
+    const make = async (h: Record<string, string>, title: string) =>
+      (await t.app.inject({ method: 'POST', url: '/api/albums', headers: h, payload: { title } })).json().id as string;
+    const mine = await make(headers, 'Mine');
+    const full = await make(headers, 'Full');
+    const bobs = await make(bobHeaders, 'Bob');
+    await t.db.insert(clips).values(
+      Array.from({ length: MAX_ALBUM_CLIPS }, (_, i) => ({
+        id: `filler${String(i).padStart(6, '0')}`,
+        userId: other.id,
+        title: 'x',
+        durationMs: 1,
+        width: 1,
+        height: 1,
+        sizeBytes: 1,
+      })),
+    );
+    await t.db
+      .insert(albumClips)
+      .values(Array.from({ length: MAX_ALBUM_CLIPS }, (_, i) => ({ albumId: full, clipId: `filler${String(i).padStart(6, '0')}`, position: i })));
+
+    const { uploadId } = await tusUpload(t.app, token, fixture);
+    const res = await finalize(uploadId, { albums: [mine, full, bobs, 'gone00000000'] });
+    expect(res.statusCode).toBe(201);
+    const id = res.json().id;
+    const inAlbum = async (album: string) =>
+      (await t.db.select().from(albumClips).where(eq(albumClips.albumId, album))).some((r) => r.clipId === id);
+    expect(await inAlbum(mine)).toBe(true);
+    expect(await inAlbum(full)).toBe(false);
+    expect(await inAlbum(bobs)).toBe(false);
+
+    // A lost-response retry answers with the clip and leaves it in the album once.
+    expect((await finalize(uploadId, { albums: [mine] })).statusCode).toBe(200);
+    expect((await t.db.select().from(albumClips).where(eq(albumClips.albumId, mine))).length).toBe(1);
   });
 
   it('finalizes a PNG as a screenshot: stored as PNG with a thumbnail, served as an image', async () => {

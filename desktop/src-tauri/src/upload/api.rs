@@ -68,6 +68,9 @@ pub struct FinalizeRequest {
     /// High: the server keeps the video as uploaded instead of compressing it (admins only).
     #[serde(skip_serializing_if = "UploadQuality::is_standard")]
     pub quality: UploadQuality,
+    /// Your albums to put the clip in, by id (the server skips any that's gone or full).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub albums: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]

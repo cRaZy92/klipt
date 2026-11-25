@@ -7,18 +7,22 @@ const row = (clipId: string, status: string) => ({
   tagged: [],
   replace: false,
   queuedAtMs: 1,
+  albums: clipId === "w" ? ["album0000001"] : [],
   status,
 });
+
+const { uploadClip } = vi.hoisted(() => ({ uploadClip: vi.fn(async (..._args: unknown[]) => {}) }));
 
 vi.mock("./api", async (orig) => ({
   ...(await orig<typeof import("./api")>()),
   api: {
     pendingUploads: async () => [row("q", "queued"), row("r", "running"), row("l", "needsLogin"), row("w", "waiting")],
+    uploadClip,
   },
   on: () => () => {},
 }));
 
-import { isBusy, loadPendingUploads, uploads } from "./uploads.svelte";
+import { isBusy, loadPendingUploads, retryUpload, uploads } from "./uploads.svelte";
 
 describe("loadPendingUploads", () => {
   it("shows saved uploads by what the core does with them", async () => {
@@ -31,5 +35,14 @@ describe("loadPendingUploads", () => {
     // Stopped (no connection): not stuck as busy, so "Try again" works.
     expect(uploads.w.status).toBe("failed");
     expect(isBusy(uploads.w)).toBe(false);
+  });
+});
+
+describe("retryUpload", () => {
+  it("keeps the albums a saved upload was going into", async () => {
+    await loadPendingUploads();
+    retryUpload("w");
+    await vi.waitFor(() => expect(uploadClip).toHaveBeenCalled());
+    expect(uploadClip.mock.calls[0]).toEqual(["w", "T w", "link", [], false, false, false, ["album0000001"]]);
   });
 });

@@ -64,6 +64,7 @@ fn req() -> FinalizeRequest {
         tagged: Vec::new(),
         replaces: None,
         quality: UploadQuality::Standard,
+        albums: Vec::new(),
     }
 }
 
@@ -478,4 +479,11 @@ fn finalize_sends_quality_only_when_high() {
     assert!(standard.get("quality").is_none(), "older servers never see it");
     let high = serde_json::to_value(FinalizeRequest { quality: UploadQuality::High, ..req() }).unwrap();
     assert_eq!(high["quality"], "high");
+}
+
+#[test]
+fn finalize_sends_albums_only_when_some_are_picked() {
+    assert!(serde_json::to_value(req()).unwrap().get("albums").is_none());
+    let picked = serde_json::to_value(FinalizeRequest { albums: vec!["album0000001".into()], ..req() }).unwrap();
+    assert_eq!(picked["albums"], serde_json::json!(["album0000001"]));
 }

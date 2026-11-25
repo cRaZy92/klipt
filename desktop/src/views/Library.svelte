@@ -18,6 +18,7 @@
   import ClipPlayer from "../components/ClipPlayer.svelte";
   import CombineDialog from "../components/CombineDialog.svelte";
   import AlbumDialog from "../components/AlbumDialog.svelte";
+  import AlbumPicker from "../components/AlbumPicker.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
   import GameFilter from "../components/GameFilter.svelte";
   import ImageViewer from "../components/ImageViewer.svelte";
@@ -70,7 +71,7 @@
     online: MyUpload[];
   } | null>(null);
   let deleting = $state(false);
-  let bulkUpload = $state<{ clips: ClipView[]; visibility: "feed" | "link" } | null>(null);
+  let bulkUpload = $state<{ clips: ClipView[]; visibility: "feed" | "link"; albums: string[] } | null>(null);
   /** Joining the selected clips into one new clip. */
   let combining = $state<ClipView[] | null>(null);
   /** "Add to album": the server clips going in, and how many picked ones aren't uploaded. */
@@ -366,13 +367,14 @@
 
   async function startBulkUpload() {
     if (!bulkUpload) return;
-    const { clips, visibility } = bulkUpload;
+    const { clips, visibility, albums } = bulkUpload;
     bulkUpload = null;
     clearSelection();
     // The core announces them when the last one ends ("3 clips uploaded").
     await uploadInTurn(
       clips.map((c) => ({ id: c.id, title: uploadTitle(c) })),
       visibility,
+      albums,
     );
   }
 
@@ -771,7 +773,7 @@
         class="btn btn-sm btn-ghost"
         disabled={uploadable.length === 0}
         title={uploadable.length === 0 ? "Nothing here left to upload" : undefined}
-        onclick={() => (bulkUpload = { clips: uploadable, visibility: "feed" })}
+        onclick={() => (bulkUpload = { clips: uploadable, visibility: "feed", albums: [] })}
       >
         <Icon name="upload" size={15} /> Upload{uploadable.length > 0 && uploadable.length < selected.size
           ? ` ${uploadable.length}`
@@ -825,6 +827,9 @@
         <input type="radio" bind:group={bulkUpload.visibility} value="link" />
         <span><strong>Link only</strong><small>Only people you send a link to can watch them.</small></span>
       </label>
+    </div>
+    <div class="bulk-albums">
+      <AlbumPicker bind:selected={bulkUpload.albums} count={b.clips.length} />
     </div>
     {#snippet footer()}
       <button class="btn" onclick={() => (bulkUpload = null)}>Cancel</button>
@@ -925,6 +930,10 @@
 {/if}
 
 <style>
+  .bulk-albums {
+    margin-top: 1rem;
+  }
+
   .filters {
     display: flex;
     flex-wrap: wrap;

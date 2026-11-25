@@ -260,4 +260,6 @@ pub struct PendingUpload {
     pub queued_at_ms: i64,
     /// An admin's high-quality upload (see `commands::upload_clip`).
     pub high_quality: bool,
+    /// Server albums to put the clip in, by id.
+    pub albums: Vec<String>,
 }

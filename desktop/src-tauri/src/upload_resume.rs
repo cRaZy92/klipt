@@ -146,7 +146,18 @@ pub async fn resume_all(app: AppHandle) {
             }
             ResumeAction::Start => {
                 crate::elog!("klipt: carrying on the upload of clip {}", row.clip_id);
-                match commands::prepare_upload(&app, &row.clip_id, &row.title, row.visibility, Some(row.tagged.clone()), Some(row.replace), row.high_quality) {
+                match commands::prepare_upload(
+                    &app,
+                    &row.clip_id,
+                    &row.title,
+                    row.visibility,
+                    commands::UploadOptions {
+                        tagged: Some(row.tagged.clone()),
+                        replace: Some(row.replace),
+                        high_quality: row.high_quality,
+                        albums: Some(row.albums.clone()),
+                    },
+                ) {
                     Ok((job, guard)) => {
                         commands::run_job(app.clone(), job, guard).await;
                     }

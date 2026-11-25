@@ -15,6 +15,8 @@ export interface PendingUpload {
   tagged: string[];
   replace: boolean;
   queuedAtMs: number;
+  /** Server albums it goes into once it's online, by id. */
+  albums: string[];
   /** What the core does with it: running, queued for its resume pass, waiting for a login, or
    * stopped and tried again in a while. */
   status: "running" | "queued" | "needsLogin" | "waiting";
@@ -114,6 +116,9 @@ export interface ClipView {
   fileMissing: boolean;
   thumbPath: string | null;
 }
+
+/** How many clips an album holds at most (`MAX_ALBUM_CLIPS` in packages/shared). */
+export const MAX_ALBUM_CLIPS = 200;
 
 /** An album on the server (`AlbumSummary` in packages/shared): clips under one link. */
 export interface AlbumSummary {
@@ -606,8 +611,16 @@ export const api = {
   /** `replace`: swap the video at the clip's existing link instead of making a new one. */
   pendingUploads: () => invoke<PendingUpload[]>("pending_uploads"),
   resumePendingUploads: () => invoke<void>("resume_pending_uploads"),
-  uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = [], replace = false, more = false, highQuality = false) =>
-    invoke<void>("upload_clip", { id, title, visibility, tagged, replace, more, highQuality }),
+  uploadClip: (
+    id: string,
+    title: string,
+    visibility: Visibility,
+    tagged: string[] = [],
+    replace = false,
+    more = false,
+    highQuality = false,
+    albums: string[] = [],
+  ) => invoke<void>("upload_clip", { id, title, visibility, tagged, replace, more, highQuality, albums }),
   /** The server's users, for tagging friends in a clip. */
   listUsers: () => invoke<{ username: string; displayName?: string }[]>("list_users"),
   /** One page of the feed; `search` matches title, game and uploader on the server. */

@@ -3,6 +3,7 @@
   import { uploadTitle } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import { fraction, isBusy, retryUpload, startUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
+  import AlbumPicker from "./AlbumPicker.svelte";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
 
@@ -23,6 +24,8 @@
   /** Admins may keep a video as it is (no server compression): for edits and compilations. */
   let isAdmin = $state(false);
   let quality = $state<"standard" | "high">("standard");
+  /** Albums it goes into once it's online. */
+  let albums = $state<string[]>([]);
 
   $effect(() => {
     Promise.all([api.listUsers(), api.getAccount()])
@@ -60,7 +63,7 @@
     if (!trimmedTitle) return;
     started = true;
     const high = isAdmin && clip.kind === "clip" && quality === "high";
-    void startUpload(clip.id, trimmedTitle, visibility, tagged, replaceable && replace, false, high);
+    void startUpload(clip.id, trimmedTitle, visibility, tagged, replaceable && replace, false, high, albums);
   }
 
   async function copyAgain() {
@@ -170,6 +173,7 @@
           </div>
         </fieldset>
       {/if}
+      <AlbumPicker bind:selected={albums} />
     </form>
   {:else if job.status === "done"}
     <div class="done">

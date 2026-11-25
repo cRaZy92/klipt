@@ -112,7 +112,11 @@ function settled(id: string): Promise<void> {
  * Uploads several clips one after another (each exports with ffmpeg first, so not all at once).
  * They show "Waiting to upload…" until their turn. Returns how many were uploaded.
  */
-export async function uploadInTurn(list: { id: string; title: string }[], visibility: Visibility): Promise<number> {
+export async function uploadInTurn(
+  list: { id: string; title: string }[],
+  visibility: Visibility,
+  albums: string[] = [],
+): Promise<number> {
   const todo = list.filter(({ id }) => !isBusy(uploads[id]));
   for (const { id, title } of todo) {
     uploads[id] = { id, title, visibility, status: "queued", sent: 0, total: 0 };
@@ -123,7 +127,7 @@ export async function uploadInTurn(list: { id: string; title: string }[], visibi
     if (uploads[id]?.status !== "queued") continue;
     // More to come: the core holds its "uploaded" notice for one summary at the end.
     const more = todo.slice(index + 1).some((rest) => uploads[rest.id]?.status === "queued");
-    await startUpload(id, title, visibility, undefined, undefined, more);
+    await startUpload(id, title, visibility, undefined, undefined, more, undefined, albums);
     // "Already uploading": the core is on it after all, and its events will say when it ends.
     if (uploads[id]?.status === "queued") uploads[id] = { ...uploads[id], status: "starting" };
     await settled(id);
@@ -145,10 +149,12 @@ const taggedFor: Record<string, string[]> = {};
 const replaceFor: Record<string, boolean> = {};
 /** An admin's high-quality uploads, kept for retries. */
 const highQualityFor: Record<string, boolean> = {};
+/** Server albums each upload goes into, kept for retries. */
+const albumsFor: Record<string, string[]> = {};
 
 /**
- * Starts (or retries, resuming where it stopped) an upload. `tagged`, `replace` and
- * `highQuality` are kept for retries.
+ * Starts (or retries, resuming where it stopped) an upload. `tagged`, `replace`,
+ * `highQuality` and `albums` are kept for retries.
  */
 export async function startUpload(
   id: string,
@@ -158,15 +164,26 @@ export async function startUpload(
   replace?: boolean,
   more = false,
   highQuality?: boolean,
+  albums?: string[],
 ) {
   stoppedByLogout.delete(id);
   requested[id] = { title, visibility };
   if (tagged) taggedFor[id] = tagged;
   if (replace !== undefined) replaceFor[id] = replace;
   if (highQuality !== undefined) highQualityFor[id] = highQuality;
+  if (albums) albumsFor[id] = albums;
   const previous = uploads[id];
   try {
-    await api.uploadClip(id, title, visibility, taggedFor[id] ?? [], replaceFor[id] ?? false, more, highQualityFor[id] ?? false);
+    await api.uploadClip(
+      id,
+      title,
+      visibility,
+      taggedFor[id] ?? [],
+      replaceFor[id] ?? false,
+      more,
+      highQualityFor[id] ?? false,
+      albumsFor[id] ?? [],
+    );
   } catch (e) {
     // "Already uploading" means the core is still on it: leave what's shown alone; its
     // progress events keep updating the card.
@@ -227,6 +244,7 @@ export async function loadPendingUploads() {
     requested[row.clipId] = { title: row.title, visibility: row.visibility };
     taggedFor[row.clipId] = row.tagged;
     replaceFor[row.clipId] = row.replace;
+    albumsFor[row.clipId] = row.albums ?? [];
     // An event that arrived meanwhile is newer.
     if (!uploads[row.clipId]) {
       const status: UploadStatus =

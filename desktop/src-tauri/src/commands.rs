@@ -690,6 +690,8 @@ pub(crate) struct Job {
     more: bool,
     /// Encoded with less loss and kept as uploaded by the server (admins only).
     high_quality: bool,
+    /// Server albums to put the clip in, by id.
+    albums: Vec<String>,
 }
 
 /// Starts uploading a clip: export (trim + mix), resumable upload, finalize. Returns once the
@@ -704,9 +706,22 @@ pub async fn upload_clip(
     replace: Option<bool>,
     more: Option<bool>,
     high_quality: Option<bool>,
+    albums: Option<Vec<String>>,
 ) -> Result<()> {
     let high_quality = high_quality.unwrap_or(false);
-    off_main(move || start_upload(app, id, title, visibility, tagged, replace, more.unwrap_or(false), high_quality)).await?
+    let options = UploadOptions { tagged, replace, high_quality, albums };
+    off_main(move || start_upload(app, id, title, visibility, options, more.unwrap_or(false))).await?
+}
+
+/// What the user picked for an upload besides its title and visibility.
+pub(crate) struct UploadOptions {
+    /// Friends in the clip, by username.
+    pub tagged: Option<Vec<String>>,
+    /// Replace the video at the clip's existing link.
+    pub replace: Option<bool>,
+    pub high_quality: bool,
+    /// Server albums to put the clip in, by id.
+    pub albums: Option<Vec<String>>,
 }
 
 fn start_upload(
@@ -714,12 +729,10 @@ fn start_upload(
     id: String,
     title: String,
     visibility: Visibility,
-    tagged: Option<Vec<String>>,
-    replace: Option<bool>,
+    options: UploadOptions,
     more: bool,
-    high_quality: bool,
 ) -> Result<()> {
-    let (mut job, guard) = prepare_upload(&app, &id, &title, visibility, tagged, replace, high_quality)?;
+    let (mut job, guard) = prepare_upload(&app, &id, &title, visibility, options)?;
     job.more = more;
     tauri::async_runtime::spawn(run_job(app, job, guard));
     Ok(())
@@ -738,15 +751,17 @@ pub(crate) fn prepare_upload(
     id: &str,
     title: &str,
     visibility: Visibility,
-    tagged: Option<Vec<String>>,
-    replace: Option<bool>,
-    high_quality: bool,
+    options: UploadOptions,
 ) -> Result<(Job, UploadGuard)> {
+    let UploadOptions { tagged, replace, high_quality, albums } = options;
     let state = app.state::<AppState>();
     let uploads = app.state::<Uploads>();
     let title = clean_title(title)?;
     let tagged: Vec<String> =
         tagged.unwrap_or_default().into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).take(20).collect();
+    let mut albums: Vec<String> = albums.unwrap_or_default().into_iter().filter(|a| !a.trim().is_empty()).take(20).collect();
+    albums.sort();
+    albums.dedup();
     let clip = lock(&state.library).get(id)?;
     if !clip.path.is_file() {
         return Err(AppError::FileMissing);
@@ -765,6 +780,7 @@ pub(crate) fn prepare_upload(
         replace: replace.unwrap_or(false),
         queued_at_ms: now_ms(),
         high_quality,
+        albums: albums.clone(),
     };
     if let Err(e) = lock(&state.library).add_pending_upload(&pending) {
         crate::elog!("klipt: can't remember the upload of clip {id}: {e}");
@@ -775,7 +791,7 @@ pub(crate) fn prepare_upload(
     } else {
         None
     };
-    let job = Job { clip, title, visibility, tagged, replaces, auth, tools, data_dir: state.data_dir.clone(), cache_dir, more: false, high_quality };
+    let job = Job { clip, title, visibility, tagged, replaces, auth, tools, data_dir: state.data_dir.clone(), cache_dir, more: false, high_quality, albums };
     Ok((job, guard))
 }
 
@@ -979,6 +995,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
         tagged: job.tagged.clone(),
         replaces: job.replaces.clone(),
         quality: if job.high_quality { UploadQuality::High } else { UploadQuality::Standard },
+        albums: job.albums.clone(),
     };
     let server_clip = client.finalize(token, &request).await?;
     let replaced = job.replaces.as_deref() == Some(server_clip.id.as_str());

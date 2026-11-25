@@ -103,6 +103,9 @@ const MIGRATIONS: &[&str] = &["
 ", "
     -- Parts of the picture blurred in the editor: JSON list of {\"startMs\", \"endMs\"} (ms into the file).
     ALTER TABLE clips ADD COLUMN blur_ranges TEXT NOT NULL DEFAULT '[]';
+", "
+    -- Server albums to put an upload in once it's online: JSON list of album ids.
+    ALTER TABLE pending_uploads ADD COLUMN albums TEXT NOT NULL DEFAULT '[]';
 "];
 
 /// Queries that select more after these read them from index 34 on.
@@ -531,11 +534,21 @@ impl Library {
             crate::upload::Visibility::Link => "link",
         };
         self.conn.execute(
-            "INSERT INTO pending_uploads (clip_id, title, visibility, tagged, replace, queued_at, high_quality)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO pending_uploads (clip_id, title, visibility, tagged, replace, queued_at, high_quality, albums)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(clip_id) DO UPDATE SET title = excluded.title, visibility = excluded.visibility,
-                 tagged = excluded.tagged, replace = excluded.replace, high_quality = excluded.high_quality",
-            params![p.clip_id, p.title, visibility, serde_json::to_string(&p.tagged)?, p.replace, p.queued_at_ms, p.high_quality],
+                 tagged = excluded.tagged, replace = excluded.replace, high_quality = excluded.high_quality,
+                 albums = excluded.albums",
+            params![
+                p.clip_id,
+                p.title,
+                visibility,
+                serde_json::to_string(&p.tagged)?,
+                p.replace,
+                p.queued_at_ms,
+                p.high_quality,
+                serde_json::to_string(&p.albums)?
+            ],
         )?;
         Ok(())
     }
@@ -553,20 +566,22 @@ impl Library {
     /// Unfinished uploads, oldest first.
     pub fn pending_uploads(&self) -> Result<Vec<PendingUpload>> {
         let mut stmt = self.conn.prepare(
-            "SELECT clip_id, title, visibility, tagged, replace, queued_at, high_quality FROM pending_uploads ORDER BY queued_at, clip_id",
+            "SELECT clip_id, title, visibility, tagged, replace, queued_at, high_quality, albums FROM pending_uploads
+             ORDER BY queued_at, clip_id",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 (row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?),
-                (row.get::<_, bool>(4)?, row.get::<_, i64>(5)?, row.get::<_, bool>(6)?),
+                (row.get::<_, bool>(4)?, row.get::<_, i64>(5)?, row.get::<_, bool>(6)?, row.get::<_, String>(7)?),
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let ((clip_id, title, visibility, tagged), (replace, queued_at_ms, high_quality)) = row?;
+            let ((clip_id, title, visibility, tagged), (replace, queued_at_ms, high_quality, albums)) = row?;
             let visibility = if visibility == "feed" { crate::upload::Visibility::Feed } else { crate::upload::Visibility::Link };
             let tagged = serde_json::from_str(&tagged).unwrap_or_default();
-            out.push(PendingUpload { clip_id, title, visibility, tagged, replace, queued_at_ms, high_quality });
+            let albums = serde_json::from_str(&albums).unwrap_or_default();
+            out.push(PendingUpload { clip_id, title, visibility, tagged, replace, queued_at_ms, high_quality, albums });
         }
         Ok(out)
     }
@@ -947,6 +962,7 @@ mod tests {
             replace: true,
             queued_at_ms: at,
             high_quality: true,
+            albums: vec!["album0000001".into()],
         }
     }
 

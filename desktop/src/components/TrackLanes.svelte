@@ -330,8 +330,12 @@
     const area = block.parentElement as HTMLElement;
     const b = blurs[i];
     onblurselect(i);
-    onseek(b.startMs);
-    if (locked) return;
+    // The playhead moves when the drag ends: seeking now could turn a zoomed-in timeline's page
+    // under the pointer, and the drag would then jump to where the pointer lands on the new page.
+    if (locked) {
+      onseek(b.startMs);
+      return;
+    }
     const what = grabbed(block, e.clientX);
     block.setPointerCapture(e.pointerId);
     blurDrag = { i, what, offset: msAt(e, area) - b.startMs };
@@ -389,8 +393,11 @@
     if (i < 0) return;
     const s = subtitles[i];
     onsubtitleselect(i);
-    onseek(s.startMs);
-    if (locked) return;
+    // The playhead moves when the drag ends (see `blurDown`).
+    if (locked) {
+      onseek(s.startMs);
+      return;
+    }
     const what = grabbed(block, e.clientX);
     block.setPointerCapture(e.pointerId);
     subDrag = { i, what, offset: msAt(e, area) - s.startMs };

@@ -407,7 +407,7 @@
   function store(key, value) {
     try { localStorage.setItem(key, value); } catch (e) { /* private mode: just not remembered */ }
   }
-  document.querySelectorAll('.share video').forEach(function (video) {
+  document.querySelectorAll('.share video, .album-page video').forEach(function (video) {
     var volume = parseFloat(stored(VOLUME_KEY));
     video.volume = volume >= 0 && volume <= 1 ? volume : 0.5;
     video.muted = stored(MUTED_KEY) === 'true';
@@ -416,6 +416,28 @@
       store(MUTED_KEY, String(video.muted));
     });
   });
+
+  // Album page: a clip that ends moves on to the next one, which starts playing by itself; the
+  // clip playing is scrolled into view in the list.
+  var AUTOPLAY_KEY = 'klipt.albumAutoplay';
+  document.querySelectorAll('.album-page video').forEach(function (video) {
+    var session = null;
+    try { session = sessionStorage; } catch (e) { /* storage blocked */ }
+    if (session && session.getItem(AUTOPLAY_KEY) === '1') {
+      session.removeItem(AUTOPLAY_KEY);
+      var playing = video.play();
+      if (playing && playing.catch) playing.catch(function () {});
+    }
+    video.addEventListener('ended', function () {
+      if (!video.dataset.nextUrl) return;
+      try { if (session) session.setItem(AUTOPLAY_KEY, '1'); } catch (e) { /* just no autoplay */ }
+      location.assign(video.dataset.nextUrl);
+    });
+  });
+  var currentItem = document.querySelector('.album-list li.current');
+  if (currentItem && currentItem.parentElement.scrollHeight > currentItem.parentElement.clientHeight) {
+    currentItem.scrollIntoView({ block: 'nearest' });
+  }
 
   // A screenshot counts as viewed when its page opens.
   document.querySelectorAll('img[data-view-url]').forEach(function (img) {

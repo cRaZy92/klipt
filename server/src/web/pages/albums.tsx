@@ -68,7 +68,17 @@ export function AlbumsPage(props: { user: AuthUser; albums: AlbumSummary[] }): J
   );
 }
 
-/** The album's page: the clip picked (`?c=`, or the first) plays, the whole album is listed beside it. */
+/** "12:34 in total" for the album's videos (screenshots don't count). */
+function totalLength(clips: Clip[]): string {
+  const ms = clips.reduce((sum, c) => sum + (c.kind === 'screenshot' ? 0 : c.durationMs), 0);
+  return ms > 0 ? `${formatDuration(ms)} in total` : '';
+}
+
+/**
+ * The album's page: its name and actions across the top, the clip picked (`?c=`, or the first)
+ * playing below with what it is and Previous / Next, and every clip listed beside it (under it on
+ * narrow screens). A clip that ends moves on to the next one.
+ */
 export function AlbumPage(props: { user: AuthUser | null; album: AlbumSummary; clips: Clip[]; current: Clip | null; isOwner: boolean }): JSX.Element {
   const { album, clips, current, isOwner } = props;
   const at = current ? clips.findIndex((c) => c.id === current.id) : -1;
@@ -76,104 +86,121 @@ export function AlbumPage(props: { user: AuthUser | null; album: AlbumSummary; c
   const next = at >= 0 && at < clips.length - 1 ? clips[at + 1] : null;
   const link = (c: Clip) => `/a/${encodeURIComponent(album.id)}?c=${encodeURIComponent(c.id)}`;
   const ar = current && current.width > 0 && current.height > 0 ? `${current.width}/${current.height}` : '16/9';
+  const total = totalLength(clips);
   return (
     <Layout title={album.title} user={props.user} head={albumHead(album)}>
-      <div class="share album" style={`--ar:${ar}`}>
-        {current ? (
-          current.kind === 'screenshot' ? (
-            <img class="shot" src={e(current.videoUrl)} alt={e(current.title)} data-view-url={`/api/clips/${e(current.id)}/view`} />
-          ) : (
-            <video
-              controls
-              {...{ playsinline: true, preload: 'metadata' }}
-              poster={e(current.thumbnailUrl)}
-              src={e(current.videoUrl)}
-              data-view-url={`/api/clips/${e(current.id)}/view`}
-            ></video>
-          )
-        ) : (
-          <div class="album-placeholder">
-            <p>No clips in this album yet.</p>
-            {isOwner ? <p class="muted">Open a clip and press Add to album.</p> : ''}
+      <div class="album-page" data-album-id={e(album.id)} style={`--ar:${ar}`}>
+        <header class="album-head">
+          <div class="album-head-text">
+            <p class="album-kicker">Album</p>
+            <h1 data-role="album-title">{e(album.title)}</h1>
+            <p class="album-byline">
+              <a class="album-owner" href={`/u/${encodeURIComponent(album.owner.username)}`}>
+                <Avatar name={album.owner.displayName} size="sm" />
+                <strong>{e(album.owner.displayName)}</strong>
+              </a>
+              <span>{clipsLabel(clips.length)}</span>
+              {total ? <span>{total}</span> : ''}
+              <span>Changed {relativeDate(new Date(album.updatedAt))}</span>
+            </p>
           </div>
-        )}
-        <aside class="share-info" data-album-id={e(album.id)}>
-          <p class="share-game">Album · {clipsLabel(clips.length)}</p>
-          <h1 data-role="album-title">{e(album.title)}</h1>
-          <a class="share-owner" href={`/u/${encodeURIComponent(album.owner.username)}`}>
-            <Avatar name={album.owner.displayName} size="md" />
-            <span>
-              <strong>{e(album.owner.displayName)}</strong>
-              <span class="meta">
-                <span>Changed {relativeDate(new Date(album.updatedAt))}</span>
-              </span>
-            </span>
-          </a>
-          <div class="share-main">
+          <div class="album-actions">
             <button type="button" class="btn primary" data-action="copy" data-url={e(album.shareUrl)}>
               Copy album link
             </button>
+            {isOwner ? (
+              <>
+                <button type="button" class="btn" data-action="album-rename" data-title={e(album.title)}>Rename</button>
+                <button type="button" class="btn ghost danger" data-action="album-delete">Delete</button>
+              </>
+            ) : (
+              ''
+            )}
           </div>
-          {isOwner ? (
-            <div class="share-more">
-              <button type="button" class="btn ghost small" data-action="album-rename" data-title={e(album.title)}>Rename</button>
-              <button type="button" class="btn ghost small danger" data-action="album-delete">Delete album</button>
-            </div>
-          ) : (
-            ''
-          )}
-          {current ? (
-            <div class="album-now">
-              <div>
-                <p class="album-now-title"><a href={`/c/${e(current.id)}`}>{e(current.title)}</a></p>
-                <p class="meta">
-                  <span>{e(current.owner.displayName)}</span>
-                  {current.gameName ? <span>{e(current.gameName)}</span> : ''}
-                  <span>{at + 1} of {clips.length}</span>
-                </p>
+        </header>
+
+        <div class="album-body">
+          <section class="album-stage">
+            {current ? (
+              current.kind === 'screenshot' ? (
+                <img class="album-media shot" src={e(current.videoUrl)} alt={e(current.title)} data-view-url={`/api/clips/${e(current.id)}/view`} />
+              ) : (
+                <video
+                  class="album-media"
+                  controls
+                  {...{ playsinline: true, preload: 'metadata' }}
+                  poster={e(current.thumbnailUrl)}
+                  src={e(current.videoUrl)}
+                  data-view-url={`/api/clips/${e(current.id)}/view`}
+                  data-next-url={next ? e(link(next)) : undefined}
+                ></video>
+              )
+            ) : (
+              <div class="album-placeholder">
+                <p>No clips in this album yet.</p>
+                {isOwner ? <p class="muted">Open a clip and press Add to album.</p> : ''}
               </div>
-              <nav class="album-steps" aria-label="Clips in this album">
-                {prev ? <a class="btn small" href={e(link(prev))} rel="prev">‹ Previous</a> : <span class="btn small" aria-disabled="true">‹ Previous</span>}
-                {next ? <a class="btn small" href={e(link(next))} rel="next">Next ›</a> : <span class="btn small" aria-disabled="true">Next ›</span>}
-              </nav>
-            </div>
-          ) : (
-            ''
-          )}
+            )}
+            {current ? (
+              <div class="album-now">
+                <div class="album-now-text">
+                  <p class="album-now-title"><a href={`/c/${e(current.id)}`}>{e(current.title)}</a></p>
+                  <p class="meta">
+                    <span>{at + 1} of {clips.length}</span>
+                    <span>{e(current.owner.displayName)}</span>
+                    {current.gameName ? <span>{e(current.gameName)}</span> : ''}
+                  </p>
+                </div>
+                <nav class="album-steps" aria-label="Previous and next clip">
+                  {prev ? <a class="btn" href={e(link(prev))} rel="prev">‹ Previous</a> : <span class="btn" aria-disabled="true">‹ Previous</span>}
+                  {next ? <a class="btn" href={e(link(next))} rel="next">Next ›</a> : <span class="btn" aria-disabled="true">Next ›</span>}
+                </nav>
+              </div>
+            ) : (
+              ''
+            )}
+          </section>
+
           {clips.length > 0 ? (
-            <ol class="album-list">
-              {clips.map((c, i) => (
-                <li class={c.id === current?.id ? 'current' : ''} data-album-clip={e(c.id)}>
-                  <a class="album-item" href={e(link(c))} aria-current={c.id === current?.id ? 'true' : undefined}>
-                    <span class="album-num">{i + 1}</span>
-                    <span class="album-item-thumb">
-                      <img src={e(c.thumbnailUrl)} alt="" loading="lazy" width="96" height="54" />
-                      <span class="dur">{c.kind === 'screenshot' ? 'Shot' : formatDuration(c.durationMs)}</span>
-                    </span>
-                    <span class="album-item-text">
-                      <span class="album-item-title">{e(c.title)}</span>
-                      <span class="meta">
-                        <span>{e(c.owner.displayName)}</span>
-                        {c.gameName ? <span>{e(c.gameName)}</span> : ''}
+            <aside class="album-playlist" aria-label="Clips in this album">
+              <div class="album-playlist-head">
+                <h2>Clips</h2>
+                <span class="muted">{clipsLabel(clips.length)}</span>
+              </div>
+              <ol class="album-list">
+                {clips.map((c, i) => (
+                  <li class={c.id === current?.id ? 'current' : ''} data-album-clip={e(c.id)}>
+                    <a class="album-item" href={e(link(c))} aria-current={c.id === current?.id ? 'true' : undefined}>
+                      <span class="album-num">{i + 1}</span>
+                      <span class="album-item-thumb">
+                        <img src={e(c.thumbnailUrl)} alt="" loading="lazy" width="128" height="72" />
+                        <span class="dur">{c.kind === 'screenshot' ? 'Shot' : formatDuration(c.durationMs)}</span>
                       </span>
-                    </span>
-                  </a>
-                  {isOwner ? (
-                    <span class="album-item-tools">
-                      <button type="button" class="icon-btn" data-action="album-move" data-dir="-1" aria-label="Move up" title="Move up" disabled={i === 0}>↑</button>
-                      <button type="button" class="icon-btn" data-action="album-move" data-dir="1" aria-label="Move down" title="Move down" disabled={i === clips.length - 1}>↓</button>
-                      <button type="button" class="icon-btn" data-action="album-remove" aria-label="Remove from the album" title="Remove from the album">✕</button>
-                    </span>
-                  ) : (
-                    ''
-                  )}
-                </li>
-              ))}
-            </ol>
+                      <span class="album-item-text">
+                        <span class="album-item-title" title={e(c.title)}>{e(c.title)}</span>
+                        <span class="meta">
+                          <span>{e(c.owner.displayName)}</span>
+                          {c.gameName ? <span>{e(c.gameName)}</span> : ''}
+                        </span>
+                      </span>
+                    </a>
+                    {isOwner ? (
+                      <span class="album-item-tools">
+                        <button type="button" class="icon-btn" data-action="album-move" data-dir="-1" aria-label="Move up" title="Move up" disabled={i === 0}>↑</button>
+                        <button type="button" class="icon-btn" data-action="album-move" data-dir="1" aria-label="Move down" title="Move down" disabled={i === clips.length - 1}>↓</button>
+                        <button type="button" class="icon-btn" data-action="album-remove" aria-label="Remove from the album" title="Remove from the album">✕</button>
+                      </span>
+                    ) : (
+                      ''
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </aside>
           ) : (
             ''
           )}
-        </aside>
+        </div>
       </div>
     </Layout>
   );

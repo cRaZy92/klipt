@@ -13,7 +13,7 @@
     if (importing.phase !== "running") stopping = false;
   });
 
-  const ACTION: Record<string, string> = { importing: "Importing", remuxing: "Copying", converting: "Converting" };
+  const ACTION: Record<string, string> = { importing: "Importing", copying: "Copying", remuxing: "Copying", converting: "Converting" };
 
   function stop() {
     stopping = true;

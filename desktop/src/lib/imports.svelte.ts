@@ -1,7 +1,8 @@
 // Importing clips from a folder, in two steps: Klipt checks the folder and shows what it will do
 // (how many files need converting, how long it should take, how much space), the user confirms,
 // then the Rust core imports in the background. This mirrors its `import-*` events, so the
-// progress survives switching tabs.
+// progress survives switching tabs. Files and folders dropped on the window go the same way;
+// a quick drop (nothing to convert) starts without asking, since picking the drop zone said yes.
 
 import { api, errorMessage, on, type ImportPreview, type ImportProgress, type ImportSummary } from "./api";
 import { summaryText } from "./importSummary";
@@ -9,9 +10,15 @@ import { toast } from "./toasts.svelte";
 
 export type ImportPhase = "idle" | "checking" | "confirm" | "running";
 
+/** What is being imported: a picked folder, or what was dropped (`copy`: into the clips folder). */
+export type ImportSource = { kind: "folder"; folder: string } | { kind: "drop"; paths: string[]; copy: boolean };
+
+/** A drop that would take longer than this asks first. */
+const ASK_AFTER_SECS = 60;
+
 export const importing = $state<{
   phase: ImportPhase;
-  folder: string | null;
+  source: ImportSource | null;
   /** While checking: files looked at so far. */
   checked: number;
   found: number;
@@ -20,36 +27,58 @@ export const importing = $state<{
   progress: ImportProgress | null;
   /** The last finished import, kept while it has skipped files to show. */
   summary: ImportSummary | null;
-}>({ phase: "idle", folder: null, checked: 0, found: 0, preview: null, progress: null, summary: null });
+  /** A quick drop is starting without asking: the confirmation stays hidden. */
+  autoStart: boolean;
+}>({ phase: "idle", source: null, checked: 0, found: 0, preview: null, progress: null, summary: null, autoStart: false });
+
+/** Files in a preview that will be imported. */
+export function toImportCount(p: ImportPreview): number {
+  return p.inPlace + p.copied + p.remux + p.reencode;
+}
 
 /** Step 1: look through `folder`; the confirmation opens when that's done. */
-export async function checkFolder(folder: string): Promise<void> {
-  if (importing.phase === "running" || importing.phase === "checking") {
-    toast("An import is already running.", "info");
+export function checkFolder(folder: string): Promise<void> {
+  return check({ kind: "folder", folder });
+}
+
+/** Files and folders dropped on the window: kept where they are, or copied into the clips folder. */
+export function checkDropped(paths: string[], copy: boolean): Promise<void> {
+  return check({ kind: "drop", paths, copy });
+}
+
+async function check(source: ImportSource): Promise<void> {
+  if (importing.phase !== "idle") {
+    toast(importing.phase === "confirm" ? "Finish or cancel the import that's waiting first." : "An import is already running.", "info");
     return;
   }
-  Object.assign(importing, { phase: "checking", folder, checked: 0, found: 0, preview: null });
+  Object.assign(importing, { phase: "checking", source, checked: 0, found: 0, preview: null });
   try {
-    const preview = await api.checkImport(folder);
+    const preview = source.kind === "folder" ? await api.checkImport(source.folder) : await api.checkDrop(source.paths, source.copy);
     // Stopped meanwhile (the cast: TypeScript keeps the narrowing from before the await).
     if ((importing.phase as ImportPhase) !== "checking") return;
     if (!preview) {
       importing.phase = "idle";
       return;
     }
-    if (preview.inPlace + preview.remux + preview.reencode === 0) {
+    if (toImportCount(preview) === 0) {
       importing.phase = "idle";
+      const where = source.kind === "folder" ? "in that folder" : "you dropped";
       toast(
         preview.files === 0
-          ? "No videos or pictures in that folder."
+          ? `No videos or pictures ${where}.`
           : preview.alreadyThere === preview.files
-            ? "Everything in that folder is already in Klipt."
-            : "Nothing in that folder can be imported.",
+            ? `Everything ${where} is already in Klipt.`
+            : `Nothing ${where} can be imported.`,
         "info",
       );
       return;
     }
-    Object.assign(importing, { phase: "confirm", preview });
+    const quick = source.kind === "drop" && preview.reencode === 0 && preview.estimateSecs <= ASK_AFTER_SECS;
+    Object.assign(importing, { phase: "confirm", preview, autoStart: quick });
+    if (quick) {
+      await confirmImport();
+      importing.autoStart = false;
+    }
   } catch (e) {
     importing.phase = "idle";
     toast(errorMessage(e), "error");
@@ -58,11 +87,13 @@ export async function checkFolder(folder: string): Promise<void> {
 
 /** Step 2: the user said yes. */
 export async function confirmImport(): Promise<void> {
-  if (importing.phase !== "confirm" || !importing.folder) return;
+  const source = importing.source;
+  if (importing.phase !== "confirm" || !source) return;
   try {
-    if (!(await api.importFolder(importing.folder))) {
+    const started = source.kind === "folder" ? await api.importFolder(source.folder) : await api.importDrop();
+    if (!started) {
       importing.phase = "idle";
-      toast("Couldn't start the import. Check the folder again.", "error");
+      toast(`Couldn't start the import. ${source.kind === "folder" ? "Check the folder" : "Drop the files"} again.`, "error");
       return;
     }
     Object.assign(importing, { phase: "running", progress: null, summary: null });
@@ -104,7 +135,8 @@ export function watchImports(): () => void {
         preview: null,
         summary: summary.skipped.length > 0 ? summary : null,
       });
-      toast(summaryText(summary), summary.imported > 0 ? "success" : "info");
+      const copied = importing.source?.kind === "drop" && importing.source.copy;
+      toast(summaryText(summary, copied), summary.imported > 0 ? "success" : "info");
     }),
   ];
   return () => stops.forEach((stop) => stop());

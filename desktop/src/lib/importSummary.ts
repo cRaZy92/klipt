@@ -4,14 +4,16 @@ function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** One line about a finished import, e.g. "Imported 38 clips (5 converted to H.264). 2 were already in Klipt." */
-export function summaryText(s: ImportSummary): string {
+/** One line about a finished import, e.g. "Imported 38 clips (5 converted to H.264). 2 were already in Klipt."
+ * `copied`: the files were copied into the clips folder (a drop with "copy"). */
+export function summaryText(s: ImportSummary, copied = false): string {
   const parts: string[] = [];
   if (s.imported === 0) {
     parts.push(s.cancelled ? "Import stopped." : "Nothing new to import.");
   } else {
     const converted = s.converted > 0 ? ` (${s.converted} converted to H.264)` : "";
-    parts.push(`${s.cancelled ? "Stopped after importing" : "Imported"} ${count(s.imported, "clip", "clips")}${converted}.`);
+    const into = copied ? " into your clips folder" : "";
+    parts.push(`${s.cancelled ? "Stopped after importing" : copied ? "Copied" : "Imported"} ${count(s.imported, "clip", "clips")}${into}${converted}.`);
   }
   if (s.alreadyThere > 0) parts.push(`${count(s.alreadyThere, "was", "were")} already in Klipt.`);
   if (s.skipped.length > 0) parts.push(`${count(s.skipped.length, "file", "files")} skipped.`);

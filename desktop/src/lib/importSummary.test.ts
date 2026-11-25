@@ -11,6 +11,10 @@ describe("summaryText", () => {
     expect(summaryText({ ...base, imported: 1, alreadyThere: 1 })).toBe("Imported 1 clip. 1 was already in Klipt.");
   });
 
+  it("says copies went into the clips folder", () => {
+    expect(summaryText({ ...base, imported: 2, converted: 1 }, true)).toBe("Copied 2 clips into your clips folder (1 converted to H.264).");
+  });
+
   it("handles nothing new and a cancelled import", () => {
     expect(summaryText({ ...base, alreadyThere: 4 })).toBe("Nothing new to import. 4 were already in Klipt.");
     expect(summaryText({ ...base, cancelled: true })).toBe("Import stopped.");

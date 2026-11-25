@@ -13,6 +13,8 @@
   import Toast from "./components/Toast.svelte";
   import Modal from "./components/Modal.svelte";
   import FeedbackDialog from "./components/FeedbackDialog.svelte";
+  import DropZones from "./components/DropZones.svelte";
+  import ImportDialog from "./components/ImportDialog.svelte";
   import Editor from "./views/Editor.svelte";
   import Feed from "./views/Feed.svelte";
   import Library from "./views/Library.svelte";
@@ -449,6 +451,12 @@
       {/if}
     </div>
   </div>
+{/if}
+
+{#if ready && account}
+  <!-- App-wide, so dropping files and the import's confirmation work on every screen. -->
+  <DropZones />
+  <ImportDialog />
 {/if}
 
 {#if feedbackKind}

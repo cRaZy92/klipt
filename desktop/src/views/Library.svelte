@@ -2,7 +2,6 @@
   import { untrack } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { checkFolder, importing } from "../lib/imports.svelte";
-  import ImportDialog from "../components/ImportDialog.svelte";
   import ImportPanel from "../components/ImportPanel.svelte";
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
   import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
@@ -906,8 +905,6 @@
     {/snippet}
   </Modal>
 {/if}
-
-<ImportDialog />
 
 {#if removing}
   <DeleteClipDialog

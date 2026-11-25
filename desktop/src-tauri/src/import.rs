@@ -6,6 +6,10 @@
 //! (a quick remux when only the container or audio differs), because the editor's webview can't
 //! reliably play H.265/AV1 and the server only takes H.264. Originals are never changed, imported
 //! clips are never removed by the automatic cleanup, and a file is never imported twice.
+//!
+//! Files and folders can also be dropped on the window. A drop either adds them like a folder
+//! import (kept where they are) or copies them into `<clips folder>/Imported` first, so the
+//! library doesn't depend on the dropped originals staying around.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,6 +54,8 @@ pub enum Plan {
     Skip(&'static str),
     /// The library points at the file itself.
     InPlace,
+    /// Copied as it is into the clips folder (a drop with "copy"), and the copy is imported.
+    Copy,
     /// An H.264/AAC MP4 copy is made.
     Convert { reencode_video: bool, audio: AudioPlan },
 }
@@ -231,6 +237,9 @@ fn free_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
 pub struct Planned {
     /// The real path (symlinks resolved), as stored in the library.
     pub path: PathBuf,
+    /// The folder it was found in (the picked or dropped folder, or a dropped file's own
+    /// folder): the game is guessed from the folders between, and it's shown relative to it.
+    pub root: PathBuf,
     pub info: Option<MediaInfo>,
     pub plan: Plan,
     pub bytes: u64,
@@ -245,6 +254,8 @@ pub enum Work {
     Instant,
     /// A new container (and maybe audio): about as fast as the disk.
     Remux,
+    /// A plain file copy: as fast as the disk too.
+    Copy,
     /// The video is encoded again: the slow part.
     Reencode,
     /// Nothing to do (already there, or can't be imported).
@@ -259,6 +270,7 @@ impl Planned {
         match self.plan {
             Plan::Skip(_) => Work::None,
             Plan::InPlace => Work::Instant,
+            Plan::Copy => Work::Copy,
             Plan::Convert { reencode_video: false, .. } => Work::Remux,
             Plan::Convert { reencode_video: true, .. } => Work::Reencode,
         }
@@ -293,7 +305,7 @@ pub fn file_secs(file: &Planned, rates: &Rates) -> f64 {
     let load = file.info.as_ref().map_or(0.0, load_secs);
     match file.work() {
         Work::Instant => rates.instant_secs,
-        Work::Remux => rates.instant_secs + file.bytes as f64 / rates.remux_bytes_per_sec,
+        Work::Remux | Work::Copy => rates.instant_secs + file.bytes as f64 / rates.remux_bytes_per_sec,
         Work::Reencode => rates.instant_secs + load / rates.reencode_speed,
         Work::None => 0.0,
     }
@@ -324,7 +336,7 @@ impl Meter {
                 self.instant.0 += 1.0;
                 self.instant.1 += secs;
             }
-            Work::Remux => {
+            Work::Remux | Work::Copy => {
                 self.remux.0 += file.bytes as f64;
                 self.remux.1 += secs;
             }
@@ -359,6 +371,8 @@ pub struct Preview {
     pub folder: String,
     pub files: usize,
     pub in_place: usize,
+    /// Copied as they are into the clips folder (a drop with "copy").
+    pub copied: usize,
     pub remux: usize,
     pub reencode: usize,
     pub already_there: usize,
@@ -387,6 +401,10 @@ pub fn preview_of(folder: &Path, copies_dir: &Path, files: &[Planned], encoder: 
     for f in files {
         match f.work() {
             Work::Instant => p.in_place += 1,
+            Work::Copy => {
+                p.copied += 1;
+                p.copy_bytes += f.bytes;
+            }
             Work::Remux => {
                 p.remux += 1;
                 p.copy_bytes += f.bytes;
@@ -417,34 +435,123 @@ pub fn check_folder(
     library: &Mutex<Library>,
     root: &Path,
     stop: &AtomicBool,
+    checked: impl FnMut(usize, usize),
+) -> Option<Vec<Planned>> {
+    let found = scan(root).into_iter().map(|file| Found { root: root.to_path_buf(), file }).collect();
+    check_files(tools, library, found, None, stop, checked)
+}
+
+/// A file to check, and the folder it was found in (see [`Planned::root`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub root: PathBuf,
+    pub file: PathBuf,
+}
+
+/// What was dropped on the window: dropped files as they are (each under its own folder, so no
+/// game is guessed from wherever it happened to be), dropped folders searched like a picked one.
+/// Duplicates are dropped; at most [`MAX_FILES`].
+pub fn collect_dropped(paths: &[PathBuf]) -> Vec<Found> {
+    let mut seen = std::collections::HashSet::new();
+    let mut found = Vec::new();
+    for path in paths {
+        let path = dunce::canonicalize(path).unwrap_or_else(|_| path.clone());
+        let files: Vec<Found> = if path.is_dir() {
+            scan(&path).into_iter().map(|file| Found { root: path.clone(), file }).collect()
+        } else if path.is_file() {
+            let root = path.parent().map(Path::to_path_buf).unwrap_or_default();
+            vec![Found { root, file: path }]
+        } else {
+            continue;
+        };
+        for f in files {
+            if found.len() >= MAX_FILES {
+                return found;
+            }
+            if seen.insert(f.file.clone()) {
+                found.push(f);
+            }
+        }
+    }
+    found
+}
+
+/// Checks `found`: what each file is and what importing it takes. With `copy_into` (the clips
+/// folder), files that would be imported in place are copied there instead, unless they already
+/// are in it. `checked` hears (checked, total) as it goes; returns None when `stop` is set.
+pub fn check_files(
+    tools: &Tools,
+    library: &Mutex<Library>,
+    found: Vec<Found>,
+    copy_into: Option<&Path>,
+    stop: &AtomicBool,
     mut checked: impl FnMut(usize, usize),
 ) -> Option<Vec<Planned>> {
-    let found = scan(root);
     let total = found.len();
     let mut files = Vec::with_capacity(total);
-    for (i, file) in found.into_iter().enumerate() {
+    for (i, Found { root, file }) in found.into_iter().enumerate() {
         if stop.load(Ordering::SeqCst) {
             return None;
         }
         checked(i, total);
         let path = dunce::canonicalize(&file).unwrap_or(file);
         let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
-        let already = crate::commands::lock(library).contains_file(&path).unwrap_or(false);
-        let (info, plan) = if already {
+        let ext = ext_of(&path);
+        let media = VIDEO_EXTS.contains(&ext.as_str()) || PICTURE_EXTS.contains(&ext.as_str());
+        let already = media && crate::commands::lock(library).contains_file(&path).unwrap_or(false);
+        let (info, plan) = if !media {
+            (None, Plan::Skip("not a video or picture"))
+        } else if already {
             (None, Plan::Skip("already in Klipt"))
         } else {
             match crate::ffmpeg::inspect(tools, &path) {
                 Ok(info) => {
-                    let plan = plan(&info, &ext_of(&path));
+                    let mut plan = plan(&info, &ext);
+                    if plan == Plan::InPlace && copy_into.is_some_and(|dir| !path.starts_with(dir)) {
+                        plan = Plan::Copy;
+                    }
                     (Some(info), plan)
                 }
                 Err(_) => (None, Plan::Skip("not a video or picture ffmpeg can read")),
             }
         };
-        files.push(Planned { path, info, plan, bytes, already });
+        files.push(Planned { path, root, info, plan, bytes, already });
     }
     checked(total, total);
     Some(files)
+}
+
+/// Copies `from` to the new file `to`, hearing 0..=1 as it goes. Ok(false) when `stop` was set;
+/// the partial copy is removed then, and on errors.
+fn copy_file(from: &Path, to: &Path, stop: &AtomicBool, progress: &mut impl FnMut(f64)) -> std::io::Result<bool> {
+    use std::io::{Read, Write};
+    let mut src = std::fs::File::open(from)?;
+    let total = src.metadata()?.len().max(1);
+    let mut dst = std::fs::File::create_new(to)?;
+    let mut copy = || -> std::io::Result<bool> {
+        let mut buf = vec![0u8; 1 << 20];
+        let mut done = 0u64;
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                return Ok(false);
+            }
+            let n = src.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            dst.write_all(&buf[..n])?;
+            done += n as u64;
+            progress((done as f64 / total as f64).min(1.0));
+        }
+        dst.sync_all()?;
+        Ok(true)
+    };
+    let result = copy();
+    if !matches!(result, Ok(true)) {
+        drop(dst);
+        let _ = std::fs::remove_file(to);
+    }
+    result
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -460,13 +567,12 @@ pub enum Outcome {
     Stopped,
 }
 
-/// Imports one checked file. `copies_dir` is where H.264 copies go; `progress` hears 0..=1 while
-/// a copy is written; `stop` interrupts a copy.
+/// Imports one checked file. `copies_dir` is where copies go; `progress` hears 0..=1 while a
+/// copy is written; `stop` interrupts a copy.
 pub fn import_planned(
     tools: &Tools,
     library: &Mutex<Library>,
     file: &Planned,
-    root: &Path,
     copies_dir: &Path,
     encoder: Option<&Encoder>,
     stop: &AtomicBool,
@@ -480,9 +586,20 @@ pub fn import_planned(
         return Ok(Outcome::Skipped(reason.into()));
     };
     let source = &file.path;
-    let (path, converted) = match *plan {
+    // `copied`: `path` is a file this import made (removed again if the import fails).
+    let (path, converted, copied) = match *plan {
         Plan::Skip(reason) => return Ok(Outcome::Skipped(reason.into())),
-        Plan::InPlace => (source.clone(), false),
+        Plan::InPlace => (source.clone(), false, false),
+        Plan::Copy => {
+            std::fs::create_dir_all(copies_dir)?;
+            let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("clip");
+            let out = free_path(copies_dir, stem, &ext_of(source));
+            match copy_file(source, &out, stop, &mut progress) {
+                Ok(true) => (out, false, true),
+                Ok(false) => return Ok(Outcome::Stopped),
+                Err(e) => return Ok(Outcome::Skipped(format!("couldn't copy it: {e}"))),
+            }
+        }
         Plan::Convert { reencode_video, audio } => {
             let encoder_args: &[&str] = if reencode_video {
                 match encoder {
@@ -502,7 +619,7 @@ pub fn import_planned(
                 }
                 return Ok(Outcome::Skipped(format!("couldn't convert it: {e}")));
             }
-            (out, true)
+            (out, true, true)
         }
     };
 
@@ -512,7 +629,7 @@ pub fn import_planned(
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_millis() as i64);
     let kind = if info.is_image() { ClipKind::Screenshot } else { ClipKind::Clip };
-    let folder_game = guess_game(source, root);
+    let folder_game = guess_game(source, &file.root);
     let (clip, thumb) = {
         let library = crate::commands::lock(library);
         // A game Klipt already knows (any capitalization) keeps its name and Steam art.
@@ -537,7 +654,7 @@ pub fn import_planned(
         let clip = match library.insert(new) {
             Ok(clip) => clip,
             Err(e) => {
-                if converted {
+                if copied {
                     let _ = std::fs::remove_file(&path);
                 }
                 return Err(e);
@@ -566,9 +683,9 @@ pub fn import_one(tools: &Tools, library: &Mutex<Library>, file: &Path, root: &P
         None => Plan::Skip("not a video or picture ffmpeg can read"),
     };
     let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
-    let planned = Planned { path, info, plan, bytes, already };
+    let planned = Planned { path, root: root.to_path_buf(), info, plan, bytes, already };
     let encoder = detect_encoder(tools);
-    import_planned(tools, library, &planned, root, copies_dir, encoder.as_ref(), &AtomicBool::new(false), |_| {})
+    import_planned(tools, library, &planned, copies_dir, encoder.as_ref(), &AtomicBool::new(false), |_| {})
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -579,7 +696,7 @@ pub struct Progress {
     pub total: usize,
     /// The file being worked on, relative to the picked folder.
     pub current: Option<String>,
-    /// "importing", "remuxing" or "converting".
+    /// "importing", "copying", "remuxing" or "converting".
     pub action: Option<&'static str>,
     /// 0..=1 through the current file's copy.
     pub file_fraction: Option<f64>,
@@ -616,9 +733,16 @@ pub struct Summary {
     pub elapsed_secs: f64,
 }
 
-/// A checked folder, waiting for the user to confirm.
+/// What was checked: a picked folder, or what was dropped on the window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Source {
+    Folder(PathBuf),
+    Drop,
+}
+
+/// Checked files, waiting for the user to confirm.
 struct Checked {
-    root: PathBuf,
+    source: Source,
     files: Vec<Planned>,
     encoder: Option<Encoder>,
 }
@@ -648,18 +772,47 @@ pub async fn check_import(app: AppHandle, folder: String) -> Result<Option<Previ
     if !root.is_dir() {
         return Err(AppError::InvalidInput("not a folder".into()));
     }
+    let root = dunce::canonicalize(&root).unwrap_or(root);
+    let found_root = root.clone();
+    let find = move || scan(&found_root).into_iter().map(|file| Found { root: found_root.clone(), file }).collect();
+    check(app, Source::Folder(root.clone()), root, false, find).await
+}
+
+/// Like [`check_import`], for files and folders dropped on the window. With `copy`, files are
+/// copied into the clips folder instead of being used where they are.
+#[tauri::command]
+pub async fn check_drop(app: AppHandle, paths: Vec<String>, copy: bool) -> Result<Option<Preview>> {
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let shown = match paths.as_slice() {
+        [one] => one.clone(),
+        many => many.first().and_then(|p| p.parent()).map(Path::to_path_buf).unwrap_or_default(),
+    };
+    check(app, Source::Drop, shown, copy, move || collect_dropped(&paths)).await
+}
+
+async fn check(
+    app: AppHandle,
+    source: Source,
+    shown: PathBuf,
+    copy: bool,
+    find: impl FnOnce() -> Vec<Found> + Send + 'static,
+) -> Result<Option<Preview>> {
     let tools = app.state::<AppState>().tools.clone().ok_or(AppError::ToolsMissing)?;
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Ok(None);
     }
     CANCEL.store(false, Ordering::SeqCst);
-    let root = dunce::canonicalize(&root).unwrap_or(root);
     let copies = copies_dir(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let _running = RunningGuard;
         let state = app.state::<AppState>();
+        let clips = copy.then(|| {
+            let dir = crate::commands::lock(&state.settings).output_dir.clone();
+            dunce::canonicalize(&dir).unwrap_or(dir)
+        });
         let mut last = std::time::Instant::now();
-        let files = check_folder(&tools, &state.library, &root, &CANCEL, |checked, total| {
+        let found = find();
+        let files = check_files(&tools, &state.library, found, clips.as_deref(), &CANCEL, |checked, total| {
             if checked == 0 || checked == total || last.elapsed().as_millis() >= 150 {
                 last = std::time::Instant::now();
                 let _ = app.emit(events::CHECK_PROGRESS, CheckProgress { checked, total });
@@ -667,12 +820,12 @@ pub async fn check_import(app: AppHandle, folder: String) -> Result<Option<Previ
         })?;
         let needs_encoder = files.iter().any(|f| f.work() == Work::Reencode);
         let encoder = if needs_encoder { detect_encoder(&tools) } else { None };
-        let preview = preview_of(&root, &copies, &files, encoder.as_ref());
-        *crate::commands::lock(&CHECKED) = Some(Checked { root, files, encoder });
+        let preview = preview_of(&shown, &copies, &files, encoder.as_ref());
+        *crate::commands::lock(&CHECKED) = Some(Checked { source, files, encoder });
         Some(preview)
     })
     .await
-    .map_err(|e| AppError::Internal(format!("checking the folder failed: {e}")))
+    .map_err(|e| AppError::Internal(format!("checking the files failed: {e}")))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -688,14 +841,23 @@ pub struct CheckProgress {
 #[tauri::command]
 pub async fn import_folder(app: AppHandle, folder: String) -> Result<bool> {
     // Resolves the folder on disk first (slow on a sleeping or network drive): off the main thread.
-    crate::commands::off_main(move || start_import(app, folder)).await?
+    crate::commands::off_main(move || {
+        let root = PathBuf::from(&folder);
+        let root = dunce::canonicalize(&root).unwrap_or(root);
+        start_import(app, Source::Folder(root))
+    })
+    .await?
 }
 
-fn start_import(app: AppHandle, folder: String) -> Result<bool> {
+/// Imports what `check_drop` just looked at, like [`import_folder`].
+#[tauri::command]
+pub async fn import_drop(app: AppHandle) -> Result<bool> {
+    crate::commands::off_main(move || start_import(app, Source::Drop)).await?
+}
+
+fn start_import(app: AppHandle, source: Source) -> Result<bool> {
     let tools = app.state::<AppState>().tools.clone().ok_or(AppError::ToolsMissing)?;
-    let root = PathBuf::from(&folder);
-    let root = dunce::canonicalize(&root).unwrap_or(root);
-    let Some(checked) = crate::commands::lock(&CHECKED).take().filter(|c| c.root == root) else {
+    let Some(checked) = crate::commands::lock(&CHECKED).take().filter(|c| c.source == source) else {
         return Ok(false);
     };
     if RUNNING.swap(true, Ordering::SeqCst) {
@@ -743,15 +905,16 @@ fn run(app: &AppHandle, tools: &Tools, checked: &Checked, copies_dir: &Path) -> 
             summary.cancelled = true;
             break;
         }
-        let shown = file.path.strip_prefix(&checked.root).unwrap_or(&file.path).to_string_lossy().into_owned();
+        let shown = file.path.strip_prefix(&file.root).unwrap_or(&file.path).to_string_lossy().into_owned();
         let work = file.work();
         p.current = Some(shown.clone());
         p.action = Some(match work {
+            Work::Copy => "copying",
             Work::Remux => "remuxing",
             Work::Reencode => "converting",
             _ => "importing",
         });
-        p.file_fraction = matches!(work, Work::Remux | Work::Reencode).then_some(0.0);
+        p.file_fraction = matches!(work, Work::Copy | Work::Remux | Work::Reencode).then_some(0.0);
         p.speed = None;
         let file_started = std::time::Instant::now();
         let duration_s = file.info.as_ref().map_or(0.0, |info| info.duration_ms as f64 / 1000.0);
@@ -768,7 +931,7 @@ fn run(app: &AppHandle, tools: &Tools, checked: &Checked, copies_dir: &Path) -> 
         };
         emit(&mut p, 0.0, work != Work::Instant && work != Work::None);
 
-        let outcome = import_planned(tools, &state.library, file, &checked.root, copies_dir, encoder, &CANCEL, |fraction| {
+        let outcome = import_planned(tools, &state.library, file, copies_dir, encoder, &CANCEL, |fraction| {
             p.file_fraction = Some(fraction);
             let secs = file_started.elapsed().as_secs_f64();
             if work == Work::Reencode && secs > 0.5 && duration_s > 0.0 {
@@ -823,7 +986,7 @@ mod tests {
 
     fn planned(info: MediaInfo, ext: &str, bytes: u64) -> Planned {
         let plan = plan(&info, ext);
-        Planned { path: PathBuf::from(format!("/v/x.{ext}")), info: Some(info), plan, bytes, already: false }
+        Planned { path: PathBuf::from(format!("/v/x.{ext}")), root: PathBuf::from("/v"), info: Some(info), plan, bytes, already: false }
     }
 
     #[test]
@@ -1060,7 +1223,7 @@ mod tests {
         let copies = w.dir.path().join("clips/Imported");
         let stop = AtomicBool::new(false);
         let encoder = detect_encoder(&tools());
-        let outcome = import_planned(&tools(), &w.library, long, &root, &copies, encoder.as_ref(), &stop, |_| {
+        let outcome = import_planned(&tools(), &w.library, long, &copies, encoder.as_ref(), &stop, |_| {
             stop.store(true, Ordering::SeqCst)
         })
         .unwrap();
@@ -1068,6 +1231,63 @@ mod tests {
         let left: Vec<_> = fs::read_dir(&copies).map(|d| d.flatten().collect()).unwrap_or_default();
         assert!(left.is_empty(), "{left:?}");
         assert!(!crate::commands::lock(&w.library).contains_file(&long.path).unwrap());
+    }
+
+    #[test]
+    fn drops_take_files_as_they_are_and_search_folders_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        fs::create_dir_all(root.join("Deadlock/Replays")).unwrap();
+        for f in ["Deadlock/a.mp4", "Deadlock/Replays/b.mkv", "Deadlock/notes.txt", "loose.mp4", "readme.txt"] {
+            fs::write(root.join(f), b"x").unwrap();
+        }
+        let dropped = [root.join("Deadlock"), root.join("loose.mp4"), root.join("readme.txt"), root.join("Deadlock/a.mp4"), root.join("gone.mp4")];
+        let found = collect_dropped(&dropped);
+        let got: Vec<(String, String)> = found
+            .iter()
+            .map(|f| (f.root.file_name().unwrap().to_string_lossy().into_owned(), f.file.file_name().unwrap().to_string_lossy().into_owned()))
+            .collect();
+        let tmp = root.file_name().unwrap().to_string_lossy().into_owned();
+        // The folder's videos (its .txt left out), then the dropped files under their own folder;
+        // a.mp4 only once, the missing file not at all.
+        assert_eq!(got.len(), 4, "{got:?}");
+        assert!(got.contains(&("Deadlock".into(), "a.mp4".into())));
+        assert!(got.contains(&("Deadlock".into(), "b.mkv".into())));
+        assert_eq!(got[2..], [(tmp.clone(), "loose.mp4".into()), (tmp, "readme.txt".into())]);
+    }
+
+    #[test]
+    fn a_copying_drop_imports_a_copy_in_the_clips_folder() {
+        let w = World::new();
+        let file = w.root().join("Deadlock/ok.mp4");
+        let args: Vec<&str> = [&SRC[..], &TONE[..], &["-t", "1", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac"]].concat();
+        make(&file, &args);
+        let txt = w.root().join("notes.txt");
+        fs::write(&txt, b"x").unwrap();
+        let clips = w.dir.path().join("clips");
+        let inside = clips.join("Imported/already.mp4");
+        fs::create_dir_all(inside.parent().unwrap()).unwrap();
+        make(&inside, &args);
+        let found = collect_dropped(&[file.clone(), txt, inside.clone()]);
+        let clips = dunce::canonicalize(&clips).unwrap();
+        let files = check_files(&tools(), &w.library, found, Some(&clips), &AtomicBool::new(false), |_, _| {}).unwrap();
+        let plans: Vec<&Plan> = files.iter().map(|f| &f.plan).collect();
+        assert_eq!(plans, [&Plan::Copy, &Plan::Skip("not a video or picture"), &Plan::InPlace], "one in the clips folder stays");
+        assert_eq!(preview_of(&w.root(), &clips, &files, None).copied, 1);
+
+        let copies = clips.join("Imported");
+        let mut fractions = Vec::new();
+        let outcome = import_planned(&tools(), &w.library, &files[0], &copies, None, &AtomicBool::new(false), |f| fractions.push(f)).unwrap();
+        let Outcome::Imported { view, converted } = outcome else { panic!("not imported: {outcome:?}") };
+        assert!(!converted);
+        assert_eq!(view.clip.path, copies.join("ok.mp4"));
+        assert_eq!(fs::read(&view.clip.path).unwrap(), fs::read(&file).unwrap());
+        assert_eq!(view.clip.game_name, None, "a dropped file's own folder says nothing");
+        assert_eq!(fractions.last(), Some(&1.0));
+        assert!(file.is_file(), "the original stays");
+        // Dropping the original again finds it already in Klipt.
+        let again = check_files(&tools(), &w.library, collect_dropped(&[file]), Some(&clips), &AtomicBool::new(false), |_, _| {}).unwrap();
+        assert!(again[0].already);
     }
 
     #[test]

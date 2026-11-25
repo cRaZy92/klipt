@@ -164,6 +164,8 @@ pub fn run() {
             server_clips::set_album_clip,
             import::check_import,
             import::import_folder,
+            import::check_drop,
+            import::import_drop,
             import::cancel_import,
             feed_watch::feed_new_count,
             feed_watch::mark_feed_seen,

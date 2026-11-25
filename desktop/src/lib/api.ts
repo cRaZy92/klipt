@@ -420,6 +420,8 @@ export interface ImportPreview {
   files: number;
   /** Imported as they are: instant. */
   inPlace: number;
+  /** Copied as they are into the clips folder (a drop with "copy"). */
+  copied: number;
   /** A quick container change. */
   remux: number;
   /** Encoded again to H.264: the slow part. */
@@ -442,7 +444,7 @@ export interface ImportProgress {
   done: number;
   total: number;
   current: string | null;
-  action: "importing" | "remuxing" | "converting" | null;
+  action: "importing" | "copying" | "remuxing" | "converting" | null;
   /** 0..1 through the current file's copy. */
   fileFraction: number | null;
   /** Times real time the current conversion runs. */
@@ -595,6 +597,11 @@ export const api = {
   /** Imports the folder `checkImport` just looked at, in the background (`import-*` events);
    * false when an import is already running. */
   importFolder: (folder: string) => invoke<boolean>("import_folder", { folder }),
+  /** Like `checkImport`, for files and folders dropped on the window; with `copy` they're copied
+   * into the clips folder instead of used where they are. */
+  checkDrop: (paths: string[], copy: boolean) => invoke<ImportPreview | null>("check_drop", { paths, copy }),
+  /** Imports what `checkDrop` just looked at, like `importFolder`. */
+  importDrop: () => invoke<boolean>("import_drop"),
   /** Stops checking, or stops the import (the file being converted is dropped). */
   cancelImport: () => invoke<void>("cancel_import"),
   /** Stars or unstars a server clip (yours or a friend's); kept on the server. */

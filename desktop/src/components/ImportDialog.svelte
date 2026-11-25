@@ -1,23 +1,30 @@
 <script lang="ts">
-  import { closeImport, confirmImport, importing } from "../lib/imports.svelte";
+  import { closeImport, confirmImport, importing, toImportCount } from "../lib/imports.svelte";
   import { etaText, sizeText, videoLengthText } from "../lib/importSummary";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
 
   // Step 1 and 2 of an import: checking the folder (with a live count), then what it will do and
   // how long it should take, for the user to confirm. Long conversions get a clear warning.
+  // Files dropped on the window use the same two steps (quick drops skip the second).
 
   const p = $derived(importing.preview);
-  const toImport = $derived(p ? p.inPlace + p.remux + p.reencode : 0);
+  const toImport = $derived(p ? toImportCount(p) : 0);
   /** Over ~10 minutes, or any re-encode on the CPU: worth a warning. */
   const long = $derived(!!p && (p.estimateSecs > 600 || (p.reencode > 0 && p.encoder === "CPU")));
-  const folderName = $derived(importing.folder?.split(/[\\/]/).filter(Boolean).pop() ?? "");
+  const source = $derived(importing.source);
+  const nameOf = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  /** "Deadlock", or for a drop of several things "3 dropped items". */
+  const sourceName = $derived(
+    !source ? "" : source.kind === "folder" ? nameOf(source.folder) : source.paths.length === 1 ? nameOf(source.paths[0]) : `${source.paths.length} dropped items`,
+  );
+  const copying = $derived(source?.kind === "drop" && source.copy);
 </script>
 
 {#if importing.phase === "checking"}
-  <Modal title="Checking the folder…" onclose={closeImport}>
+  <Modal title={source?.kind === "drop" ? "Checking the files…" : "Checking the folder…"} onclose={closeImport}>
     <p class="lead">
-      Looking at every video and picture in <strong>{folderName}</strong> to see what importing it takes.
+      Looking at every video and picture in <strong>{sourceName}</strong> to see what importing it takes.
     </p>
     <div class="progress" class:indeterminate={importing.found === 0} style:--value={importing.found > 0 ? importing.checked / importing.found : undefined}>
       <div></div>
@@ -29,12 +36,15 @@
       <button class="btn" onclick={closeImport}>Cancel</button>
     {/snippet}
   </Modal>
-{:else if importing.phase === "confirm" && p}
-  <Modal title="Import {toImport === 1 ? '1 file' : `${toImport} files`}?" onclose={closeImport} width="32rem">
-    <p class="lead">Found {p.files === 1 ? "1 file" : `${p.files} files`} in <strong title={p.folder}>{folderName}</strong>:</p>
+{:else if importing.phase === "confirm" && p && !importing.autoStart}
+  <Modal title="{copying ? 'Copy' : 'Import'} {toImport === 1 ? '1 file' : `${toImport} files`}?" onclose={closeImport} width="32rem">
+    <p class="lead">Found {p.files === 1 ? "1 file" : `${p.files} files`} in <strong title={p.folder}>{sourceName}</strong>:</p>
     <ul class="breakdown">
       {#if p.inPlace > 0}
         <li><Icon name="check" size={16} /><span><b>{p.inPlace}</b> ready to use as they are <em>(instant, nothing is copied)</em></span></li>
+      {/if}
+      {#if p.copied > 0}
+        <li><Icon name="folder" size={16} /><span><b>{p.copied}</b> copied into your clips folder as they are</span></li>
       {/if}
       {#if p.remux > 0}
         <li><Icon name="folder" size={16} /><span><b>{p.remux}</b> need a quick container change <em>(fast copy)</em></span></li>
@@ -80,7 +90,7 @@
     {/if}
     {#if p.copyBytes > 0}
       <p class="muted small">
-        Copies go to <span class="path" title={p.copiesDir}>{p.copiesDir}</span>. Your original files are never changed.
+        Copies go to <span class="path" title={p.copiesDir}>{p.copiesDir}</span>. Your original files are never changed{copying ? ", and you can delete them afterwards" : ""}.
       </p>
     {:else}
       <p class="muted small">Your original files are never changed or moved.</p>
@@ -89,7 +99,7 @@
     {#snippet footer()}
       <button class="btn" onclick={closeImport}>Cancel</button>
       <button class="btn btn-primary" onclick={confirmImport}>
-        {long ? "Start anyway" : "Import"}
+        {long ? "Start anyway" : copying ? "Copy" : "Import"}
       </button>
     {/snippet}
   </Modal>

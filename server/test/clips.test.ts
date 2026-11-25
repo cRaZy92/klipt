@@ -1,11 +1,12 @@
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clips } from '../src/db/schema.js';
 import { createUser, makeFixtureVideo, makeTestApp, sessionFor, type TestApp } from './helpers.js';
+import { execFileSync } from 'node:child_process';
 
 let t: TestApp;
 let a: { id: string; h: Record<string, string> };
@@ -306,5 +307,42 @@ describe('cursor precision', () => {
     } while (cursor && seen.length < 20);
     expect(seen).toHaveLength(5);
     expect(new Set(seen).size).toBe(5);
+  });
+});
+
+describe('thumbnail from an image', () => {
+  /** A small picture made by ffmpeg, as `ext` (png, jpg, webp). */
+  async function picture(ext: string): Promise<Buffer> {
+    const dir = await mkdtemp(join(tmpdir(), 'klipt-thumb-'));
+    const out = join(dir, `p.${ext}`);
+    execFileSync(process.env.FFMPEG_PATH ?? 'ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=red:size=1280x720', '-frames:v', '1', out]);
+    return readFile(out);
+  }
+  const put = (id: string, h: Record<string, string>, body: Buffer | string, type = 'image/png') =>
+    t.app.inject({ method: 'PUT', url: `/api/clips/${id}/thumbnail`, headers: { ...h, 'content-type': type }, payload: body });
+
+  it("replaces the owner's thumbnail and gives it a new URL each time", async () => {
+    const id = await addClip(a.id, { mediaVersion: 2 });
+    const before = (await get(`/api/clips/${id}`, a.h)).json().thumbnailUrl;
+    expect(before).toMatch(/\.jpg\?v=2$/);
+    const res = await put(id, a.h, await picture('png'));
+    expect(res.statusCode).toBe(200);
+    expect(res.json().thumbnailUrl).toMatch(/\.jpg\?v=2-1$/);
+    const jpg = await readFile(join(t.dataDir, 'clips', `${id}.jpg`));
+    expect(jpg.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
+    const again = await put(id, a.h, await picture('jpg'), 'image/jpeg');
+    expect(again.json().thumbnailUrl).toMatch(/\?v=2-2$/);
+    expect((await get('/api/clips?scope=mine', a.h)).json().items[0].thumbnailUrl).toMatch(/\?v=2-2$/);
+  });
+
+  it("refuses other people's clips, screenshots and files that aren't pictures", async () => {
+    const id = await addClip(a.id);
+    expect((await put(id, b.h, await picture('png'))).statusCode).toBe(403);
+    const shot = await addClip(a.id, { kind: 'screenshot' });
+    expect((await put(shot, a.h, await picture('png'))).statusCode).toBe(400);
+    const bad = await put(id, a.h, Buffer.from('not a picture at all'));
+    expect(bad.statusCode).toBe(422);
+    expect(await readFile(join(t.dataDir, 'clips', `${id}.jpg`), 'utf8')).toBe('x');
+    expect((await put('doesnotexist', a.h, await picture('png'))).statusCode).toBe(404);
   });
 });

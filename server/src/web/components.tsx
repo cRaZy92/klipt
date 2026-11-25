@@ -1,5 +1,6 @@
 import type { GameCount } from '@klipt/shared';
 import type { ClipWithOwner } from '../clips/repo.js';
+import { thumbnailUrl } from '../clips/routes.js';
 
 import { esc as e } from './escape.js';
 import { Avatar } from './layout.js';
@@ -96,7 +97,7 @@ export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
   return (
     <a class="card" href={`/c/${clip.id}`}>
       <div class="thumb">
-        <img src={`/media/${clip.id}.jpg`} alt="" loading="lazy" width="320" height="180" />
+        <img src={thumbnailUrl(clip, '')} alt="" loading="lazy" width="320" height="180" />
         <ProcessingPill state={clip.transcodeState} />
         {props.item.favorite ? <span class="fav-mark" title="In your favorites">★</span> : ''}
         <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>

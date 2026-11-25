@@ -4,7 +4,7 @@ import type { Db } from '../db/client.js';
 import { albumClips, albums, clips, users } from '../db/schema.js';
 import { displayNameOf, getClip, type ClipWithOwner } from '../clips/repo.js';
 import { newClipId } from '../clips/ids.js';
-import { versionQuery } from '../clips/routes.js';
+import { thumbnailUrl } from '../clips/routes.js';
 
 export type AlbumRow = typeof albums.$inferSelect;
 
@@ -14,7 +14,7 @@ export interface AlbumWithOwner {
   owner: { username: string; displayName: string };
   clipCount: number;
   /** The first clip's id and media version (for its thumbnail); null while empty. */
-  cover: { id: string; mediaVersion: number } | null;
+  cover: { id: string; mediaVersion: number; thumbVersion: number } | null;
   hasClip?: boolean;
 }
 
@@ -24,13 +24,13 @@ export class AlbumFullError extends Error {}
 export class UnknownClipError extends Error {}
 
 const clipCountExpr = sql<number>`(select count(*) from ${albumClips} ac where ac.album_id = ${albums.id})::int`;
-/** The first clip, as `id|mediaVersion`. */
-const coverExpr = sql<string | null>`(select c.id || '|' || c.media_version from ${albumClips} ac join ${clips} c on c.id = ac.clip_id where ac.album_id = ${albums.id} order by ac.position, ac.added_at limit 1)`;
+/** The first clip, as `id|mediaVersion|thumbVersion`. */
+const coverExpr = sql<string | null>`(select c.id || '|' || c.media_version || '|' || c.thumb_version from ${albumClips} ac join ${clips} c on c.id = ac.clip_id where ac.album_id = ${albums.id} order by ac.position, ac.added_at limit 1)`;
 
 function parseCover(raw: string | null): AlbumWithOwner['cover'] {
   if (!raw) return null;
-  const [id, version] = raw.split('|');
-  return { id: id!, mediaVersion: Number(version) || 0 };
+  const [id, version, thumb] = raw.split('|');
+  return { id: id!, mediaVersion: Number(version) || 0, thumbVersion: Number(thumb) || 0 };
 }
 
 const summaryColumns = (clipId?: string) => ({
@@ -50,7 +50,7 @@ export function toAlbumSummary(a: AlbumWithOwner, baseUrl: string): AlbumSummary
     title: a.album.title,
     owner: a.owner,
     clipCount: a.clipCount,
-    coverUrl: a.cover ? `${baseUrl}/media/${a.cover.id}.jpg${versionQuery(a.cover)}` : null,
+    coverUrl: a.cover ? thumbnailUrl(a.cover, baseUrl) : null,
     shareUrl: `${baseUrl}/a/${a.album.id}`,
     createdAt: a.album.createdAt.toISOString(),
     updatedAt: a.album.updatedAt.toISOString(),

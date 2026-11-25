@@ -1,6 +1,7 @@
 import type { GameCount, MyStorage } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import type { ClipWithOwner } from '../../clips/repo.js';
+import { thumbnailUrl } from '../../clips/routes.js';
 import { emptyText, formatDuration, formatSize, GameFilter, Pager, ProcessingPill, relativeDate, SearchBox, viewsLabel } from '../components.js';
 import { Layout } from '../layout.js';
 
@@ -11,7 +12,7 @@ function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element
   return (
     <li class="row" data-clip-id={clip.id}>
       <a class="row-thumb" href={`/c/${clip.id}`}>
-        <img src={`/media/${clip.id}.jpg`} alt="" loading="lazy" width="160" height="90" />
+        <img src={thumbnailUrl(clip, '')} alt="" loading="lazy" width="160" height="90" />
         <ProcessingPill state={clip.transcodeState} />
         <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>
       </a>

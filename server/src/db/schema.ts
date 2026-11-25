@@ -116,6 +116,8 @@ export const clips = pgTable(
     highQuality: boolean('high_quality').notNull().default(false),
     /** Bumped each time the video file is replaced: version n > 0 is stored as `<id>.v<n>.mp4`. */
     mediaVersion: integer('media_version').notNull().default(0),
+    /** Bumped each time the owner sets the thumbnail from an image: part of the thumbnail URL's `?v=`. */
+    thumbVersion: integer('thumb_version').notNull().default(0),
     /**
      * The embed settings (`EMBED_VERSION`) that made the clip's `<id>.embed.mp4`; 0 for copies made
      * before this was recorded. A lower one than current is remade by the embed backfill.

@@ -99,6 +99,13 @@
       "when": 1795621412619,
       "tag": "0013_clip_high_quality",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795641030837,
+      "tag": "0014_clip_thumb_version",
+      "breakpoints": true
     }
   ]
 }

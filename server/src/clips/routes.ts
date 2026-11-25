@@ -1,6 +1,6 @@
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { and, eq, isNull, lt, or } from 'drizzle-orm';
+import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Clip } from '@klipt/shared';
@@ -53,7 +53,7 @@ export function toClip(item: ClipWithOwner, baseUrl: string): Clip {
     owner: { username: owner.username, displayName: owner.displayName },
     shareUrl: `${baseUrl}/c/${row.id}`,
     videoUrl: `${baseUrl}/media/${mediaFileName(row)}`,
-    thumbnailUrl: `${baseUrl}/media/${row.id}.jpg${versionQuery(row)}`,
+    thumbnailUrl: thumbnailUrl(row, baseUrl),
   };
 }
 
@@ -65,10 +65,27 @@ export function versionQuery(row: Pick<ClipRow, 'mediaVersion'>): string {
   return row.mediaVersion > 0 ? `?v=${row.mediaVersion}` : '';
 }
 
+/**
+ * `?v=` for the thumbnail: the video's version, plus `-<n>` once the owner set it from an image
+ * (the thumbnail is cached as immutable, so each new picture needs a new URL).
+ */
+export function thumbQuery(row: Pick<ClipRow, 'mediaVersion' | 'thumbVersion'>): string {
+  return row.thumbVersion > 0 ? `?v=${row.mediaVersion}-${row.thumbVersion}` : versionQuery(row);
+}
+
+/** A clip's thumbnail URL (`baseUrl` '' gives a path on this site). */
+export function thumbnailUrl(row: Pick<ClipRow, 'id' | 'mediaVersion' | 'thumbVersion'>, baseUrl: string): string {
+  return `${baseUrl}/media/${row.id}.jpg${thumbQuery(row)}`;
+}
+
 /** Whether the server is still compressing the clip (it plays meanwhile). */
 export function processingOf(row: Pick<ClipRow, 'transcodeState'>): 'queued' | 'running' | null {
   return row.transcodeState === 'queued' || row.transcodeState === 'running' ? row.transcodeState : null;
 }
+
+/** Pictures the app may send as a thumbnail, and how big. */
+const THUMB_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_THUMB_BYTES = 10 * 1024 * 1024;
 
 const CLAIM_TTL_MS = 30 * 60 * 1000;
 /** The embed copy is made while the uploader waits (a few seconds), so it gets more cores than compression. */
@@ -230,6 +247,36 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const patch = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
     if (Object.keys(patch).length > 0) await db.update(clips).set(patch).where(eq(clips.id, found.clip.id));
     const now = (await getClip(db, found.clip.id, req.user!.id))!;
+    return toClip(now, config.baseUrl);
+  });
+
+  // A thumbnail picked by the owner: the picture's bytes as the body.
+  app.addContentTypeParser(THUMB_TYPES, { parseAs: 'buffer', bodyLimit: MAX_THUMB_BYTES }, (_req, body, done) => done(null, body));
+  app.put('/api/clips/:id/thumbnail', { preHandler: requireUser, bodyLimit: MAX_THUMB_BYTES }, async (req, reply) => {
+    const p = idParam.safeParse(req.params);
+    const found = p.success ? await getClip(db, p.data.id, req.user?.id) : null;
+    if (!found) return reply.code(404).send({ error: 'not_found' });
+    if (found.clip.userId !== req.user!.id) return reply.code(403).send({ error: 'forbidden' });
+    if (found.clip.kind !== 'clip') {
+      return reply.code(400).send({ error: 'invalid_request', message: "A screenshot's thumbnail is its picture." });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return reply.code(400).send({ error: 'invalid_request' });
+    const id = found.clip.id;
+    const dir = join(config.dataDir, 'clips');
+    const tmpIn = join(dir, `.${id}.thumb-in.tmp`);
+    const tmpThumb = join(dir, `.${id}.thumb.jpg.tmp`);
+    try {
+      await writeFile(tmpIn, req.body);
+      if (!(await probeImage(tmpIn))) {
+        return reply.code(422).send({ error: 'not_an_image', message: "That file isn't a picture Klipt can read." });
+      }
+      await makeThumbnail(tmpIn, tmpThumb, 0);
+      await rename(tmpThumb, join(dir, `${id}.jpg`));
+    } finally {
+      await Promise.all([tmpIn, tmpThumb].map((f) => rm(f, { force: true })));
+    }
+    await db.update(clips).set({ thumbVersion: sql`${clips.thumbVersion} + 1` }).where(eq(clips.id, id));
+    const now = (await getClip(db, id, req.user!.id))!;
     return toClip(now, config.baseUrl);
   });
 

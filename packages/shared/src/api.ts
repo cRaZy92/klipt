@@ -168,6 +168,10 @@ export interface FinalizeRequest {
   thumbnailMs?: number | null;
   /** Friends in the clip, by username. */
   tagged?: string[];
+  /** One of your clips whose video this upload replaces (same link). */
+  replaces?: string;
+  /** `high` (admins only): kept as uploaded, never compressed by the server. */
+  quality?: 'standard' | 'high';
 }
 
 export interface Clip {

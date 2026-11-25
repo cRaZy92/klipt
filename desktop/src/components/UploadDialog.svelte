@@ -20,10 +20,14 @@
   /** Display names by username, for the friend chips. */
   let names = $state<Record<string, string>>({});
   let tagged = $state<string[]>([]);
+  /** Admins may keep a video as it is (no server compression): for edits and compilations. */
+  let isAdmin = $state(false);
+  let quality = $state<"standard" | "high">("standard");
 
   $effect(() => {
     Promise.all([api.listUsers(), api.getAccount()])
       .then(([users, account]) => {
+        isAdmin = !!account?.isAdmin;
         const me = account?.username.toLowerCase();
         names = Object.fromEntries(users.map((u) => [u.username, nameOf(u)]));
         friends = users.map((u) => u.username).filter((name) => name.toLowerCase() !== me);
@@ -55,7 +59,8 @@
     e.preventDefault();
     if (!trimmedTitle) return;
     started = true;
-    void startUpload(clip.id, trimmedTitle, visibility, tagged, replaceable && replace);
+    const high = isAdmin && clip.kind === "clip" && quality === "high";
+    void startUpload(clip.id, trimmedTitle, visibility, tagged, replaceable && replace, false, high);
   }
 
   async function copyAgain() {
@@ -120,6 +125,29 @@
           <span class="ring" aria-hidden="true"></span>
         </label>
       </fieldset>
+      {#if isAdmin && clip.kind === "clip"}
+        <fieldset>
+          <legend>Quality <span class="optional">admins only</span></legend>
+          <label class="option" class:selected={quality === "standard"}>
+            <input type="radio" name="quality" value="standard" bind:group={quality} />
+            <span class="opt-icon"><Icon name="film" size={18} /></span>
+            <span class="opt-text">
+              <strong>Standard</strong>
+              <small>The server compresses it to save space. Fine for most clips.</small>
+            </span>
+            <span class="ring" aria-hidden="true"></span>
+          </label>
+          <label class="option" class:selected={quality === "high"}>
+            <input type="radio" name="quality" value="high" bind:group={quality} />
+            <span class="opt-icon"><Icon name="star" size={18} /></span>
+            <span class="opt-text">
+              <strong>High quality</strong>
+              <small>Kept as uploaded, never compressed. For edits and compilations. Bigger file, slower upload.</small>
+            </span>
+            <span class="ring" aria-hidden="true"></span>
+          </label>
+        </fieldset>
+      {/if}
       {#if friends && friends.length > 0}
         <fieldset>
           <legend>

@@ -127,6 +127,19 @@ pub fn video_encoders() -> Vec<Encoder> {
     list
 }
 
+/// `encoder` set to keep far more detail (fast motion, compilations with many cuts), for an
+/// admin's high-quality upload: lower quantizers, slower presets. Same keyframes as the usual args.
+pub fn high_quality_args(encoder: &Encoder) -> Vec<&'static str> {
+    match encoder.args.get(1).copied() {
+        Some("h264_nvenc") => {
+            vec!["-c:v", "h264_nvenc", "-preset", "p7", "-tune", "hq", "-rc", "vbr", "-cq", "16", "-b:v", "0", "-forced-idr", "1"]
+        }
+        Some("h264_amf") => vec!["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "15", "-qp_p", "17"],
+        Some("h264_qsv") => vec!["-c:v", "h264_qsv", "-preset", "veryslow", "-global_quality", "16"],
+        _ => vec!["-c:v", "libx264", "-preset", "medium", "-crf", "16"],
+    }
+}
+
 /// The best encoder that works on this PC (tested once per run of the app).
 pub fn detect_encoder(tools: &Tools) -> Option<Encoder> {
     static DETECTED: OnceLock<Option<Encoder>> = OnceLock::new();

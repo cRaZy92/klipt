@@ -211,6 +211,8 @@ export interface Account {
   displayName: string;
   /** The display name as set; null when none is. */
   customName: string | null;
+  /** A server admin: may upload in high quality. */
+  isAdmin: boolean;
 }
 
 /** A line of what a problem report says about this PC. */
@@ -578,8 +580,8 @@ export const api = {
   /** `replace`: swap the video at the clip's existing link instead of making a new one. */
   pendingUploads: () => invoke<PendingUpload[]>("pending_uploads"),
   resumePendingUploads: () => invoke<void>("resume_pending_uploads"),
-  uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = [], replace = false, more = false) =>
-    invoke<void>("upload_clip", { id, title, visibility, tagged, replace, more }),
+  uploadClip: (id: string, title: string, visibility: Visibility, tagged: string[] = [], replace = false, more = false, highQuality = false) =>
+    invoke<void>("upload_clip", { id, title, visibility, tagged, replace, more, highQuality }),
   /** The server's users, for tagging friends in a clip. */
   listUsers: () => invoke<{ username: string; displayName?: string }[]>("list_users"),
   /** One page of the feed; `search` matches title, game and uploader on the server. */

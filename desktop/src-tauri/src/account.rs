@@ -55,13 +55,16 @@ fn forget_if_unauthorized(app: &AppHandle, auth: &Auth, e: &AppError) {
     }
 }
 
-/// Keeps the display name the server answered with in the saved login.
-fn save_name(app: &AppHandle, auth: &Auth, custom_name: Option<String>) -> Result<Account> {
+/// Keeps the display name and admin flag the server answered with (`me`) in the saved login.
+fn save_name(app: &AppHandle, auth: &Auth, me: &serde_json::Value) -> Result<Account> {
     let data_dir = app.state::<AppState>().data_dir.clone();
     // Only if this login is still the saved one (a logout or another login may have happened).
     let mut current = auth::load(&data_dir).filter(|a| a.token == auth.token).ok_or(AppError::Unauthorized)?;
-    if current.display_name != custom_name {
+    let custom_name = custom_name_of(me);
+    let is_admin = me.get("isAdmin").and_then(|v| v.as_bool()).unwrap_or(current.is_admin);
+    if current.display_name != custom_name || current.is_admin != is_admin {
         current.display_name = custom_name;
+        current.is_admin = is_admin;
         auth::save(&data_dir, &current)?;
     }
     Ok(Account::from_auth(&current))
@@ -109,7 +112,7 @@ pub async fn refresh_account(app: AppHandle) -> Result<Option<Account>> {
     };
     report_device(&app, &auth);
     let app2 = app.clone();
-    off_main(move || save_name(&app2, &auth, custom_name_of(&me))).await?.map(Some)
+    off_main(move || save_name(&app2, &auth, &me)).await?.map(Some)
 }
 
 /// Sets the name friends see; empty clears it.
@@ -121,7 +124,7 @@ pub async fn update_profile(app: AppHandle, display_name: String) -> Result<Acco
         forget_if_unauthorized(&app, &auth, e);
     })?;
     let app2 = app.clone();
-    off_main(move || save_name(&app2, &auth, custom_name_of(&me))).await?
+    off_main(move || save_name(&app2, &auth, &me)).await?
 }
 
 /// Changes the password; the server signs out every other device (this one stays logged in).

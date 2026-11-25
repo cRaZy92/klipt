@@ -189,6 +189,7 @@ pub fn combine(
                 &id,
                 &crate::editor::current_edit(clip),
                 Tracks::of(clip),
+                export::Quality::Standard,
                 |p| progress(base + share * p),
             )?;
             // Kept even if probing fails, so it's cleaned up below.

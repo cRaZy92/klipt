@@ -65,6 +65,23 @@ pub struct FinalizeRequest {
     /// The server clip whose video this upload replaces (same link); `None` makes a new clip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
+    /// High: the server keeps the video as uploaded instead of compressing it (admins only).
+    #[serde(skip_serializing_if = "UploadQuality::is_standard")]
+    pub quality: UploadQuality,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UploadQuality {
+    #[default]
+    Standard,
+    High,
+}
+
+impl UploadQuality {
+    fn is_standard(&self) -> bool {
+        *self == UploadQuality::Standard
+    }
 }
 
 /// The server's `Clip`.

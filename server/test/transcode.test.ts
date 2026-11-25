@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clips } from '../src/db/schema.js';
+import { clips, users } from '../src/db/schema.js';
 import { probeVideo, transcodeH264 } from '../src/clips/media.js';
 import { createUser, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
 
@@ -112,6 +112,30 @@ describe('compression queue', () => {
     const page = await t.app.inject({ url: '/admin', headers: admin });
     expect(page.statusCode).toBe(200);
     expect(page.body).toMatch(/→ .*\(−\d+%\)/);
+  });
+
+  it("an admin's high-quality upload is kept as uploaded; others may not ask for it", async () => {
+    const boss = (await t.db.select().from(users).where(eq(users.username, 'boss')))[0]!;
+    const bossToken = (await sessionFor(t.db, boss.id, 'desktop')).token;
+    const finalize = async (bearer: string) => {
+      const { uploadId } = await tusUpload(t.app, bearer, await readFile(await makeVideo(dir, 'high')));
+      return t.app.inject({
+        method: 'POST',
+        url: '/api/clips',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: { uploadId, title: 'Compilation', quality: 'high' },
+      });
+    };
+    const refused = await finalize(token);
+    expect(refused.statusCode).toBe(403);
+
+    const res = await finalize(bossToken);
+    expect(res.statusCode).toBe(201);
+    const created = res.json();
+    expect(created.processing).toBeNull();
+    await t.app.transcoder.idle();
+    const [row] = await t.db.select().from(clips).where(eq(clips.id, created.id));
+    expect(row).toMatchObject({ transcodeState: null, mediaVersion: 0, sizeBytes: created.sizeBytes });
   });
 
   it('keeps the upload when compressing barely helps', async () => {

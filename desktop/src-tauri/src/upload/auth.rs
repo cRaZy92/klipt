@@ -20,6 +20,10 @@ pub struct Auth {
     /// The display name set on the server (None: friends see the username).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// A server admin (may upload without the server's compression). Missing from logins saved
+    /// before this was kept; the account refresh at startup fills it in.
+    #[serde(default)]
+    pub is_admin: bool,
 }
 
 /// Never prints the token, so a stray `{:?}` can't leak it into logs.
@@ -76,6 +80,7 @@ mod tests {
             token: "secret-token".into(),
             username: "u".into(),
             display_name: None,
+            is_admin: false,
         };
         let shown = format!("{a:?}");
         assert!(!shown.contains("secret-token") && shown.contains("<redacted>"), "{shown}");

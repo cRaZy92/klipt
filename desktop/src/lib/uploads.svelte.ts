@@ -143,10 +143,12 @@ export async function uploadInTurn(list: { id: string; title: string }[], visibi
 const taggedFor: Record<string, string[]> = {};
 /** Uploads that replace the video at the clip's link, kept for retries. */
 const replaceFor: Record<string, boolean> = {};
+/** An admin's high-quality uploads, kept for retries. */
+const highQualityFor: Record<string, boolean> = {};
 
 /**
- * Starts (or retries, resuming where it stopped) an upload. `tagged` and `replace` are kept for
- * retries.
+ * Starts (or retries, resuming where it stopped) an upload. `tagged`, `replace` and
+ * `highQuality` are kept for retries.
  */
 export async function startUpload(
   id: string,
@@ -155,14 +157,16 @@ export async function startUpload(
   tagged?: string[],
   replace?: boolean,
   more = false,
+  highQuality?: boolean,
 ) {
   stoppedByLogout.delete(id);
   requested[id] = { title, visibility };
   if (tagged) taggedFor[id] = tagged;
   if (replace !== undefined) replaceFor[id] = replace;
+  if (highQuality !== undefined) highQualityFor[id] = highQuality;
   const previous = uploads[id];
   try {
-    await api.uploadClip(id, title, visibility, taggedFor[id] ?? [], replaceFor[id] ?? false, more);
+    await api.uploadClip(id, title, visibility, taggedFor[id] ?? [], replaceFor[id] ?? false, more, highQualityFor[id] ?? false);
   } catch (e) {
     // "Already uploading" means the core is still on it: leave what's shown alone; its
     // progress events keep updating the card.

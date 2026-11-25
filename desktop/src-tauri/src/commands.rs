@@ -28,7 +28,7 @@ use crate::recorder::{AudioDevice, Display, RecordConfig, SupervisorHandle};
 use crate::settings::{Effects, FieldError, Settings};
 use crate::state::AppState;
 use crate::upload::auth::{self, Auth};
-use crate::upload::{tus, ApiClient, ApiError, FinalizeRequest, Me, Visibility};
+use crate::upload::{tus, ApiClient, ApiError, FinalizeRequest, Me, UploadQuality, Visibility};
 
 /// Upload events the UI listens to.
 pub mod events {
@@ -404,6 +404,8 @@ pub struct Account {
     pub display_name: String,
     /// The display name as set (None: not set).
     pub custom_name: Option<String>,
+    /// A server admin: may upload in high quality (kept as uploaded).
+    pub is_admin: bool,
 }
 
 impl Account {
@@ -413,6 +415,7 @@ impl Account {
             username: a.username.clone(),
             display_name: a.display_name.clone().unwrap_or_else(|| a.username.clone()),
             custom_name: a.display_name.clone(),
+            is_admin: a.is_admin,
         }
     }
 }
@@ -452,9 +455,9 @@ pub async fn login(app: AppHandle, server_url: String, username: String, passwor
     let base = normalize_server_url(&server_url)?;
     let client = ApiClient::new(&base).map_err(|_| AppError::InvalidServerAddress)?;
     let session = client.login(username.trim(), &password, &device_name()).await.map_err(login_error)?;
-    let Me { username, custom_name, .. } = session.me;
+    let Me { username, custom_name, is_admin, .. } = session.me;
     let state = app.state::<AppState>();
-    let saved = Auth { server_url: base.clone(), token: session.token, username, display_name: custom_name };
+    let saved = Auth { server_url: base.clone(), token: session.token, username, display_name: custom_name, is_admin };
     auth::save(&state.data_dir, &saved)?;
     crate::account::report_device(&app, &saved);
     // The same lock as Settings saves, and the change made to the current settings, so a save
@@ -685,6 +688,8 @@ pub(crate) struct Job {
     cache_dir: PathBuf,
     /// The window has more clips queued after this one (a bulk upload): no notice of its own.
     more: bool,
+    /// Encoded with less loss and kept as uploaded by the server (admins only).
+    high_quality: bool,
 }
 
 /// Starts uploading a clip: export (trim + mix), resumable upload, finalize. Returns once the
@@ -698,8 +703,10 @@ pub async fn upload_clip(
     tagged: Option<Vec<String>>,
     replace: Option<bool>,
     more: Option<bool>,
+    high_quality: Option<bool>,
 ) -> Result<()> {
-    off_main(move || start_upload(app, id, title, visibility, tagged, replace, more.unwrap_or(false))).await?
+    let high_quality = high_quality.unwrap_or(false);
+    off_main(move || start_upload(app, id, title, visibility, tagged, replace, more.unwrap_or(false), high_quality)).await?
 }
 
 fn start_upload(
@@ -710,8 +717,9 @@ fn start_upload(
     tagged: Option<Vec<String>>,
     replace: Option<bool>,
     more: bool,
+    high_quality: bool,
 ) -> Result<()> {
-    let (mut job, guard) = prepare_upload(&app, &id, &title, visibility, tagged, replace)?;
+    let (mut job, guard) = prepare_upload(&app, &id, &title, visibility, tagged, replace, high_quality)?;
     job.more = more;
     tauri::async_runtime::spawn(run_job(app, job, guard));
     Ok(())
@@ -732,6 +740,7 @@ pub(crate) fn prepare_upload(
     visibility: Visibility,
     tagged: Option<Vec<String>>,
     replace: Option<bool>,
+    high_quality: bool,
 ) -> Result<(Job, UploadGuard)> {
     let state = app.state::<AppState>();
     let uploads = app.state::<Uploads>();
@@ -744,6 +753,8 @@ pub(crate) fn prepare_upload(
     }
     let tools = state.tools.clone().ok_or(AppError::ToolsMissing)?;
     let auth = auth::load(&state.data_dir).ok_or(AppError::Unauthorized)?;
+    // The server refuses it from anyone else; the saved flag may be stale, so that's the check.
+    let high_quality = high_quality && clip.kind == crate::library::ClipKind::Clip;
     let cache_dir = cache_dir(app)?;
     let guard = uploads.try_begin(id)?;
     let pending = crate::library::PendingUpload {
@@ -753,6 +764,7 @@ pub(crate) fn prepare_upload(
         tagged: tagged.clone(),
         replace: replace.unwrap_or(false),
         queued_at_ms: now_ms(),
+        high_quality,
     };
     if let Err(e) = lock(&state.library).add_pending_upload(&pending) {
         crate::elog!("klipt: can't remember the upload of clip {id}: {e}");
@@ -763,7 +775,7 @@ pub(crate) fn prepare_upload(
     } else {
         None
     };
-    let job = Job { clip, title, visibility, tagged, replaces, auth, tools, data_dir: state.data_dir.clone(), cache_dir, more: false };
+    let job = Job { clip, title, visibility, tagged, replaces, auth, tools, data_dir: state.data_dir.clone(), cache_dir, more: false, high_quality };
     Ok((job, guard))
 }
 
@@ -935,8 +947,9 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
         let (tools, input, cache_dir) = (job.tools.clone(), clip.path.clone(), job.cache_dir.clone());
         let (clip_id, tracks, export_app) = (clip.id.clone(), export::Tracks::of(clip), app.clone());
         let edit = editor::current_edit(clip);
+        let quality = if job.high_quality { export::Quality::High } else { export::Quality::Standard };
         tauri::async_runtime::spawn_blocking(move || {
-            export::export(&tools, &input, &cache_dir, &clip_id, &edit, tracks, |p| {
+            export::export(&tools, &input, &cache_dir, &clip_id, &edit, tracks, quality, |p| {
                 progress(&export_app, &clip_id, "exporting", (p * 1000.0) as u64, 1000);
             })
         })
@@ -965,6 +978,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
         thumbnail_ms: if screenshot { None } else { upload_thumbnail_ms(clip) },
         tagged: job.tagged.clone(),
         replaces: job.replaces.clone(),
+        quality: if job.high_quality { UploadQuality::High } else { UploadQuality::Standard },
     };
     let server_clip = client.finalize(token, &request).await?;
     let replaced = job.replaces.as_deref() == Some(server_clip.id.as_str());
@@ -1373,7 +1387,7 @@ pub async fn export_copy(
     crate::library::validate_audio_ranges(&edit.audio, clip.duration_ms)?;
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, export::Tracks::of(&clip), |p| {
+        let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, export::Tracks::of(&clip), export::Quality::Standard, |p| {
             emit(&worker_app, events::EXPORT_PROGRESS, ExportProgressEvent { id: &id, progress: p });
         })?;
         editor::move_file(&staged, &dest_path)
@@ -1668,7 +1682,7 @@ mod tests {
     #[test]
     fn a_dead_token_clears_only_its_own_login() {
         let dir = tempfile::tempdir().unwrap();
-        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into(), display_name: None };
+        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into(), display_name: None, is_admin: false };
         assert!(!clear_auth_if_current(dir.path(), "old").unwrap(), "nothing saved: nothing to clear");
 
         // The user already logged in again: an old upload's 401 leaves the new login alone.

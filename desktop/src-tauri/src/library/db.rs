@@ -97,6 +97,9 @@ const MIGRATIONS: &[&str] = &["
         replace    INTEGER NOT NULL DEFAULT 0,
         queued_at  INTEGER NOT NULL
     );
+", "
+    -- An admin's upload in high quality: encoded with less loss, not compressed by the server.
+    ALTER TABLE pending_uploads ADD COLUMN high_quality INTEGER NOT NULL DEFAULT 0;
 "];
 
 /// Queries that select more after these read them from index 33 on.
@@ -510,11 +513,11 @@ impl Library {
             crate::upload::Visibility::Link => "link",
         };
         self.conn.execute(
-            "INSERT INTO pending_uploads (clip_id, title, visibility, tagged, replace, queued_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO pending_uploads (clip_id, title, visibility, tagged, replace, queued_at, high_quality)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(clip_id) DO UPDATE SET title = excluded.title, visibility = excluded.visibility,
-                 tagged = excluded.tagged, replace = excluded.replace",
-            params![p.clip_id, p.title, visibility, serde_json::to_string(&p.tagged)?, p.replace, p.queued_at_ms],
+                 tagged = excluded.tagged, replace = excluded.replace, high_quality = excluded.high_quality",
+            params![p.clip_id, p.title, visibility, serde_json::to_string(&p.tagged)?, p.replace, p.queued_at_ms, p.high_quality],
         )?;
         Ok(())
     }
@@ -532,17 +535,20 @@ impl Library {
     /// Unfinished uploads, oldest first.
     pub fn pending_uploads(&self) -> Result<Vec<PendingUpload>> {
         let mut stmt = self.conn.prepare(
-            "SELECT clip_id, title, visibility, tagged, replace, queued_at FROM pending_uploads ORDER BY queued_at, clip_id",
+            "SELECT clip_id, title, visibility, tagged, replace, queued_at, high_quality FROM pending_uploads ORDER BY queued_at, clip_id",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, bool>(4)?, row.get::<_, i64>(5)?))
+            Ok((
+                (row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?),
+                (row.get::<_, bool>(4)?, row.get::<_, i64>(5)?, row.get::<_, bool>(6)?),
+            ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (clip_id, title, visibility, tagged, replace, queued_at_ms) = row?;
+            let ((clip_id, title, visibility, tagged), (replace, queued_at_ms, high_quality)) = row?;
             let visibility = if visibility == "feed" { crate::upload::Visibility::Feed } else { crate::upload::Visibility::Link };
             let tagged = serde_json::from_str(&tagged).unwrap_or_default();
-            out.push(PendingUpload { clip_id, title, visibility, tagged, replace, queued_at_ms });
+            out.push(PendingUpload { clip_id, title, visibility, tagged, replace, queued_at_ms, high_quality });
         }
         Ok(out)
     }
@@ -901,6 +907,7 @@ mod tests {
             tagged: vec!["sam".into()],
             replace: true,
             queued_at_ms: at,
+            high_quality: true,
         }
     }
 

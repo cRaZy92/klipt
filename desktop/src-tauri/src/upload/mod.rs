@@ -8,5 +8,5 @@ pub mod tus;
 #[cfg(test)]
 mod tests;
 
-pub use api::{ApiClient, ApiError, FinalizeOptions, FinalizeRequest, Me, ServerClip, Session, Visibility};
+pub use api::{ApiClient, ApiError, FinalizeOptions, FinalizeRequest, Me, ServerClip, Session, UploadQuality, Visibility};
 pub use tus::{UploadError, UploadOutcome};

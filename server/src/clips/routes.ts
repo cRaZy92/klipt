@@ -93,6 +93,11 @@ const finalizeBody = z.object({
    * date. Its tags stay unless `tagged` is sent.
    */
   replaces: z.string().regex(/^[A-Za-z0-9_-]{12}$/).optional(),
+  /**
+   * `high` (admins only): the video is kept as uploaded, never compressed, for edits and
+   * compilations that the usual compression would make blocky.
+   */
+  quality: z.enum(['standard', 'high']).optional(),
 });
 
 /**
@@ -282,6 +287,10 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
     const body = parsed.data;
     const user = req.user!;
+    const highQuality = body.quality === 'high';
+    if (highQuality && !user.isAdmin) {
+      return reply.code(403).send({ error: 'forbidden', message: 'Only admins can upload in high quality.' });
+    }
 
     const ownedUpload = async () => {
       const [row] = await db
@@ -397,7 +406,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         title: body.title,
         gameName: body.gameName ?? null,
         steamAppId: body.steamAppId ?? null,
-        transcodeState: !image && config.transcode.enabled ? ('queued' as const) : null,
+        transcodeState: !image && !highQuality && config.transcode.enabled ? ('queued' as const) : null,
         durationMs: info.durationMs,
         width: info.width,
         height: info.height,

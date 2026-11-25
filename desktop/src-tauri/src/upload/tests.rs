@@ -63,6 +63,7 @@ fn req() -> FinalizeRequest {
         thumbnail_ms: None,
         tagged: Vec::new(),
         replaces: None,
+        quality: UploadQuality::Standard,
     }
 }
 
@@ -381,6 +382,7 @@ fn auth_round_trips_and_clears() {
         token: "t".into(),
         username: "adam".into(),
         display_name: None,
+        is_admin: false,
     };
     auth::save(dir.path(), &a).unwrap();
     auth::save(dir.path(), &a).unwrap(); // overwrite works
@@ -397,7 +399,7 @@ fn auth_round_trips_and_clears() {
 fn auth_file_is_private() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    let a = Auth { server_url: "u".into(), token: "t".into(), username: "n".into(), display_name: None };
+    let a = Auth { server_url: "u".into(), token: "t".into(), username: "n".into(), display_name: None, is_admin: false };
     auth::save(dir.path(), &a).unwrap();
     let mode = std::fs::metadata(dir.path().join("auth.json")).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
@@ -468,4 +470,12 @@ async fn failures_that_still_advance_the_upload_do_not_use_up_the_retries() {
     // 10 failing PATCHes (20 bytes / 2) is more than the 5 backoff steps; it must still finish.
     let out = tus::upload_with(&client, "tok", &f, None, |_, _| {}, |_, _| {}, &fast(32)).await.unwrap();
     assert_eq!(out.upload_id, "up1");
+}
+
+#[test]
+fn finalize_sends_quality_only_when_high() {
+    let standard = serde_json::to_value(req()).unwrap();
+    assert!(standard.get("quality").is_none(), "older servers never see it");
+    let high = serde_json::to_value(FinalizeRequest { quality: UploadQuality::High, ..req() }).unwrap();
+    assert_eq!(high["quality"], "high");
 }

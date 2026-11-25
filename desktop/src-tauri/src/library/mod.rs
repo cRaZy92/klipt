@@ -244,4 +244,6 @@ pub struct PendingUpload {
     pub replace: bool,
     /// Unix ms when it was first queued.
     pub queued_at_ms: i64,
+    /// An admin's high-quality upload (see `commands::upload_clip`).
+    pub high_quality: bool,
 }

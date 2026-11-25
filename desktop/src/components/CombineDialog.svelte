@@ -113,7 +113,7 @@
         </ol>
       </div>
       <p class="muted small">
-        Each clip goes in with its trim, cuts, zooms, subtitles and volumes. The result is a new clip in My clips; these
+        Each clip goes in with its trim, cuts, zooms, blurred parts, subtitles and volumes. The result is a new clip in My clips; these
         clips stay as they are.
       </p>
       {#if error}<p class="error" role="alert">{error}</p>{/if}

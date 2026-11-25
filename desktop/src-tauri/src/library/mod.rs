@@ -1,7 +1,7 @@
 //! The local clip library: one SQLite row per saved clip, plus generated thumbnails.
 
 mod db;
-pub use db::{validate_audio_ranges, validate_cuts, validate_edit, validate_subtitles, validate_zooms};
+pub use db::{validate_audio_ranges, validate_blurs, validate_cuts, validate_edit, validate_subtitles, validate_zooms};
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -93,6 +93,8 @@ pub struct Clip {
     pub removed_ranges: Vec<CutRange>,
     /// Zooms set in the editor (ms into the video file), sorted, never overlapping.
     pub zoom_ranges: Vec<ZoomRange>,
+    /// Parts of the picture blurred in the editor (ms into the video file), sorted, never overlapping.
+    pub blur_ranges: Vec<BlurRange>,
     /// Subtitles typed in the editor (ms into the video file), sorted, never overlapping.
     pub subtitles: Vec<SubtitleRange>,
     /// Parts of audio tracks muted or turned down in the editor (ms into the video file), sorted
@@ -126,6 +128,18 @@ pub struct ZoomRange {
     pub zoom: f32,
     pub x: f32,
     pub y: f32,
+}
+
+/// The shortest a blurred part can be.
+pub const MIN_BLUR_MS: u64 = 300;
+
+/// A part of the clip whose picture is blurred: during `start_ms..end_ms` (into the video file)
+/// uploads and exports blur the whole picture, as "Blur video" does for the whole clip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlurRange {
+    pub start_ms: u64,
+    pub end_ms: u64,
 }
 
 /// The shortest a subtitle can be.

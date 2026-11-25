@@ -34,7 +34,8 @@
   } from "../lib/cuts";
   import { formatTenths, stepMs } from "../lib/timecode";
   import { addZoomAt, removeZoom, sameZooms, setZoomBox, zoomAt, zoomIndexAt } from "../lib/zoom";
-  import type { AudioRange, SubtitleRange, ZoomRange } from "../lib/api";
+  import { addBlurAt, blurIndexAt, removeBlur, sameBlurs } from "../lib/blur";
+  import type { AudioRange, BlurRange, SubtitleRange, ZoomRange } from "../lib/api";
   import { addPart, nextLevel, removePart, sameParts, setPartLevel } from "../lib/audioParts";
   import {
     MAX_SUBTITLE_CHARS,
@@ -114,6 +115,10 @@
   let zooms = $state<ZoomRange[]>([]);
   /** The zoom picked on the Zoom lane: its box can be placed on the video. */
   let selectedZoom = $state<number | null>(null);
+  /** The blurred parts (sorted, never overlapping), in ms into the file. */
+  let blurs = $state<BlurRange[]>([]);
+  /** The blurred part picked on the Blur lane. */
+  let selectedBlur = $state<number | null>(null);
   /** The subtitles (sorted, never overlapping), in ms into the file. */
   let subtitles = $state<SubtitleRange[]>([]);
   /** The subtitle picked on the Subtitles lane. */
@@ -132,14 +137,14 @@
 
   let video = $state<HTMLVideoElement>();
 
-  // The preview of "Blur video": as strong as the export's blur (sigma 8 at up to 720p, see
-  // export.rs), scaled to the size the picture is shown at.
+  // The preview of "Blur video" and of the blurred parts: as strong as the export's blur (sigma 8
+  // at up to 720p, see export.rs), scaled to the size the picture is shown at.
   const BLUR_SIGMA = 8;
   let stageWidth = $state(0);
   let stageHeight = $state(0);
   let videoSize = $state<{ width: number; height: number } | null>(null);
   const previewBlur = $derived.by(() => {
-    if (!blurVideo || !videoSize || !stageWidth || !stageHeight) return undefined;
+    if (!(blurVideo || blurIndexAt(blurs, position) >= 0) || !videoSize || !stageWidth || !stageHeight) return undefined;
     const shown = Math.min(stageHeight, (stageWidth * videoSize.height) / videoSize.width);
     return `blur(${((BLUR_SIGMA * shown) / Math.min(720, videoSize.height)).toFixed(1)}px)`;
   });
@@ -256,6 +261,7 @@
       blurVideo,
       removedRanges: removedRanges(pieces, trim),
       zoomRanges: zooms.map((z) => ({ startMs: z.startMs, endMs: z.endMs, zoom: z.zoom, x: z.x, y: z.y })),
+      blurRanges: blurs.map((b) => ({ startMs: b.startMs, endMs: b.endMs })),
       subtitles: savedSubtitles(subtitles),
       audioRanges: audioParts.map((p) => ({ track: p.track, startMs: p.startMs, endMs: p.endMs, level: p.level })),
     };
@@ -281,6 +287,7 @@
         edit.blurVideo !== stored.blurVideo ||
         !sameRanges(edit.removedRanges, stored.removedRanges) ||
         !sameZooms(edit.zoomRanges, stored.zoomRanges) ||
+        !sameBlurs(edit.blurRanges, stored.blurRanges) ||
         !sameSubtitles(edit.subtitles, stored.subtitles) ||
         !sameParts(edit.audioRanges, stored.audioRanges) ||
         savedThumb !== storedThumb),
@@ -297,6 +304,7 @@
     extraVolumes: Record<number, number>;
     blurVideo: boolean;
     zooms: ZoomRange[];
+    blurs: BlurRange[];
     subtitles: SubtitleRange[];
     audioParts: AudioRange[];
     thumb: number | null;
@@ -312,6 +320,7 @@
     extraVolumes: { ...extraVolumes },
     blurVideo,
     zooms: zooms.map((z) => ({ ...z })),
+    blurs: blurs.map((b) => ({ ...b })),
     subtitles: subtitles.map((t) => ({ ...t })),
     audioParts: audioParts.map((p) => ({ ...p })),
     thumb,
@@ -323,7 +332,7 @@
    * A drag on the timeline or a volume slider in progress: its changes become one undo step,
    * recorded when it ends (so a drag that rests is still one step).
    */
-  const gestures = new Gestures<"scrub" | "slider" | "zoom" | "subtitle" | "subtitleText" | "part">(() => history?.record(editState));
+  const gestures = new Gestures<"scrub" | "slider" | "zoom" | "blur" | "subtitle" | "subtitleText" | "part">(() => history?.record(editState));
 
   function applyState(s: EditState) {
     trim = s.trim;
@@ -336,6 +345,8 @@
     blurVideo = s.blurVideo;
     zooms = s.zooms;
     if (selectedZoom !== null && selectedZoom >= zooms.length) selectedZoom = null;
+    blurs = s.blurs;
+    if (selectedBlur !== null && selectedBlur >= blurs.length) selectedBlur = null;
     subtitles = s.subtitles;
     if (selectedSubtitle !== null && selectedSubtitle >= subtitles.length) selectedSubtitle = null;
     editingSubtitle = null;
@@ -426,6 +437,7 @@
       extraVolumes = Object.fromEntries(d.extraTracks.map((t) => [t.index, percent(d.clip.extraVolumes?.[t.index] ?? 1)]));
       blurVideo = d.clip.blurVideo ?? false;
       zooms = d.clip.zoomRanges ?? [];
+      blurs = d.clip.blurRanges ?? [];
       subtitles = d.clip.subtitles ?? [];
       audioParts = d.clip.audioRanges ?? [];
       thumb = d.clip.thumbnailMs;
@@ -997,8 +1009,36 @@
     }
     zooms = next;
     selectedZoom = zoomIndexAt(next, Math.round(position));
+    selectedBlur = null;
     selectedSubtitle = null;
     selectedPart = null;
+  }
+
+  /** Blurs a part of the picture from the playhead, picked. */
+  function blurHere() {
+    if (editLocked) return;
+    const next = addBlurAt(blurs, position, trim);
+    if (!next) {
+      toast("Can't blur here: inside another blurred part, too close to the next one, or outside the trim", "error");
+      return;
+    }
+    blurs = next;
+    selectBlur(blurIndexAt(next, Math.round(position)));
+  }
+
+  function selectBlur(i: number | null) {
+    selectedBlur = i;
+    if (i !== null) {
+      selectedZoom = null;
+      selectedSubtitle = null;
+      selectedPart = null;
+    }
+  }
+
+  function removeBlurAt(i: number) {
+    if (editLocked) return;
+    blurs = removeBlur(blurs, i);
+    selectedBlur = null;
   }
 
   /** Adds a subtitle at the playhead and opens its text box. */
@@ -1017,6 +1057,7 @@
     const i = subtitleIndexAt(next, Math.round(position));
     selectedSubtitle = i;
     selectedZoom = null;
+    selectedBlur = null;
     selectedPart = null;
     editingSubtitle = i;
   }
@@ -1029,6 +1070,7 @@
     gestures.start("subtitleText");
     selectedSubtitle = i;
     selectedZoom = null;
+    selectedBlur = null;
     selectedPart = null;
     editingSubtitle = i;
     seek(subtitles[i].startMs);
@@ -1099,6 +1141,7 @@
     selectedPart = i;
     if (i !== null) {
       selectedZoom = null;
+      selectedBlur = null;
       selectedSubtitle = null;
     }
   }
@@ -1154,10 +1197,12 @@
     else if (action.kind === "split") splitHere();
     else if (action.kind === "zoom") zoomHere();
     else if (action.kind === "subtitle") subtitleHere();
+    else if (action.kind === "blur") blurHere();
     else if (action.kind === "mark") markHere(action.end);
     else if (action.kind === "timelineZoom") zoomTimeline(action.direction);
     else if (action.kind === "delete") {
       if (selectedZoom !== null) removeZoomAt(selectedZoom);
+      else if (selectedBlur !== null) removeBlurAt(selectedBlur);
       else if (selectedSubtitle !== null) removeSubtitleAt(selectedSubtitle);
       else if (selectedPart !== null) removePartAt(selectedPart);
     }
@@ -1195,6 +1240,7 @@
         blurVideo: next.blurVideo,
         removedRanges: next.removedRanges,
         zoomRanges: next.zoomRanges,
+        blurRanges: next.blurRanges,
         subtitles: next.subtitles,
         uploadId: null,
         uploadOffset: null,
@@ -1599,6 +1645,14 @@
         >
           <Icon name="subtitles" size={15} /> Subtitle
         </button>
+        <button
+          class="btn btn-sm"
+          onclick={blurHere}
+          disabled={mediaError || editLocked}
+          title="Blur the picture from the playhead (B), then drag the part on the Blur lane"
+        >
+          <Icon name="eye" size={15} /> Blur
+        </button>
         </div>
         <label class="master" title="The whole clip: every track together">
           <Icon name="volume" size={17} />
@@ -1640,6 +1694,7 @@
         onzoomselect={(i) => {
           selectedZoom = i;
           if (i !== null) {
+            selectedBlur = null;
             selectedSubtitle = null;
             selectedPart = null;
           }
@@ -1649,12 +1704,21 @@
         }}
         {onzoomgesture}
         onzoomremove={removeZoomAt}
+        {blurs}
+        {selectedBlur}
+        onblurselect={selectBlur}
+        onblurchange={(next) => {
+          if (!editLocked) blurs = next;
+        }}
+        onblurgesture={(active) => (active ? gestures.start("blur") : gestures.end("blur"))}
+        onblurremove={removeBlurAt}
         {subtitles}
         {selectedSubtitle}
         onsubtitleselect={(i) => {
           selectedSubtitle = i;
           if (i !== null) {
             selectedZoom = null;
+            selectedBlur = null;
             selectedPart = null;
           }
         }}
@@ -1703,6 +1767,7 @@
         <span><kbd>S</kbd> split</span>
         <span><kbd>Z</kbd> zoom</span>
         <span><kbd>T</kbd> subtitle</span>
+        <span><kbd>B</kbd> blur a part</span>
         <span><kbd>Shift</kbd>+drag on a sound lane: mute part of it</span>
         <span><kbd>←</kbd><kbd>→</kbd> one frame</span>
         <span><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> one second</span>
@@ -1728,7 +1793,7 @@
     </form>
     <p class="part-info">
       {formatClock(trim.start)} – {formatClock(trim.end)} · {formatTenths(keptLength(pieces, trim))} long.
-      Its cuts, zooms, subtitles and volumes come along, and the game stays {gameName ?? "unknown"}. This clip
+      Its cuts, zooms, blurred parts, subtitles and volumes come along, and the game stays {gameName ?? "unknown"}. This clip
       stays as it is.
     </p>
     {#snippet footer()}

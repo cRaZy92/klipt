@@ -30,6 +30,9 @@ pub struct Edit {
     pub removed: Vec<crate::library::CutRange>,
     /// Zooms (sorted, never overlapping), in the file's time: the picture eases in and out.
     pub zooms: Vec<crate::library::ZoomRange>,
+    /// Blurred parts (sorted, never overlapping), in the file's time: the whole picture is blurred
+    /// there, as strongly as "Blur video" blurs it.
+    pub blurs: Vec<crate::library::BlurRange>,
     /// Subtitles (sorted, never overlapping), in the file's time: drawn onto the picture.
     pub subtitles: Vec<crate::library::SubtitleRange>,
     /// Parts of audio tracks muted or turned down (sorted by track, then time), in the file's time.
@@ -143,6 +146,33 @@ fn zoom_filter(zooms: &[crate::library::ZoomRange], size: (u32, u32), offset_ms:
     Some(format!("scale=w='{scaled_w}':h='{scaled_h}':eval=frame:flags=bicubic,crop={w}:{h}:x='{x}':y='{y}'"))
 }
 
+/// The `gblur` filter (no labels) that blurs the picture of a `height` px tall video during
+/// `blurs`, or `None` without any. As strong as "Blur video", which blurs at most 720p: the sigma
+/// grows with the height, since the picture isn't scaled down (a video can't change size midway).
+/// `offset_ms` is the file time of the input's `t = 0`.
+fn blur_filter(blurs: &[crate::library::BlurRange], height: u32, offset_ms: u64) -> Option<String> {
+    if blurs.is_empty() {
+        return None;
+    }
+    let t = if offset_ms == 0 { "t".to_string() } else { format!("(t+{})", seconds(offset_ms)) };
+    // The parts never overlap, so at most one term is 1 at a time.
+    let on: Vec<String> =
+        blurs.iter().map(|b| format!("gte({t},{})*lt({t},{})", seconds(b.start_ms), seconds(b.end_ms))).collect();
+    let sigma = BLUR_SIGMA as f32 * height.max(BLUR_MAX_HEIGHT) as f32 / BLUR_MAX_HEIGHT as f32;
+    Some(format!("gblur=sigma={sigma:.1}:enable='{}'", on.join("+")))
+}
+
+/// The blurred parts that show in an export: those overlapping the trim. None while "Blur video"
+/// blurs the whole clip anyway.
+fn visible_blurs(edit: &Edit) -> Vec<crate::library::BlurRange> {
+    if edit.blur_video {
+        return Vec::new();
+    }
+    let start = edit.trim_start_ms.unwrap_or(0);
+    let end = edit.trim_end_ms.unwrap_or(u64::MAX);
+    edit.blurs.iter().filter(|b| b.end_ms > start && b.start_ms < end).copied().collect()
+}
+
 /// The zooms that show in an export: those overlapping the trim.
 fn visible_zooms(edit: &Edit) -> Vec<crate::library::ZoomRange> {
     let start = edit.trim_start_ms.unwrap_or(0);
@@ -152,7 +182,11 @@ fn visible_zooms(edit: &Edit) -> Vec<crate::library::ZoomRange> {
 
 /// Whether an export has to encode the picture (instead of copying it).
 fn reencodes(edit: &Edit) -> bool {
-    edit.blur_video || !edit.removed.is_empty() || !visible_zooms(edit).is_empty() || !subtitle_events(edit).is_empty()
+    edit.blur_video
+        || !edit.removed.is_empty()
+        || !visible_zooms(edit).is_empty()
+        || !visible_blurs(edit).is_empty()
+        || !subtitle_events(edit).is_empty()
 }
 
 /// The subtitles as they show in the export, in the export's time.
@@ -236,12 +270,18 @@ pub fn export_args(
     };
 
     let zooms = visible_zooms(edit);
+    let blurs = visible_blurs(edit);
+    // The timed picture filters: the zooms, then the blurred parts (blurred the same zoomed or not).
+    let timed = |offset_ms: u64| -> Option<String> {
+        let chain: Vec<String> =
+            zoom_filter(&zooms, size, offset_ms).into_iter().chain(blur_filter(&blurs, size.1, offset_ms)).collect();
+        (!chain.is_empty()).then(|| chain.join(","))
+    };
     if !edit.removed.is_empty() {
-        let zoom = zoom_filter(&zooms, size, 0);
-        return Ok(cut_args(input, output, edit, &graph, zoom.as_deref(), subtitles, encoder));
+        return Ok(cut_args(input, output, edit, &graph, timed(0).as_deref(), subtitles, encoder));
     }
-    // `-ss` before `-i` makes the trim start `t = 0`, so the zooms are shifted by it.
-    let zoom = zoom_filter(&zooms, size, start.unwrap_or(0));
+    // `-ss` before `-i` makes the trim start `t = 0`, so the zooms and blurs are shifted by it.
+    let zoom = timed(start.unwrap_or(0));
     let reencode = reencodes(edit);
     let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-y"].map(String::from).into();
     if let Some(start) = start {
@@ -251,8 +291,8 @@ pub fn export_args(
     if let Some(end) = edit.trim_end_ms {
         args.extend(["-to".into(), seconds(end - start.unwrap_or(0))]);
     }
-    // The picture's filters in order: zoom, then blur (so the blur looks the same zoomed or not),
-    // then the subtitles.
+    // The picture's filters in order: zoom and blurred parts, then blur (so the blur looks the same
+    // zoomed or not), then the subtitles.
     let blur = edit.blur_video.then(|| format!("scale=-2:'min({BLUR_MAX_HEIGHT},ih)',gblur=sigma={BLUR_SIGMA}"));
     let video: Vec<String> = zoom.into_iter().chain(blur).chain(subtitles.map(String::from)).collect();
     let graph = if video.is_empty() { graph } else { format!("[0:v:0]{}[vout];{graph}", video.join(",")) };
@@ -275,8 +315,9 @@ pub fn export_args(
 
 /// The arguments for an export with removed parts: every kept part is cut out exactly (`trim`,
 /// `atrim` on the mix), the parts are joined with `concat` and the video is encoded with
-/// `encoder`. `mix` is the audio graph ending in `[aout]`. `zoom` (in the file's time) runs
-/// before the parts are cut out, so a zoom across a removed part plays right on both sides.
+/// `encoder`. `mix` is the audio graph ending in `[aout]`. `zoom` (the zooms and blurred parts,
+/// in the file's time) runs before the parts are cut out, so a zoom across a removed part plays
+/// right on both sides.
 #[allow(clippy::too_many_arguments)]
 fn cut_args(
     input: &Path,
@@ -534,7 +575,7 @@ mod tests {
     }
 
     fn edit(start: Option<u64>, end: Option<u64>) -> Edit {
-        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new(), audio: Vec::new() }
+        Edit { trim_start_ms: start, trim_end_ms: end, game_volume: 1.0, mic_volume: 0.5, voice_volume: 0.25, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), blurs: Vec::new(), subtitles: Vec::new(), audio: Vec::new() }
     }
 
     #[test]
@@ -561,7 +602,7 @@ mod tests {
 
     #[test]
     fn volumes_are_clamped_and_bad_ranges_rejected() {
-        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), subtitles: Vec::new(), audio: Vec::new() };
+        let e = Edit { trim_start_ms: None, trim_end_ms: Some(1500), game_volume: 5.0, mic_volume: -1.0, voice_volume: 1.0, master_volume: 1.0, extra_volumes: BTreeMap::new(), blur_video: false, removed: Vec::new(), zooms: Vec::new(), blurs: Vec::new(), subtitles: Vec::new(), audio: Vec::new() };
         let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &[]).unwrap().join(" ");
         assert!(joined.contains("volume=2[a0]") && joined.contains("volume=0[a1]") && joined.contains("-to 1.500"));
         for (s, e) in [(Some(4000), Some(2000)), (Some(2000), Some(2000)), (None, Some(0))] {
@@ -746,6 +787,59 @@ mod tests {
         let corner = mean_diff(&zoomed, &frame(&src, 2.8, "crop=320:180:320:0"));
         assert!(plain > 15.0, "zoomed at 2.8 s of the file: {plain}");
         assert!(corner < 8.0, "it shows the top-right quarter: {corner}");
+    }
+
+    fn blur(start_ms: u64, end_ms: u64) -> crate::library::BlurRange {
+        crate::library::BlurRange { start_ms, end_ms }
+    }
+
+    #[test]
+    fn blur_filter_blurs_only_its_parts_as_strongly_as_blur_video() {
+        assert!(blur_filter(&[], 1080, 0).is_none());
+        let f = blur_filter(&[blur(1000, 2500), blur(4000, 5000)], 1080, 0).unwrap();
+        assert_eq!(f, "gblur=sigma=12.0:enable='gte(t,1.000)*lt(t,2.500)+gte(t,4.000)*lt(t,5.000)'");
+        // At or below 720p the sigma is Blur video's own; with a trim start the time is shifted.
+        let f = blur_filter(&[blur(5000, 6000)], 480, 4000).unwrap();
+        assert_eq!(f, "gblur=sigma=8.0:enable='gte((t+4.000),5.000)*lt((t+4.000),6.000)'");
+    }
+
+    #[test]
+    fn exporting_a_blurred_part_reencodes_at_full_size() {
+        let enc = ["-c:v", "libx264"];
+        let e = Edit { blurs: vec![blur(1000, 3000)], ..edit(Some(500), None) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &e, &MIC, SIZE, None, &enc).unwrap().join(" ");
+        assert!(joined.contains("[0:v:0]gblur=sigma=12.0:enable='gte((t+0.500),1.000)"), "{joined}");
+        assert!(!joined.contains("min(720,ih)") && joined.contains("-map [vout] -c:v libx264"), "{joined}");
+        // After a zoom, and with cuts in the file's time before the parts are split.
+        let both = Edit { zooms: vec![zoom(1000, 3000, 2.0, 0.5, 0.5)], removed: vec![cut(1500, 2000)], ..e.clone() };
+        let joined = export_args(Path::new("i"), Path::new("o"), &both, &MIC, SIZE, None, &enc).unwrap().join(" ");
+        let (z, b, s) = (joined.find("eval=frame").unwrap(), joined.find("gblur").unwrap(), joined.find(",split=2").unwrap());
+        assert!(z < b && b < s && joined.contains("gte(t,1.000)"), "{joined}");
+        // Blur video blurs everything anyway: no second blur.
+        let whole = Edit { blur_video: true, ..e.clone() };
+        let joined = export_args(Path::new("i"), Path::new("o"), &whole, &MIC, SIZE, None, &enc).unwrap().join(" ");
+        assert_eq!(joined.matches("gblur").count(), 1, "{joined}");
+        assert!(joined.contains("min(720,ih)"), "{joined}");
+        // A blurred part outside the trim doesn't show, so the picture is still copied.
+        let outside = Edit { blurs: vec![blur(5000, 6000)], ..edit(Some(1000), Some(4000)) };
+        let joined = export_args(Path::new("i"), Path::new("o"), &outside, &MIC, SIZE, None, &[]).unwrap().join(" ");
+        assert!(joined.contains("-c:v copy") && !joined.contains("gblur"), "{joined}");
+    }
+
+    #[test]
+    fn a_blurred_part_blurs_only_that_moment() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = pattern_clip(dir.path(), "src.mp4", (640, 360), 4);
+        // Blurred from 2.0 s to 3.0 s of the file; the trim starts at 1 s.
+        let e = Edit { blurs: vec![blur(2000, 3000)], ..edit(Some(1000), None) };
+        let out = export(&tools(), &src, dir.path(), "blur", &e, Tracks::default(), Quality::Standard, |_| {}).unwrap();
+        assert_eq!((probe(&tools(), &out).unwrap().width, probe(&tools(), &out).unwrap().height), (640, 360));
+        let sharp = |at: f32| mean_diff(&frame(&out, at - 1.0, ""), &frame(&src, at, ""));
+        let blurred = |at: f32| mean_diff(&frame(&out, at - 1.0, ""), &frame(&src, at, "gblur=sigma=8"));
+        assert!(sharp(1.5) < 6.0, "before the part it is sharp: {}", sharp(1.5));
+        assert!(sharp(2.5) > blurred(2.5), "inside it is blurred: {} vs {}", sharp(2.5), blurred(2.5));
+        assert!(blurred(2.5) < 6.0, "as blurred as Blur video: {}", blurred(2.5));
+        assert!(sharp(3.5) < 6.0, "after the part it is sharp again: {}", sharp(3.5));
     }
 
     fn sub(start_ms: u64, end_ms: u64, text: &str) -> crate::library::SubtitleRange {

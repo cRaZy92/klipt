@@ -1,4 +1,4 @@
-// Moving and resizing timed blocks on a lane (zooms, subtitles): sorted, never overlapping, kept
+// Moving and resizing timed blocks on a lane (zooms, blurred parts, subtitles): sorted, never overlapping, kept
 // between their neighbours and the trim.
 
 import type { TrimRange } from "./trim";

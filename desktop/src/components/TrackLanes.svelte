@@ -21,10 +21,11 @@
   } from "../lib/timelineView";
   import { windowPeaks } from "../lib/waveform";
   import { edgeScroller, edgeSpeed } from "../lib/edgeScroll";
-  import type { AudioRange, SubtitleRange, ZoomRange } from "../lib/api";
+  import type { AudioRange, BlurRange, SubtitleRange, ZoomRange } from "../lib/api";
   import { addPart, levelLabel, movePart, MIN_AUDIO_PART_MS, partsOn, resizePart, spanPart } from "../lib/audioParts";
   import { moveZoom, rampMs, resizeZoom } from "../lib/zoom";
   import { moveSubtitle, resizeSubtitle } from "../lib/subtitles";
+  import { moveBlur, resizeBlur } from "../lib/blur";
   import Icon from "./Icon.svelte";
 
   interface LaneTrack {
@@ -63,6 +64,12 @@
     onzoomchange,
     onzoomgesture,
     onzoomremove,
+    blurs,
+    selectedBlur,
+    onblurselect,
+    onblurchange,
+    onblurgesture,
+    onblurremove,
     subtitles,
     selectedSubtitle,
     onsubtitleselect,
@@ -114,6 +121,15 @@
     /** A drag of a zoom started (true) or ended (false): one drag is one undo step. */
     onzoomgesture: (active: boolean) => void;
     onzoomremove: (i: number) => void;
+    /** The blurred parts, sorted, in ms into the file. */
+    blurs: BlurRange[];
+    /** The picked blurred part's index, or null. */
+    selectedBlur: number | null;
+    onblurselect: (i: number | null) => void;
+    onblurchange: (blurs: BlurRange[]) => void;
+    /** A drag of a blurred part started (true) or ended (false): one drag is one undo step. */
+    onblurgesture: (active: boolean) => void;
+    onblurremove: (i: number) => void;
     /** The subtitles, sorted, in ms into the file. */
     subtitles: SubtitleRange[];
     /** The picked subtitle's index, or null. */
@@ -157,8 +173,8 @@
   const zoomed = $derived(isZoomed(view, duration));
   /** Where `ms` is on the lanes, in percent (outside 0–100 when off screen). */
   const pct = (ms: number) => viewPct(ms, view);
-  /** The Zoom and Subtitles rows show only while they have something on them. */
-  const extraRows = $derived((zooms.length > 0 ? 1 : 0) + (subtitles.length > 0 ? 1 : 0));
+  /** The Zoom, Blur and Subtitles rows show only while they have something on them. */
+  const extraRows = $derived((zooms.length > 0 ? 1 : 0) + (blurs.length > 0 ? 1 : 0) + (subtitles.length > 0 ? 1 : 0));
   /**
    * Ruler, video, zoom and subtitles (when used), one row per track, and the scrollbar while
    * zoomed in: the playhead spans the rows from zoom to the last track.
@@ -299,6 +315,61 @@
       e.stopPropagation();
       onzoomselect(i);
       onseek(zooms[i].startMs + rampMs(zooms[i]));
+    }
+  }
+
+  /** A blurred part being dragged on the Blur lane: its body (moves it) or one edge (resizes it). */
+  let blurDrag: { i: number; what: "move" | "start" | "end"; offset: number } | null = $state(null);
+
+  function blurDown(e: PointerEvent, i: number) {
+    if (e.button !== 0) return;
+    onlanedown?.();
+    e.preventDefault();
+    e.stopPropagation();
+    const block = e.currentTarget as HTMLElement;
+    const area = block.parentElement as HTMLElement;
+    const b = blurs[i];
+    onblurselect(i);
+    onseek(b.startMs);
+    if (locked) return;
+    const what = grabbed(block, e.clientX);
+    block.setPointerCapture(e.pointerId);
+    blurDrag = { i, what, offset: msAt(e, area) - b.startMs };
+    startDrag(area, e, (ev) => blurTo(ev, area));
+    onblurgesture(true);
+  }
+
+  function blurMove(e: PointerEvent) {
+    if (!blurDrag) return;
+    if (edgeDrag) edgeDrag.e = e;
+    blurTo(e, (e.currentTarget as HTMLElement).parentElement as HTMLElement);
+  }
+
+  /** The dragged blurred part follows a pointer at `e` on `area`. */
+  function blurTo(e: PointerEvent, area: HTMLElement) {
+    if (!blurDrag) return;
+    const ms = msAt(e, area);
+    const { i, what } = blurDrag;
+    const next = what === "move" ? moveBlur(blurs, i, ms - blurDrag.offset, trim) : resizeBlur(blurs, i, what, ms, trim);
+    if (next !== blurs) onblurchange(next);
+  }
+
+  function blurUp() {
+    if (!blurDrag) return;
+    const { i, what } = blurDrag;
+    blurDrag = null;
+    endDrag();
+    onblurgesture(false);
+    const b = blurs[i];
+    if (b) onseek(what === "end" ? Math.max(b.startMs, b.endMs - 1) : b.startMs);
+  }
+
+  function blurKey(e: KeyboardEvent, i: number) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      onblurselect(i);
+      onseek(blurs[i].startMs);
     }
   }
 
@@ -632,7 +703,7 @@
       class:on={blur}
       aria-pressed={blur}
       disabled={locked}
-      title="For clips where only the sound matters: uploads and exports blur the picture"
+      title="For clips where only the sound matters: uploads and exports blur the whole picture (to blur just a part, use Blur under the player or B)"
       onclick={() => onblur(!blur)}
     >
       <Icon name="eye" size={14} /> Blur
@@ -701,6 +772,76 @@
               onclick={(e) => {
                 e.stopPropagation();
                 onzoomremove(i);
+              }}
+            >
+              <Icon name="close" size={11} />
+            </button>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  </div>
+
+  {/if}
+
+  {#if blurs.length > 0}
+  <div class="label zoom-label">
+    <span class="name">Blur</span>
+  </div>
+  <div class="lane zoom">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="area"
+      onpointerdown={(e) => {
+        onlanedown?.();
+        onblurselect(null);
+        grab(e);
+      }}
+      onpointermove={move}
+      onpointerup={release}
+      onpointercancel={release}
+      onlostpointercapture={release}
+    >
+      {#each shading.dims as d, i (i)}
+        <div class="dim" style:left="{d.left}%" style:width="{d.width}%"></div>
+      {/each}
+      {#each blurs as b, i (i)}
+        {@const fit = layoutOf(b.startMs, b.endMs)}
+        <!-- A pointer target for placing the blurred part in time; Enter picks it from the keyboard. -->
+        <div
+          class="zoom-block blur-block"
+          class:compact={!fit.showText}
+          class:selected={selectedBlur === i}
+          class:moving={blurDrag?.i === i && blurDrag.what === "move"}
+          class:resizing={blurDrag?.i === i && blurDrag.what !== "move"}
+          role="button"
+          tabindex="0"
+          aria-label="Blurred from {(b.startMs / 1000).toFixed(1)} s to {(b.endMs / 1000).toFixed(1)} s"
+          aria-pressed={selectedBlur === i}
+          title="Drag to move, drag an edge to make it longer or shorter, Delete to remove"
+          style:left="{pct(b.startMs)}%"
+          style:width="{pct(b.endMs) - pct(b.startMs)}%"
+          onpointerdown={(e) => blurDown(e, i)}
+          onpointermove={blurMove}
+          onpointerup={blurUp}
+          onpointercancel={blurUp}
+          onlostpointercapture={blurUp}
+          onkeydown={(e) => blurKey(e, i)}
+        >
+          <span class="zoom-edge start" aria-hidden="true" style:width="{fit.edgePx}px"></span>
+          <span class="zoom-edge end" aria-hidden="true" style:width="{fit.edgePx}px"></span>
+          {#if fit.showText}
+            <span class="zoom-text"><Icon name="eye" size={12} /> Blur</span>
+          {/if}
+          {#if selectedBlur === i && !locked && fit.showRemove}
+            <button
+              class="zoom-remove"
+              aria-label="Remove this blurred part"
+              title="Remove this blurred part (Delete)"
+              onpointerdown={(e) => e.stopPropagation()}
+              onclick={(e) => {
+                e.stopPropagation();
+                onblurremove(i);
               }}
             >
               <Icon name="close" size={11} />

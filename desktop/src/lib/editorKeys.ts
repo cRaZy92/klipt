@@ -23,9 +23,11 @@ export type EditorKeyAction =
   | { kind: "zoom" }
   /** Adds a subtitle at the playhead. */
   | { kind: "subtitle" }
+  /** Blurs a part of the picture from the playhead. */
+  | { kind: "blur" }
   /** Starts (I) or ends (O) the trim at the playhead. */
   | { kind: "mark"; end: "in" | "out" }
-  /** Removes what is picked (the picked zoom or subtitle). */
+  /** Removes what is picked (the picked zoom, blurred part, subtitle or muted part). */
   | { kind: "delete" }
   | { kind: "undo" }
   | { kind: "redo" }
@@ -53,6 +55,7 @@ export function editorKeyAction(e: EditorKey, target: KeyTarget, dialogOpen: boo
   if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "split" };
   if (key === "z" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "zoom" };
   if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "subtitle" };
+  if (key === "b" && !e.ctrlKey && !e.metaKey && !e.altKey) return { kind: "blur" };
   const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
   if (plain && (key === "i" || key === "o")) return { kind: "mark", end: key === "i" ? "in" : "out" };
   if (plain && (e.key === "+" || e.key === "=")) return { kind: "timelineZoom", direction: 1 };

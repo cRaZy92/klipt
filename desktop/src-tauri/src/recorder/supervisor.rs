@@ -1146,6 +1146,7 @@ mod tests {
                 blur_video: false,
                 removed_ranges: Vec::new(),
                 zoom_ranges: Vec::new(),
+                blur_ranges: Vec::new(),
                 subtitles: Vec::new(),
                 audio_ranges: Vec::new(),
             },

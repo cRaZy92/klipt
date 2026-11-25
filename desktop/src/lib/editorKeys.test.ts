@@ -44,6 +44,13 @@ describe("editorKeyAction", () => {
     expect(editorKeyAction(key("t"), "text", false)).toBeNull();
   });
 
+  it("B blurs a part, but not with modifiers or in a text field", () => {
+    expect(editorKeyAction(key("b"), "none", false)).toEqual({ kind: "blur" });
+    expect(editorKeyAction(key("B", { shiftKey: true }), "control", false)).toEqual({ kind: "blur" });
+    expect(editorKeyAction(key("b", { ctrlKey: true }), "none", false)).toBeNull();
+    expect(editorKeyAction(key("b"), "text", false)).toBeNull();
+  });
+
   it("Z zooms; Ctrl+Z still undoes", () => {
     expect(editorKeyAction(key("z"), "none", false)).toEqual({ kind: "zoom" });
     expect(editorKeyAction(key("Z", { shiftKey: true }), "control", false)).toEqual({ kind: "zoom" });

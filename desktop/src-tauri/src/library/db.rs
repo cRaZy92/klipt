@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::{AudioRange, PendingUpload, Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
-use super::{MAX_SUBTITLE_CHARS, MIN_AUDIO_RANGE_MS, MAX_ZOOM, MIN_SUBTITLE_MS, MIN_ZOOM, MIN_ZOOM_MS};
+use super::{AudioRange, BlurRange, PendingUpload, Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
+use super::{MAX_SUBTITLE_CHARS, MIN_AUDIO_RANGE_MS, MAX_ZOOM, MIN_BLUR_MS, MIN_SUBTITLE_MS, MIN_ZOOM, MIN_ZOOM_MS};
 use crate::errors::{AppError, Result};
 
 /// Per-track volume range the editor offers (0–200 %).
@@ -100,13 +100,16 @@ const MIGRATIONS: &[&str] = &["
 ", "
     -- An admin's upload in high quality: encoded with less loss, not compressed by the server.
     ALTER TABLE pending_uploads ADD COLUMN high_quality INTEGER NOT NULL DEFAULT 0;
+", "
+    -- Parts of the picture blurred in the editor: JSON list of {\"startMs\", \"endMs\"} (ms into the file).
+    ALTER TABLE clips ADD COLUMN blur_ranges TEXT NOT NULL DEFAULT '[]';
 "];
 
-/// Queries that select more after these read them from index 33 on.
+/// Queries that select more after these read them from index 34 on.
 const COLUMNS: &str = "id, path, created_at, duration_ms, width, height, has_mic, game_name, steam_app_id, exe, \
                        title, trim_start_ms, trim_end_ms, game_volume, mic_volume, server_clip_id, share_url, \
                        visibility, upload_id, upload_offset, favorite, thumbnail_ms, has_voice, voice_volume, master_volume, kind, \
-                       extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles, is_recording, audio_ranges";
+                       extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles, is_recording, audio_ranges, blur_ranges";
 
 fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
     Ok(Clip {
@@ -144,6 +147,7 @@ fn row_to_clip(row: &Row) -> rusqlite::Result<Clip> {
         subtitles: serde_json::from_str(&row.get::<_, String>(30)?).unwrap_or_default(),
         is_recording: row.get(31)?,
         audio_ranges: serde_json::from_str(&row.get::<_, String>(32)?).unwrap_or_default(),
+        blur_ranges: serde_json::from_str(&row.get::<_, String>(33)?).unwrap_or_default(),
     })
 }
 
@@ -272,6 +276,12 @@ impl Library {
     pub fn set_zoom_ranges(&self, id: &str, zooms: &[ZoomRange]) -> Result<()> {
         let json = serde_json::to_string(zooms).map_err(|e| AppError::Internal(e.to_string()))?;
         self.update(id, "UPDATE clips SET zoom_ranges = ?2 WHERE id = ?1", params![id, json])
+    }
+
+    /// Stores the blurred parts set in the editor (checked with `validate_blurs` by the caller).
+    pub fn set_blur_ranges(&self, id: &str, blurs: &[BlurRange]) -> Result<()> {
+        let json = serde_json::to_string(blurs).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.update(id, "UPDATE clips SET blur_ranges = ?2 WHERE id = ?1", params![id, json])
     }
 
     /// Stores the muted and turned-down parts of the audio tracks (checked with
@@ -412,7 +422,7 @@ impl Library {
             "SELECT {COLUMNS}, sync_pending FROM clips WHERE sync_pending != '' AND server_clip_id IS NOT NULL"
         ))?;
         let rows = stmt
-            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(33)?))))?
+            .query_map([], |row| Ok((row_to_clip(row)?, split_fields(&row.get::<_, String>(34)?))))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -650,6 +660,27 @@ pub fn validate_zooms(zooms: &[ZoomRange], duration_ms: u64) -> Result<()> {
             return bad("a zoom's area is outside the picture");
         }
         at = z.end_ms;
+    }
+    Ok(())
+}
+
+/// Checks the blurred parts of a clip `duration_ms` long: each at least `MIN_BLUR_MS` long,
+/// sorted, not overlapping (touching is fine) and inside the file. Parts outside the trim or in
+/// removed parts are allowed: they just don't show.
+pub fn validate_blurs(blurs: &[BlurRange], duration_ms: u64) -> Result<()> {
+    let bad = |why: &str| Err(AppError::InvalidInput(format!("blurred parts: {why}")));
+    let mut at = 0;
+    for b in blurs {
+        if b.end_ms < b.start_ms.saturating_add(MIN_BLUR_MS) {
+            return bad("a part is too short");
+        }
+        if b.start_ms < at {
+            return bad("parts overlap or are out of order");
+        }
+        if b.end_ms > duration_ms {
+            return bad("a part ends after the clip");
+        }
+        at = b.end_ms;
     }
     Ok(())
 }
@@ -1057,6 +1088,25 @@ mod tests {
         f.lib.set_zoom_ranges(&c.id, &[z(1000, 3000, 2.0, 0.5, 0.5)]).unwrap();
         assert_eq!(f.lib.get(&c.id).unwrap().zoom_ranges, vec![z(1000, 3000, 2.0, 0.5, 0.5)]);
         assert!(matches!(f.lib.set_zoom_ranges("nope", &[]), Err(AppError::ClipNotFound(_))));
+    }
+
+    #[test]
+    fn blur_ranges_round_trip_and_bad_ones_are_refused() {
+        let f = Fixture::new();
+        let c = f.add("a.mp4", 1, None);
+        let b = |start_ms, end_ms| BlurRange { start_ms, end_ms };
+        assert!(f.lib.get(&c.id).unwrap().blur_ranges.is_empty(), "new clips have no blurred parts");
+        f.lib.set_blur_ranges(&c.id, &[b(1000, 3000)]).unwrap();
+        assert_eq!(f.lib.get(&c.id).unwrap().blur_ranges, vec![b(1000, 3000)]);
+        assert!(matches!(f.lib.set_blur_ranges("nope", &[]), Err(AppError::ClipNotFound(_))));
+
+        let bad = |blurs: &[BlurRange]| matches!(validate_blurs(blurs, 10_000), Err(AppError::InvalidInput(_)));
+        assert!(bad(&[b(1000, 1200)]), "too short");
+        assert!(bad(&[b(3000, 4000), b(1000, 2000)]), "out of order");
+        assert!(bad(&[b(1000, 3000), b(2000, 4000)]), "overlapping");
+        assert!(bad(&[b(9000, 10_001)]), "past the end");
+        assert!(validate_blurs(&[], 10_000).is_ok());
+        assert!(validate_blurs(&[b(0, 500), b(500, 10_000)], 10_000).is_ok(), "touching");
     }
 
     #[test]

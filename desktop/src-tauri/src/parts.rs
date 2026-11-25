@@ -14,8 +14,8 @@ use crate::errors::{AppError, Result};
 use crate::export::Edit;
 use crate::ffmpeg::{self, Tools};
 use crate::library::{
-    AudioRange, Clip, ClipKind, ClipView, CutRange, Library, NewClip, SubtitleRange, Trim, Volumes, ZoomRange, MIN_SUBTITLE_MS,
-    MIN_AUDIO_RANGE_MS, MIN_ZOOM_MS,
+    AudioRange, BlurRange, Clip, ClipKind, ClipView, CutRange, Library, NewClip, SubtitleRange, Trim, Volumes, ZoomRange, MIN_SUBTITLE_MS,
+    MIN_AUDIO_RANGE_MS, MIN_BLUR_MS, MIN_ZOOM_MS,
 };
 
 /// The shortest part that can become a clip.
@@ -55,6 +55,13 @@ pub fn part_edit(edit: &Edit, start: u64, end: u64, offset_ms: u64, duration_ms:
         .filter(|(_, (s, e))| *e >= s + MIN_ZOOM_MS)
         .map(|(z, (start_ms, end_ms))| ZoomRange { start_ms, end_ms, ..*z })
         .collect();
+    let blurs = edit
+        .blurs
+        .iter()
+        .map(|b| clipped(b.start_ms, b.end_ms))
+        .filter(|(s, e)| *e >= s + MIN_BLUR_MS)
+        .map(|(start_ms, end_ms)| BlurRange { start_ms, end_ms })
+        .collect();
     let subtitles = edit
         .subtitles
         .iter()
@@ -74,6 +81,7 @@ pub fn part_edit(edit: &Edit, start: u64, end: u64, offset_ms: u64, duration_ms:
         trim_end_ms: (trim_end < duration_ms).then_some(trim_end),
         removed,
         zooms,
+        blurs,
         subtitles,
         audio,
         ..edit.clone()
@@ -162,6 +170,7 @@ pub fn make_part(
         crate::library::validate_edit(trim, &volumes)?;
         crate::library::validate_cuts(trim, &new_edit.removed, duration_ms)?;
         crate::library::validate_zooms(&new_edit.zooms, duration_ms)?;
+        crate::library::validate_blurs(&new_edit.blurs, duration_ms)?;
         crate::library::validate_subtitles(&new_edit.subtitles, duration_ms)?;
         crate::library::validate_audio_ranges(&new_edit.audio, duration_ms)?;
         let (clip, thumb) = {
@@ -172,6 +181,7 @@ pub fn make_part(
                 library.set_blur_video(&clip.id, new_edit.blur_video)?;
                 library.set_removed_ranges(&clip.id, &new_edit.removed)?;
                 library.set_zoom_ranges(&clip.id, &new_edit.zooms)?;
+                library.set_blur_ranges(&clip.id, &new_edit.blurs)?;
                 library.set_subtitles(&clip.id, &new_edit.subtitles)?;
                 library.set_audio_ranges(&clip.id, &new_edit.audio)?;
                 library.set_thumbnail(&clip.id, Some(thumb_ms))
@@ -211,6 +221,7 @@ mod tests {
             blur_video: true,
             removed: Vec::new(),
             zooms: Vec::new(),
+            blurs: Vec::new(),
             subtitles: Vec::new(),
             audio: Vec::new(),
         }
@@ -238,6 +249,7 @@ mod tests {
         let source = Edit {
             removed: vec![CutRange { start_ms: 3_000, end_ms: 3_500 }],
             zooms: vec![zoom(500, 1_500), zoom(4_000, 6_000), zoom(7_800, 9_000)],
+            blurs: vec![BlurRange { start_ms: 2_000, end_ms: 2_400 }, BlurRange { start_ms: 7_000, end_ms: 9_000 }],
             subtitles: vec![
                 sub(1_000, 1_900, "before"),
                 sub(2_000, 3_000, "across the start"),
@@ -251,6 +263,8 @@ mod tests {
         assert_eq!(got.removed, vec![CutRange { start_ms: 1_000, end_ms: 1_500 }]);
         // The zoom at 7.8 s keeps only 200 ms: too short, dropped.
         assert_eq!(got.zooms, vec![zoom(2_000, 4_000)]);
+        // The blurred part across the start keeps 200 ms: too short, dropped; the last is clipped.
+        assert_eq!(got.blurs, vec![BlurRange { start_ms: 5_000, end_ms: 6_000 }]);
         assert_eq!(got.subtitles, vec![sub(200, 1_000, "across the start"), sub(2_500, 3_000, "in")]);
         assert_eq!((got.game_volume, got.master_volume, got.blur_video), (0.8, 1.2, true));
         assert_eq!(got.extra_volumes, BTreeMap::from([(3, 0.4)]));

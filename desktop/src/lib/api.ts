@@ -58,6 +58,12 @@ export interface ZoomRange {
   y: number;
 }
 
+/** A part of the clip whose whole picture uploads and exports blur (ms into the file). */
+export interface BlurRange {
+  startMs: number;
+  endMs: number;
+}
+
 export interface ClipView {
   id: string;
   path: string;
@@ -76,6 +82,8 @@ export interface ClipView {
   removedRanges: CutRange[];
   /** Zooms set in the editor, sorted, never overlapping. Missing = none. */
   zoomRanges?: ZoomRange[];
+  /** Blurred parts set in the editor, sorted, never overlapping. Missing = none. */
+  blurRanges?: BlurRange[];
   subtitles?: SubtitleRange[];
   /** Muted and turned-down parts of the audio tracks, sorted by track, then time. Missing = none. */
   audioRanges?: AudioRange[];
@@ -339,6 +347,8 @@ export interface EditInput {
   removedRanges: CutRange[];
   /** Zooms: uploads and exports ease into each and back out. */
   zoomRanges: ZoomRange[];
+  /** Blurred parts: uploads and exports blur the whole picture there. */
+  blurRanges: BlurRange[];
   subtitles: SubtitleRange[];
   /** Muted and turned-down parts of the audio tracks: uploads and exports turn them down too. */
   audioRanges: AudioRange[];

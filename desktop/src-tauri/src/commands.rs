@@ -1211,6 +1211,7 @@ fn edit_from(
     blur_video: Option<bool>,
     removed_ranges: Option<Vec<crate::library::CutRange>>,
     zoom_ranges: Option<Vec<crate::library::ZoomRange>>,
+    blur_ranges: Option<Vec<crate::library::BlurRange>>,
     subtitles: Option<Vec<crate::library::SubtitleRange>>,
     audio_ranges: Option<Vec<crate::library::AudioRange>>,
 ) -> Edit {
@@ -1225,6 +1226,7 @@ fn edit_from(
         blur_video: blur_video.unwrap_or(false),
         removed: removed_ranges.unwrap_or_default(),
         zooms: zoom_ranges.unwrap_or_default(),
+        blurs: blur_ranges.unwrap_or_default(),
         subtitles: subtitles.unwrap_or_default(),
         audio: audio_ranges.unwrap_or_default(),
     }
@@ -1249,12 +1251,13 @@ pub fn save_edit(
     blur_video: Option<bool>,
     removed_ranges: Option<Vec<crate::library::CutRange>>,
     zoom_ranges: Option<Vec<crate::library::ZoomRange>>,
+    blur_ranges: Option<Vec<crate::library::BlurRange>>,
     subtitles: Option<Vec<crate::library::SubtitleRange>>,
     audio_ranges: Option<Vec<crate::library::AudioRange>>,
     thumbnail_ms: Option<u64>,
 ) -> Result<()> {
     let cache_dir = cache_dir(&app)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles, audio_ranges);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video, removed_ranges, zoom_ranges, blur_ranges, subtitles, audio_ranges);
     let clip = {
         let library = lock(&state.library);
         editor::save_edit(&library, &uploads, &cache_dir, &id, edit)?;
@@ -1362,6 +1365,7 @@ pub async fn export_copy(
     blur_video: Option<bool>,
     removed_ranges: Option<Vec<crate::library::CutRange>>,
     zoom_ranges: Option<Vec<crate::library::ZoomRange>>,
+    blur_ranges: Option<Vec<crate::library::BlurRange>>,
     subtitles: Option<Vec<crate::library::SubtitleRange>>,
     audio_ranges: Option<Vec<crate::library::AudioRange>>,
 ) -> Result<()> {
@@ -1379,10 +1383,11 @@ pub async fn export_copy(
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
     let guard = app.state::<Uploads>().try_begin(&id).map_err(|_| AppError::ClipBusy)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles, audio_ranges);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video, removed_ranges, zoom_ranges, blur_ranges, subtitles, audio_ranges);
     let trim = crate::library::Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms };
     crate::library::validate_cuts(trim, &edit.removed, clip.duration_ms)?;
     crate::library::validate_zooms(&edit.zooms, clip.duration_ms)?;
+    crate::library::validate_blurs(&edit.blurs, clip.duration_ms)?;
     crate::library::validate_subtitles(&edit.subtitles, clip.duration_ms)?;
     crate::library::validate_audio_ranges(&edit.audio, clip.duration_ms)?;
     let worker_app = app.clone();
@@ -1422,6 +1427,7 @@ pub async fn make_part_clip(
     blur_video: Option<bool>,
     removed_ranges: Option<Vec<crate::library::CutRange>>,
     zoom_ranges: Option<Vec<crate::library::ZoomRange>>,
+    blur_ranges: Option<Vec<crate::library::BlurRange>>,
     subtitles: Option<Vec<crate::library::SubtitleRange>>,
     audio_ranges: Option<Vec<crate::library::AudioRange>>,
     thumbnail_ms: Option<u64>,
@@ -1437,7 +1443,7 @@ pub async fn make_part_clip(
         return Err(AppError::FileMissing);
     }
     let tools = tools.ok_or(AppError::ToolsMissing)?;
-    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video, removed_ranges, zoom_ranges, subtitles, audio_ranges);
+    let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video, removed_ranges, zoom_ranges, blur_ranges, subtitles, audio_ranges);
     let trim = crate::library::Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms };
     crate::library::validate_cuts(trim, &edit.removed, clip.duration_ms)?;
     let worker_app = app.clone();
@@ -1590,6 +1596,7 @@ mod tests {
             blur_video: false,
             removed_ranges: Vec::new(),
             zoom_ranges: Vec::new(),
+            blur_ranges: Vec::new(),
             subtitles: Vec::new(),
             audio_ranges: Vec::new(),
         }

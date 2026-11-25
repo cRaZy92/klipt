@@ -1001,6 +1001,14 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
         }
     }
     if !screenshot {
+        // A picture chosen as the thumbnail replaces the frame the server took. Best effort: the
+        // upload is done either way.
+        let image = lock(&app.state::<AppState>().library).thumb_image_path(id);
+        if image.is_file() {
+            if let Err(e) = crate::thumb_image::send(&client, token, &server_clip.id, &image).await {
+                crate::elog!("klipt: can't send the thumbnail picture of clip {id}: {e}");
+            }
+        }
         if let Err(e) = std::fs::remove_file(&exported) {
             crate::elog!("klipt: can't delete the uploaded export {}: {e}", exported.display());
         }
@@ -1042,6 +1050,8 @@ pub struct EditorData {
     /// The clip's frame rate (0 when unknown), for stepping one frame at a time.
     pub fps: f64,
     pub filmstrip: FilmstripInfo,
+    /// A picture is the thumbnail (not a frame): the editor hides its thumbnail marker.
+    pub thumb_image: bool,
 }
 
 /// The editor's filmstrip: JPEG frames (`<dir>/000000.jpg`, one per 100 ms) readable so far.
@@ -1068,10 +1078,10 @@ pub struct ExtraTrack {
 /// webview load the clip and those files. A clip whose file is missing doesn't open.
 #[tauri::command]
 pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
-    let (clip, thumb, tools) = {
+    let (clip, thumb, thumb_image, tools) = {
         let state = app.state::<AppState>();
         let library = lock(&state.library);
-        (library.get(&id)?, library.thumb_path(&id), state.tools.clone())
+        (library.get(&id)?, library.thumb_path(&id), library.thumb_image_path(&id).is_file(), state.tools.clone())
     };
     if !clip.path.is_file() {
         return Err(AppError::FileMissing);
@@ -1186,6 +1196,7 @@ pub async fn open_editor(app: AppHandle, id: String) -> Result<EditorData> {
         duration_ms,
         fps,
         filmstrip: FilmstripInfo { dir: strip, frames, total },
+        thumb_image,
     })
 }
 
@@ -1268,14 +1279,18 @@ pub fn save_edit(
         library.set_thumbnail(&id, thumbnail_ms)?;
         library.get(&id)?
     };
-    // The library's thumbnail follows; ffmpeg runs off the UI thread.
-    let (thumb, tools) = (lock(&state.library).thumb_path(&id), state.tools.clone());
+    // The library's thumbnail follows (unless a picture is the thumbnail); ffmpeg runs off the UI thread.
+    let (thumb, image, tools) = {
+        let library = lock(&state.library);
+        (library.thumb_path(&id), library.thumb_image_path(&id), state.tools.clone())
+    };
     if let Some(tools) = tools {
         // Saves can follow each other faster than ffmpeg: only the newest redraw is kept.
         let redraw = THUMBNAIL_REDRAWS.begin(&id);
         std::thread::spawn(move || {
             let at = clip.thumbnail_ms.unwrap_or_else(|| crate::recorder::thumbnail_at_ms(clip.duration_ms));
-            match crate::ffmpeg::thumbnail_if(&tools, &clip.path, &thumb, at, || THUMBNAIL_REDRAWS.latest(&clip.id, redraw)) {
+            let wanted = || if image.is_file() { None } else { THUMBNAIL_REDRAWS.latest(&clip.id, redraw) };
+            match crate::ffmpeg::thumbnail_if(&tools, &clip.path, &thumb, at, wanted) {
                 // A newer redraw replaces it.
                 Ok(false) => return,
                 Ok(true) => {}
@@ -1285,6 +1300,11 @@ pub fn save_edit(
         });
     }
     Ok(())
+}
+
+/// Tells the window clip `id`'s thumbnail file was made again.
+pub(crate) fn thumbnail_changed(app: &AppHandle, id: &str) {
+    emit(app, events::THUMBNAIL_CHANGED, serde_json::json!({ "id": id }));
 }
 
 /// The latest thumbnail redraw asked for, per clip: a redraw that finishes after a newer one was

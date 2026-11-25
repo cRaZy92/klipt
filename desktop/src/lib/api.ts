@@ -325,6 +325,8 @@ export interface EditorData {
   fps: number;
   /** JPEG frames (`000000.jpg`, one per 100 ms) in `dir`; `frames` are readable now, the rest follow. */
   filmstrip: { dir: string; frames: number; total: number };
+  /** A picture is the thumbnail, not a frame. */
+  thumbImage: boolean;
 }
 
 /** A clip's edit. A null trim end means "to the end"; a null start, "from the start". */
@@ -590,6 +592,14 @@ export const api = {
   updateUpload: (id: string, change: { title?: string; visibility?: Visibility }) =>
     invoke<MyUpload>("update_upload", { id, title: change.title ?? null, visibility: change.visibility ?? null }),
   deleteUpload: (id: string) => invoke<void>("delete_upload", { id }),
+  /** Sets your upload's thumbnail from a picture, cut to the clip's shape. */
+  setUploadThumbnail: (upload: MyUpload, path: string) =>
+    invoke<MyUpload>("set_upload_thumbnail", { id: upload.id, path, width: upload.width, height: upload.height }),
+  /**
+   * Makes a picture this clip's thumbnail (sent with each upload, and now to an uploaded clip);
+   * null goes back to the frame. Returns why the online clip couldn't be updated, if it couldn't.
+   */
+  setThumbnailImage: (id: string, path: string | null) => invoke<string | null>("set_thumbnail_image", { id, path }),
   /** Downloads your upload into the library (linked to the server copy). */
   downloadUpload: (id: string) => invoke<ClipView>("download_upload", { id }),
   copyShareLink: (id: string) => invoke<string>("copy_share_link", { id }),

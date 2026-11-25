@@ -193,6 +193,12 @@ impl Library {
         self.thumbs_dir.join(format!("{id}.jpg"))
     }
 
+    /// The picture the owner chose as clip `id`'s thumbnail (cut to the clip's shape). While it
+    /// exists, the thumbnail is made from it instead of a frame, and uploads send it.
+    pub fn thumb_image_path(&self, id: &str) -> PathBuf {
+        self.thumbs_dir.join(format!("{id}.image.jpg"))
+    }
+
     pub fn insert(&self, clip: NewClip) -> Result<Clip> {
         let id = uuid::Uuid::new_v4().simple().to_string();
         self.conn.execute(
@@ -510,8 +516,10 @@ impl Library {
         }
         self.conn.execute("DELETE FROM clips WHERE id = ?1", [id])?;
         self.remove_pending_upload(id)?;
-        if let Err(e) = remove_if_present(&self.thumb_path(id)) {
-            crate::elog!("klipt: can't delete the thumbnail of clip {id}: {e}");
+        for thumb in [self.thumb_path(id), self.thumb_image_path(id)] {
+            if let Err(e) = remove_if_present(&thumb) {
+                crate::elog!("klipt: can't delete the thumbnail of clip {id}: {e}");
+            }
         }
         Ok(())
     }

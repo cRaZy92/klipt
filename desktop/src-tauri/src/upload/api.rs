@@ -253,6 +253,20 @@ impl ApiClient {
         }
     }
 
+    /// An authenticated PUT of raw bytes (a picture); returns the JSON answer.
+    pub async fn put_bytes(&self, token: &str, path: &str, content_type: &str, body: Vec<u8>) -> Result<serde_json::Value, ApiError> {
+        let resp = self
+            .http
+            .put(self.url(path))
+            .bearer_auth(token)
+            .header(reqwest::header::CONTENT_TYPE, content_type)
+            .body(body)
+            .send()
+            .await
+            .map_err(network)?;
+        parse_json(resp).await
+    }
+
     /// An authenticated PUT with no body, for actions that answer 204 (starring a clip).
     pub async fn put_empty(&self, token: &str, path: &str) -> Result<(), ApiError> {
         let resp = self.http.put(self.url(path)).bearer_auth(token).send().await.map_err(network)?;

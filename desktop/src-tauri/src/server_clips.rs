@@ -32,7 +32,7 @@ fn login(app: &AppHandle, timeout: Duration) -> Result<(Auth, ApiClient, PathBuf
 }
 
 /// Converts a server error; a dead token is forgotten so the app asks to log in again.
-fn failed(data_dir: &Path, saved: &Auth, e: crate::upload::ApiError) -> AppError {
+pub(crate) fn failed(data_dir: &Path, saved: &Auth, e: crate::upload::ApiError) -> AppError {
     let e = AppError::from(e);
     if matches!(e, AppError::Unauthorized) {
         if let Err(e) = clear_auth_if_current(data_dir, &saved.token) {
@@ -43,7 +43,7 @@ fn failed(data_dir: &Path, saved: &Auth, e: crate::upload::ApiError) -> AppError
 }
 
 /// Server clip ids are 12 URL-safe characters; anything else never reaches a URL path.
-fn checked_id(id: &str) -> Result<&str> {
+pub(crate) fn checked_id(id: &str) -> Result<&str> {
     let ok = id.len() == 12 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
     ok.then_some(id).ok_or_else(|| AppError::InvalidInput("not a server clip id".into()))
 }

@@ -286,6 +286,22 @@ pub fn thumbnail_if<G>(tools: &Tools, input: &Path, out: &Path, at_ms: u64, want
     write_via_temp(tools, args, out, "tmp.jpg", &format!("no video frame at {at_ms} ms"), None, wanted)
 }
 
+/// The widest a thumbnail picked from an image is kept (it goes to the server too).
+const THUMB_IMAGE_MAX_WIDTH: u32 = 1280;
+
+/// Writes picture `input` (PNG, JPEG, WebP…) into `out` as a JPEG cut to the `width`:`height`
+/// shape from its middle, at most 1280 px wide, replacing it atomically.
+pub fn crop_image(tools: &Tools, input: &Path, out: &Path, width: u32, height: u32) -> Result<()> {
+    let (w, h) = (width.max(1), height.max(1));
+    let filter = format!(
+        "crop='min(iw,ih*{w}/{h})':'min(ih,iw*{h}/{w})',scale='min({THUMB_IMAGE_MAX_WIDTH},iw)':-2"
+    );
+    let mut args = os_args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i"]);
+    args.push(input.into());
+    args.extend(os_args(["-frames:v", "1", "-vf", &filter, "-q:v", "3", "-update", "1"]));
+    write_via_temp(tools, args, out, "tmp.jpg", "that file isn't a picture", None, || Some(())).map(|_| ())
+}
+
 /// The last video keyframe at or before `at_ms` (ms into the file), found by reading packet flags
 /// only (nothing is decoded), up to 30 s back. 0 when there is none in that window.
 pub fn keyframe_at_or_before(tools: &Tools, input: &Path, at_ms: u64) -> Result<u64> {
@@ -571,6 +587,38 @@ pub(crate) mod tests {
         // Replacing an existing thumbnail works.
         thumbnail(&tools(), fixture(), &out, 0).unwrap();
         assert_eq!(fs::read_dir(out.parent().unwrap()).unwrap().count(), 1, "no temp files left");
+    }
+
+    #[test]
+    fn crop_image_cuts_the_middle_to_the_clips_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("tall.png");
+        let made = std::process::Command::new(&tools().ffmpeg)
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=red:size=1000x1000", "-frames:v", "1"])
+            .arg(&src)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let out = dir.path().join("thumbs").join("c.image.jpg");
+        crop_image(&tools(), &src, &out, 1920, 1080).unwrap();
+        let (w, h) = probe_size(&out);
+        assert_eq!((w, h), (1000, 562));
+        assert!(crop_image(&tools(), &dir.path().join("missing.png"), &out, 16, 9).is_err());
+        let notes = dir.path().join("notes.txt");
+        fs::write(&notes, "hello").unwrap();
+        assert!(crop_image(&tools(), &notes, &out, 16, 9).is_err());
+        assert_eq!(probe_size(&out), (1000, 562), "a failed crop leaves the old picture");
+    }
+
+    fn probe_size(path: &Path) -> (u32, u32) {
+        let out = std::process::Command::new(&tools().ffprobe)
+            .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0"])
+            .arg(path)
+            .output()
+            .unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        let mut parts = text.trim().split(',').map(|n| n.parse::<u32>().unwrap());
+        (parts.next().unwrap(), parts.next().unwrap())
     }
 
     #[test]

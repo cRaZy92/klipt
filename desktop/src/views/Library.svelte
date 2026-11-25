@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { pickThumbnailImage } from "../lib/thumbnailImage";
   import { checkFolder, importing } from "../lib/imports.svelte";
   import ImportPanel from "../components/ImportPanel.svelte";
   import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
@@ -484,6 +485,12 @@
     );
   }
 
+  /** "Change thumbnail…" on an online clip: a picture you pick becomes its thumbnail. */
+  async function changeThumbnail(upload: MyUpload) {
+    const path = await pickThumbnailImage();
+    if (path) await act(async () => replaceUpload(await api.setUploadThumbnail(upload, path)), "Thumbnail changed.");
+  }
+
   /** An uploaded clip on this PC: into the feed or link-only, same upload and link. */
   async function toggleLocalVisibility(clip: ClipView) {
     const id = clip.serverClipId;
@@ -719,6 +726,7 @@
                   ondelete={() => (deletingOnline = upload)}
                   onfavorite={upload.favorite === undefined ? undefined : () => toggleOnlineFavorite(upload)}
                   onalbum={() => (albuming = { ids: [upload.id], skipped: 0 })}
+                  onthumbnail={upload.kind === "screenshot" ? undefined : () => changeThumbnail(upload)}
                   selected={selected.has(item.key)}
                   selecting={selected.size > 0}
                   onselect={(e) => toggleSelect(item.key, e)}

@@ -34,7 +34,10 @@
     locked = false,
     view = null,
     onview,
+    noThumb = false,
   }: {
+    /** A picture is the thumbnail: no frame marker. */
+    noThumb?: boolean;
     /** The clip's length in ms. */
     duration: number;
     /** Trim start in ms. */
@@ -427,6 +430,7 @@
       </div>
     {/each}
 
+    {#if !noThumb}
     <div
       class="thumb-mark"
       class:picked={thumb !== null}
@@ -457,7 +461,8 @@
     >
       <Icon name="image" size={13} />
     </div>
-    {#if thumbActive && onScreen(thumbAt)}
+    {/if}
+    {#if !noThumb && thumbActive && onScreen(thumbAt)}
       <div class="thumb-pop" use:toBody style:left="{pop.left}px" style:top="{pop.top}px" aria-hidden="true">
         {#if thumbPicture}<img src={thumbPicture} alt="" decoding="async" />{/if}
         <span>Thumbnail · {formatClock(thumbAt)}</span>

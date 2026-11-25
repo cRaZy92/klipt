@@ -32,6 +32,7 @@ pub mod server_clips;
 pub mod settings;
 pub mod sound;
 pub mod state;
+pub mod thumb_image;
 pub mod tray;
 pub mod upload;
 pub mod upload_notice;
@@ -155,6 +156,8 @@ pub fn run() {
             commands::open_website,
             server_clips::my_uploads,
             server_clips::update_upload,
+            thumb_image::set_thumbnail_image,
+            thumb_image::set_upload_thumbnail,
             server_clips::delete_upload,
             server_clips::download_upload,
             server_clips::record_view,

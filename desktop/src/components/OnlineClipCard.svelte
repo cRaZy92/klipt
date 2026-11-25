@@ -22,6 +22,7 @@
     ondelete,
     onfavorite,
     onalbum,
+    onthumbnail,
     selected = false,
     selecting = false,
     onselect,
@@ -42,6 +43,8 @@
     onfavorite?: () => void;
     /** "Add to album". */
     onalbum?: () => void;
+    /** "Change thumbnail…" (video clips only). */
+    onthumbnail?: () => void;
     /** Picked for a bulk action. */
     selected?: boolean;
     /** Something is selected: clicking the picture selects instead of playing. */
@@ -174,6 +177,9 @@
           <button role="menuitem" onclick={() => pick(onrename)}><Icon name="rename" size={16} /> Rename</button>
           {#if onalbum}
             <button role="menuitem" onclick={() => pick(onalbum)}><Icon name="album" size={16} /> Add to album</button>
+          {/if}
+          {#if onthumbnail}
+            <button role="menuitem" onclick={() => pick(onthumbnail)}><Icon name="image" size={16} /> Change thumbnail…</button>
           {/if}
           <button role="menuitem" onclick={() => pick(onvisibility)}>
             <Icon name="eye" size={16} />

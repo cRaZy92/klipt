@@ -54,6 +54,7 @@
   import { Gestures } from "../lib/gestures";
   import { editorKeyAction, keyTarget, RELEASES_FOCUS } from "../lib/editorKeys";
   import { toast } from "../lib/toasts.svelte";
+  import { pickThumbnailImage } from "../lib/thumbnailImage";
   import { isBusy, uploads } from "../lib/uploads.svelte";
   import DeleteClipDialog from "../components/DeleteClipDialog.svelte";
   import Icon from "../components/Icon.svelte";
@@ -215,6 +216,8 @@
   let saveStatus = $state<SaveStatus>("saved");
   /** The ⋯ menu (Show in folder, Delete) is open. */
   let moreOpen = $state(false);
+  /** A picture is the thumbnail (no frame marker on the trim bar). */
+  let thumbImage = $state(false);
   // svelte-ignore state_referenced_locally
   let gameName = $state(clip.gameName);
   /** "Set game": the name being typed and the games Klipt knows (for suggestions). */
@@ -441,6 +444,7 @@
       subtitles = d.clip.subtitles ?? [];
       audioParts = d.clip.audioRanges ?? [];
       thumb = d.clip.thumbnailMs;
+      thumbImage = d.thumbImage;
       position = trim.start;
       stripFrames = d.filmstrip.frames;
       data = d;
@@ -1330,6 +1334,30 @@
     }
   }
 
+  /** "Thumbnail from a picture…": the picked file becomes the thumbnail. */
+  async function pickThumbImage() {
+    moreOpen = false;
+    const path = await pickThumbnailImage();
+    if (path) await setThumbImage(path);
+  }
+
+  /** A picture (or with null, the frame again) as the thumbnail. */
+  async function setThumbImage(path: string | null) {
+    moreOpen = false;
+    const online = !!data?.clip.serverClipId;
+    try {
+      const failedOnline = await api.setThumbnailImage(clip.id, path);
+      thumbImage = path !== null;
+      if (failedOnline) toast(`Thumbnail set on this PC, but the online clip couldn't be updated: ${failedOnline}`, "error");
+      else if (path && online) toast("Thumbnail changed here and on the online clip.", "success");
+      else if (path) toast("Thumbnail set. It goes up with the clip.", "success");
+      else if (online) toast("Thumbnail is a frame again. The online clip keeps the picture until you upload again.", "info");
+      else toast("Thumbnail is a frame again.", "success");
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    }
+  }
+
   function showInFolder() {
     moreOpen = false;
     api.showInFolder(clip.id).catch((e) => toast(errorMessage(e), "error"));
@@ -1479,6 +1507,16 @@
                 <Icon name="eye" size={16} />
                 {data.clip.visibility === "link" ? "Show in feed" : "Hide from feed"}
               </button>
+            {/if}
+            {#if data && data.clip.kind !== "screenshot"}
+              <button role="menuitem" onclick={pickThumbImage} disabled={uploading}>
+                <Icon name="image" size={16} /> {thumbImage ? "Change thumbnail picture…" : "Thumbnail from a picture…"}
+              </button>
+              {#if thumbImage}
+                <button role="menuitem" onclick={() => setThumbImage(null)} disabled={uploading}>
+                  <Icon name="film" size={16} /> Use a frame for the thumbnail
+                </button>
+              {/if}
             {/if}
             <button role="menuitem" onclick={showInFolder}><Icon name="folder" size={16} /> Show in folder</button>
             <button
@@ -1748,6 +1786,7 @@
             bind:start={trim.start}
             bind:end={trim.end}
             bind:thumb
+            noThumb={thumbImage}
             bind:pieces
             {position}
             strip={data ? { dir: data.filmstrip.dir, ready: stripFrames } : null}

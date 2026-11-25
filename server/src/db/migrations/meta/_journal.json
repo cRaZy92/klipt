@@ -92,6 +92,13 @@
       "when": 1795489978097,
       "tag": "0012_user_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795621412619,
+      "tag": "0013_clip_high_quality",
+      "breakpoints": true
     }
   ]
 }

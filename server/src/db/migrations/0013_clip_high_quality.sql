@@ -1,0 +1,1 @@
+ALTER TABLE "clips" ADD COLUMN "high_quality" boolean DEFAULT false NOT NULL;

@@ -112,6 +112,8 @@ export const clips = pgTable(
      * upload because compressing barely helped; `failed` kept it too (an admin can retry).
      */
     transcodeState: text('transcode_state', { enum: ['queued', 'running', 'done', 'skipped', 'failed'] }),
+    /** An admin's high-quality upload: kept as uploaded, never compressed by the server. */
+    highQuality: boolean('high_quality').notNull().default(false),
     /** Bumped each time the video file is replaced: version n > 0 is stored as `<id>.v<n>.mp4`. */
     mediaVersion: integer('media_version').notNull().default(0),
     /**

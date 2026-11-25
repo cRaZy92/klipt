@@ -407,6 +407,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         gameName: body.gameName ?? null,
         steamAppId: body.steamAppId ?? null,
         transcodeState: !image && !highQuality && config.transcode.enabled ? ('queued' as const) : null,
+        highQuality: !image && highQuality,
         durationMs: info.durationMs,
         width: info.width,
         height: info.height,

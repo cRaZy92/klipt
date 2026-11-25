@@ -135,7 +135,7 @@ describe('compression queue', () => {
     expect(created.processing).toBeNull();
     await t.app.transcoder.idle();
     const [row] = await t.db.select().from(clips).where(eq(clips.id, created.id));
-    expect(row).toMatchObject({ transcodeState: null, mediaVersion: 0, sizeBytes: created.sizeBytes });
+    expect(row).toMatchObject({ transcodeState: null, highQuality: true, mediaVersion: 0, sizeBytes: created.sizeBytes });
   });
 
   it('keeps the upload when compressing barely helps', async () => {

@@ -17,13 +17,14 @@
   import ImportDialog from "./components/ImportDialog.svelte";
   import Editor from "./views/Editor.svelte";
   import Feed from "./views/Feed.svelte";
+  import Albums from "./views/Albums.svelte";
   import Library from "./views/Library.svelte";
   import Login from "./views/Login.svelte";
   import SettingsView from "./views/Settings.svelte";
 
   // The screens. Library is home.
-  type Screen = "library" | "feed" | "settings";
-  type View = { name: "library" } | { name: "feed" } | { name: "editor"; clip: ClipView } | { name: "settings" };
+  type Screen = "library" | "feed" | "albums" | "settings";
+  type View = { name: "library" } | { name: "feed" } | { name: "albums" } | { name: "editor"; clip: ClipView } | { name: "settings" };
   /** Where the user asked to go while the current screen had unsaved changes. */
   type Leaving = { to: "view"; view: View } | { to: "logout" };
 
@@ -338,6 +339,15 @@
           </span>
           Feed
         </button>
+        <button
+          class="item"
+          class:active={view.name === "albums"}
+          aria-current={view.name === "albums" ? "page" : undefined}
+          onclick={() => go({ name: "albums" })}
+        >
+          <span class="item-icon"><Icon name="album" size={20} /></span>
+          Albums
+        </button>
       </div>
 
       <div class="nav bottom">
@@ -422,6 +432,17 @@
             onunauthorized={() => {
               account = null;
               loginNotice = "Your session has expired. Log in again to see the feed.";
+            }}
+          />
+        </main>
+      {/if}
+      {#if visited.has("albums")}
+        <main class="screen" class:here={view.name === "albums"} use:keepScroll={view.name === "albums"} inert={view.name !== "albums"}>
+          <Albums
+            active={view.name === "albums"}
+            onunauthorized={() => {
+              account = null;
+              loginNotice = "Your session has expired. Log in again to see your albums.";
             }}
           />
         </main>

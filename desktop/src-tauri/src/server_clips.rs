@@ -293,6 +293,39 @@ pub async fn set_album_clip(app: AppHandle, album_id: String, clip_id: String, a
     done.map_err(|e| failed(&data_dir, &saved, e))
 }
 
+/// One album with its clips, in order (the server's `Album`).
+#[tauri::command]
+pub async fn get_album(app: AppHandle, id: String) -> Result<Value> {
+    let id = checked_id(&id)?;
+    let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
+    client.get_json(&saved.token, &format!("/api/albums/{id}"), &[]).await.map_err(|e| failed(&data_dir, &saved, e))
+}
+
+/// Renames your album and/or puts its clips in a new order (`clip_ids`: exactly the clips it
+/// holds). Returns the album as it is now (the server's `Album`).
+#[tauri::command]
+pub async fn update_album(app: AppHandle, id: String, title: Option<String>, clip_ids: Option<Vec<String>>) -> Result<Value> {
+    let id = checked_id(&id)?;
+    let mut body = serde_json::Map::new();
+    if let Some(title) = title {
+        body.insert("title".into(), clean_title(&title)?.into());
+    }
+    if let Some(ids) = clip_ids {
+        let ids = ids.iter().map(|c| checked_id(c).map(String::from)).collect::<Result<Vec<_>>>()?;
+        body.insert("clipIds".into(), ids.into());
+    }
+    let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
+    client.patch_json(&saved.token, &format!("/api/albums/{id}"), &Value::Object(body)).await.map_err(|e| failed(&data_dir, &saved, e))
+}
+
+/// Deletes your album (its clips stay).
+#[tauri::command]
+pub async fn delete_album(app: AppHandle, id: String) -> Result<()> {
+    let id = checked_id(&id)?;
+    let (saved, client, data_dir) = login(&app, LIST_TIMEOUT)?;
+    client.delete(&saved.token, &format!("/api/albums/{id}")).await.map_err(|e| failed(&data_dir, &saved, e))
+}
+
 /// Downloads your upload into the clips folder and adds it to the library, linked to the server
 /// copy (so it shows as uploaded and isn't listed twice).
 #[tauri::command]

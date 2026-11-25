@@ -119,6 +119,12 @@ export interface AlbumSummary {
   hasClip?: boolean;
 }
 
+/** An album with its clips, in order (`Album` in packages/shared). */
+export interface Album extends AlbumSummary {
+  owner: { username: string; displayName?: string };
+  clips: FeedClip[];
+}
+
 export interface GameCount {
   name: string;
   steamAppId: number | null;
@@ -615,6 +621,13 @@ export const api = {
   createAlbum: (title: string, clipIds: string[]) => invoke<AlbumSummary>("create_album", { title, clipIds }),
   /** Puts a server clip at the end of an album, or (`add` false) takes it out. */
   setAlbumClip: (albumId: string, clipId: string, add: boolean) => invoke<void>("set_album_clip", { albumId, clipId, add }),
+  /** One album with its clips, in order. */
+  getAlbum: (id: string) => invoke<Album>("get_album", { id }),
+  /** Renames your album and/or reorders it (`clipIds`: exactly the clips it holds). */
+  updateAlbum: (id: string, change: { title?: string; clipIds?: string[] }) =>
+    invoke<Album>("update_album", { id, title: change.title ?? null, clipIds: change.clipIds ?? null }),
+  /** Deletes your album; its clips stay. */
+  deleteAlbum: (id: string) => invoke<void>("delete_album", { id }),
   /** Friends' clips new since you last opened the Feed. */
   feedNewCount: () => invoke<number>("feed_new_count"),
   /** You've seen the feed up to the clip created at `newest`. Gives back what you'd seen up to

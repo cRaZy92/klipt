@@ -1,6 +1,6 @@
 # Achievements, profile pictures and customization
 
-Date: 2026-11-26. Status: draft for the owner's approval.
+Date: 2026-11-26. Status: approved ("implement it") and built on `feat/achievements`; plan: `docs/superpowers/plans/2026-11-26-achievements-and-customization.md`.
 
 ## Why
 

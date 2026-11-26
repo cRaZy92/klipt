@@ -1311,13 +1311,16 @@
     gap: 0.4rem;
   }
 
+  /* The whole command shows, wrapped (a grid item won't shrink, so one long line was cut off). */
   .update-found code {
-    overflow-x: auto;
+    min-width: 0;
     padding: 0.4rem 0.55rem;
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.3);
     font-size: 0.8rem;
-    white-space: nowrap;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: all;
   }
 
   h2 {

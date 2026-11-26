@@ -1,4 +1,5 @@
-import type { SessionInfo } from '@klipt/shared';
+import { sanitizeLooks, type Looks, type SessionInfo } from '@klipt/shared';
+import { unseenCountExpr } from '../users/ref.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
@@ -14,6 +15,11 @@ export interface AuthUser {
   customName: string | null;
   isAdmin: boolean;
   sessionId: string;
+  /** 0: no picture. */
+  avatarVersion: number;
+  looks: Looks;
+  /** Achievements not seen yet. */
+  newAchievements: number;
 }
 
 const WEB_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -52,6 +58,9 @@ export async function resolveToken(db: Db, token: string): Promise<AuthUser | nu
       username: users.username,
       displayName: users.displayName,
       isAdmin: users.isAdmin,
+      avatarVersion: users.avatarVersion,
+      looks: users.looks,
+      newAchievements: unseenCountExpr(users.id),
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -77,6 +86,9 @@ export async function resolveToken(db: Db, token: string): Promise<AuthUser | nu
     customName: row.displayName || null,
     isAdmin: row.isAdmin,
     sessionId: row.sessionId,
+    avatarVersion: row.avatarVersion,
+    looks: sanitizeLooks(row.looks),
+    newAchievements: Number(row.newAchievements),
   };
 }
 

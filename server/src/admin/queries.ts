@@ -5,6 +5,7 @@ import type { Db } from '../db/client.js';
 import type { DiskGuard } from '../disk.js';
 import { clips, feedback, invites, sessions, users } from '../db/schema.js';
 import { displayNameOf } from '../clips/repo.js';
+import { avatarUrl } from '../users/ref.js';
 
 /** An invite that is unused, not revoked and not expired. Single source of truth for invite validity. */
 export const activeInvite = (now: Date = new Date()) =>
@@ -29,12 +30,13 @@ export async function isInviteActive(db: Db, code: string): Promise<boolean> {
   return !!row;
 }
 
-export async function listAdminUsers(db: Db): Promise<AdminUser[]> {
+export async function listAdminUsers(db: Db, baseUrl: string): Promise<AdminUser[]> {
   const rows = await db
     .select({
       id: users.id,
       username: users.username,
       displayName: displayNameOf(users),
+      avatarVersion: users.avatarVersion,
       isAdmin: users.isAdmin,
       disabledAt: users.disabledAt,
       lastSeenAt: sql<string | null>`(select max(s.last_used_at) from ${sessions} s where s.user_id = ${users.id})`,
@@ -54,6 +56,7 @@ export async function listAdminUsers(db: Db): Promise<AdminUser[]> {
     id: u.id,
     username: u.username,
     displayName: u.displayName,
+    avatarUrl: avatarUrl(u, baseUrl),
     lastSeenAt: u.lastSeenAt ? new Date(u.lastSeenAt).toISOString() : null,
     app: u.app ? { ...u.app, lastUsedAt: new Date(u.app.lastUsedAt).toISOString() } : null,
     isAdmin: u.isAdmin,

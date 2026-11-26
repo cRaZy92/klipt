@@ -33,7 +33,7 @@ describe('account', () => {
 
     await t.db.insert(clips).values({ id: 'abcdefghijkl', userId: alice.id, title: 'x', durationMs: 1000, width: 1, height: 1, sizeBytes: 1 });
     const list = await t.app.inject({ method: 'GET', url: '/api/clips?scope=feed', headers });
-    expect(list.json().items[0].owner).toEqual({ username: 'alice', displayName: 'Ali' });
+    expect(list.json().items[0].owner).toEqual({ username: 'alice', displayName: 'Ali', avatarUrl: null, frame: null });
     // Searching finds the display name too.
     const found = await t.app.inject({ method: 'GET', url: '/api/clips?scope=feed&q=ali', headers });
     expect(found.json().items).toHaveLength(1);

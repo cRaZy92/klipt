@@ -37,7 +37,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(204).send();
   });
 
-  app.get('/api/admin/users', opts, async (): Promise<AdminUser[]> => listAdminUsers(db));
+  app.get('/api/admin/users', opts, async (): Promise<AdminUser[]> => listAdminUsers(db, app.config.baseUrl));
 
   app.patch('/api/admin/users/:id', opts, async (req, reply) => {
     const { id } = req.params as { id: string };

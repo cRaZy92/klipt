@@ -112,7 +112,7 @@ export interface FeedbackItem {
   hasLogs: boolean;
   createdAt: string;
   resolvedAt: string | null;
-  user: UserRef;
+  user: { username: string; displayName: string };
 }
 
 /** `POST /api/admin/users/:id/password-reset`: a one-time link for the user to set a new password. */

@@ -10,6 +10,7 @@ import { requireUser } from '../auth/plugin.js';
 import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../uploads/tus.js';
 import { assertPlayable, makeThumbnail, MediaError, probeImage, probeVideo, remuxFaststart, toPng } from './media.js';
 import { newClipId } from './ids.js';
+import { toUserRef } from '../users/ref.js';
 import { embedFileName, MEDIA_FILE, mediaFileName, videoFileName } from './files.js';
 import { createEmbed, EMBED_VERSION } from './embed.js';
 import { addAlbumClip, AlbumFullError, getAlbum, UnknownClipError } from '../albums/repo.js';
@@ -51,7 +52,7 @@ export function toClip(item: ClipWithOwner, baseUrl: string): Clip {
     kind: row.kind,
     processing: processingOf(row),
     createdAt: row.createdAt.toISOString(),
-    owner: { username: owner.username, displayName: owner.displayName },
+    owner: toUserRef(owner, baseUrl),
     shareUrl: `${baseUrl}/c/${row.id}`,
     videoUrl: `${baseUrl}/media/${mediaFileName(row)}`,
     thumbnailUrl: thumbnailUrl(row, baseUrl),
@@ -85,8 +86,8 @@ export function processingOf(row: Pick<ClipRow, 'transcodeState'>): 'queued' | '
 }
 
 /** Pictures the app may send as a thumbnail, and how big. */
-const THUMB_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_THUMB_BYTES = 10 * 1024 * 1024;
+export const THUMB_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const MAX_THUMB_BYTES = 10 * 1024 * 1024;
 
 const CLAIM_TTL_MS = 30 * 60 * 1000;
 /** The embed copy is made while the uploader waits (a few seconds), so it gets more cores than compression. */
@@ -173,7 +174,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
   const unknownUser = (reply: FastifyReply, err: UnknownUserError) =>
     reply.code(400).send({ error: 'unknown_user', message: err.message });
 
-  app.get('/api/users', { preHandler: requireUser }, async () => listUsernames(db));
+  app.get('/api/users', { preHandler: requireUser }, async () => (await listUsernames(db)).map((u) => toUserRef(u, config.baseUrl)));
 
   app.get('/api/clips', { preHandler: requireUser }, async (req, reply) => {
     const q = listQuery.safeParse(req.query);
@@ -229,7 +230,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const found = p.success ? await getClip(db, p.data.id, req.user?.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
     if (found.clip.userId !== req.user!.id) return reply.code(403).send({ error: 'forbidden' });
-    return listViewers(db, found.clip.id);
+    return (await listViewers(db, found.clip.id)).map(({ viewedAt, ...u }) => ({ ...toUserRef(u, config.baseUrl), viewedAt }));
   });
 
   app.patch('/api/clips/:id', { preHandler: requireUser }, async (req, reply) => {
@@ -546,7 +547,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     }
     const item = created ?? {
       clip: row,
-      owner: { username: user.username, displayName: user.displayName },
+      owner: { id: user.id, username: user.username, displayName: user.displayName, avatarVersion: user.avatarVersion, frame: user.looks.frame },
       views: 0,
       tagged: [],
       taggedNames: [],

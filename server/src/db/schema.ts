@@ -12,7 +12,26 @@ export const users = pgTable('users', {
   isAdmin: boolean('is_admin').notNull().default(false),
   disabledAt: ts('disabled_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
+  /** Bumped each time the profile picture changes (`<data>/avatars/<id>.jpg`); 0 = none, draw the initial. */
+  avatarVersion: integer('avatar_version').notNull().default(0),
+  /** Equipped accent, theme, frame and banner (`Looks`); read through `sanitizeLooks`. Null = defaults. */
+  looks: jsonb('looks'),
+  /** What the desktop app reported (`StoredActivity`): counters (highest seen) and firsts. */
+  activity: jsonb('activity'),
 });
+
+/** Achievements a user earned; never removed. `quiet`: earned for past activity, announced in one summary. */
+export const userAchievements = pgTable(
+  'user_achievements',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    achievementId: text('achievement_id').notNull(),
+    earnedAt: ts('earned_at').notNull().defaultNow(),
+    seenAt: ts('seen_at'),
+    quiet: boolean('quiet').notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.achievementId] })],
+);
 
 export const sessions = pgTable(
   'sessions',

@@ -219,7 +219,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const [stats, inviteList, userList, transcodes, activity, games, reports] = await Promise.all([
       getAdminStats(db, app.disk),
       listActiveInvites(db, config.baseUrl),
-      listAdminUsers(db),
+      listAdminUsers(db, config.baseUrl),
       getTranscodes(db, app.transcoder),
       getActivity(db),
       getGameShares(db),

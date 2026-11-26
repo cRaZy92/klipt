@@ -187,6 +187,15 @@ export async function probeImage(path: string): Promise<ImageInfo | null> {
   return { width: video.width, height: video.height };
 }
 
+/** A profile picture: `input`'s picture cut to its centre square and scaled to 256×256, as a JPEG. */
+export async function makeAvatar(input: string, output: string): Promise<void> {
+  await run(ffmpegBin(), [
+    '-v', 'error', '-y', '-i', input, '-frames:v', '1',
+    '-vf', 'scale=256:256:force_original_aspect_ratio=increase,crop=256:256',
+    '-f', 'image2', '-c:v', 'mjpeg', '-q:v', '3', output,
+  ]);
+}
+
 /** Writes `input`'s picture as a PNG. */
 export async function toPng(input: string, output: string): Promise<void> {
   await run(ffmpegBin(), ['-v', 'error', '-y', '-i', input, '-frames:v', '1', '-f', 'image2', '-c:v', 'png', output]);

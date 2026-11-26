@@ -10,6 +10,7 @@ import { authRateLimit, requireUser, SESSION_COOKIE, setSessionCookie } from './
 import { hashPassword, verifyPassword } from './passwords.js';
 import { activeInvite } from '../admin/queries.js';
 import { createSession, listSessions, revokeSession } from './sessions.js';
+import { meOf } from '../users/ref.js';
 
 const registerBody = z
   .object({
@@ -33,13 +34,6 @@ const loginBody = z.object({
 // Real hash, verified against when the user is unknown, to equalize timing.
 const dummyHash = hashPassword(randomBytes(16).toString('hex'));
 
-const toMe = (u: { id: string; username: string; displayName: string | null; isAdmin: boolean }): Me => ({
-  id: u.id,
-  username: u.username,
-  displayName: u.displayName || u.username,
-  customName: u.displayName || null,
-  isAdmin: u.isAdmin,
-});
 
 export const MIN_PASSWORD = 8;
 export const MAX_DISPLAY_NAME = 32;
@@ -81,7 +75,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!user || !ok || user.disabledAt) return reply.code(401).send({ error: 'invalid_credentials' });
 
     const { token } = await createSession(db, user.id, client, deviceName ?? (client === 'web' ? 'Web' : undefined));
-    const me = toMe(user);
+    const me = (await meOf(db, user.id, config.baseUrl))!;
     if (client === 'desktop') {
       const body: DesktopLoginResponse = { token, me };
       return body;
@@ -142,7 +136,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const { token } = await createSession(db, user.id, 'web', 'Web');
     setSessionCookie(reply, token, config);
-    return toMe(user);
+    return (await meOf(db, user.id, config.baseUrl))!;
   });
 
   app.post('/api/auth/logout', async (req, reply) => {
@@ -151,9 +145,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(204).send();
   });
 
-  app.get('/api/me', { preHandler: requireUser }, async (req): Promise<Me> =>
-    toMe({ ...req.user!, displayName: req.user!.customName }),
-  );
+  app.get('/api/me', { preHandler: requireUser }, async (req): Promise<Me> => (await meOf(db, req.user!.id, config.baseUrl))!);
 
   app.patch('/api/me', { preHandler: requireUser }, async (req, reply) => {
     const parsed = updateMeBody.safeParse(req.body);
@@ -164,10 +156,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (name === false) return reply.code(400).send({ error: 'invalid_display_name' });
       set.displayName = name;
     }
-    const [user] = Object.keys(set).length
-      ? await db.update(users).set(set).where(eq(users.id, req.user!.id)).returning()
-      : await db.select().from(users).where(eq(users.id, req.user!.id));
-    return toMe(user!);
+    if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, req.user!.id));
+    return (await meOf(db, req.user!.id, config.baseUrl))!;
   });
 
   // Changing the password signs out every other session (this one stays).
@@ -229,7 +219,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(400).send({ error: 'invalid_reset' });
     const { token } = await createSession(db, user.id, 'web', 'Web');
     setSessionCookie(reply, token, config);
-    return toMe(user);
+    return (await meOf(db, user.id, config.baseUrl))!;
   });
 
   app.get('/api/auth/sessions', { preHandler: requireUser }, async (req): Promise<SessionInfo[]> =>

@@ -3,12 +3,13 @@ import type { GameCount, MyStorage } from '@klipt/shared';
 import type { AuthUser } from '../auth/sessions.js';
 import type { Db } from '../db/client.js';
 import { clipFavorites, clipTags, clipViews, clips, users } from '../db/schema.js';
+import { displayNameOf, userRefColumns, type UserRefRow } from '../users/ref.js';
 
 export type ClipRow = typeof clips.$inferSelect;
 export type Scope = 'feed' | 'mine' | 'user';
 export interface ClipWithOwner {
   clip: ClipRow;
-  owner: { username: string; displayName: string };
+  owner: UserRefRow;
   /** Friends who watched it plus logged-out plays. */
   views: number;
   /** Friends in the clip, by username. */
@@ -19,10 +20,8 @@ export interface ClipWithOwner {
   favorite: boolean;
 }
 
-/** The name a user shows to friends: their display name, or their username without one. */
-export const displayNameOf = (t: { displayName: unknown; username: unknown }) =>
-  sql<string>`coalesce(nullif(${t.displayName}, ''), ${t.username})`;
-const ownerExpr = { username: users.username, displayName: displayNameOf(users) };
+export { displayNameOf };
+const ownerExpr = userRefColumns;
 
 /** The usernames tagged in a clip, alphabetically. */
 const taggedExpr = sql<string[]>`coalesce((select array_agg(tu.username order by tu.username_key) from ${clipTags} ct join ${users} tu on tu.id = ct.user_id where ct.clip_id = ${clips.id}), '{}')`;
@@ -205,14 +204,14 @@ export async function recordView(db: Db, clipId: string, viewerId: string | null
 }
 
 /** The friends who watched `clipId`, first viewer first. */
-export async function listViewers(db: Db, clipId: string): Promise<{ username: string; displayName: string; viewedAt: string }[]> {
+export async function listViewers(db: Db, clipId: string): Promise<(UserRefRow & { viewedAt: string })[]> {
   const rows = await db
-    .select({ username: users.username, displayName: displayNameOf(users), viewedAt: clipViews.viewedAt })
+    .select({ ...userRefColumns, viewedAt: clipViews.viewedAt })
     .from(clipViews)
     .innerJoin(users, eq(users.id, clipViews.userId))
     .where(eq(clipViews.clipId, clipId))
     .orderBy(clipViews.viewedAt, users.username);
-  return rows.map((r) => ({ username: r.username, displayName: r.displayName, viewedAt: r.viewedAt.toISOString() }));
+  return rows.map((r) => ({ ...r, viewedAt: r.viewedAt.toISOString() }));
 }
 
 export class UnknownUserError extends Error {
@@ -244,8 +243,8 @@ export async function setTags(db: Pick<Db, 'delete' | 'insert'>, clipId: string,
 }
 
 /** Active users, for picking friends to tag. */
-export async function listUsernames(db: Db): Promise<{ username: string; displayName: string }[]> {
-  return db.select({ username: users.username, displayName: displayNameOf(users) }).from(users).where(isNull(users.disabledAt)).orderBy(asc(users.usernameKey));
+export async function listUsernames(db: Db): Promise<UserRefRow[]> {
+  return db.select(userRefColumns).from(users).where(isNull(users.disabledAt)).orderBy(asc(users.usernameKey));
 }
 
 /** A clip; `favorite` says whether `viewerId` starred it. */

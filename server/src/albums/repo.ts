@@ -2,7 +2,8 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { MAX_ALBUM_CLIPS, type AlbumSummary } from '@klipt/shared';
 import type { Db } from '../db/client.js';
 import { albumClips, albums, clips, users } from '../db/schema.js';
-import { displayNameOf, getClip, type ClipWithOwner } from '../clips/repo.js';
+import { userRefColumns, toUserRef, type UserRefRow } from '../users/ref.js';
+import { getClip, type ClipWithOwner } from '../clips/repo.js';
 import { newClipId } from '../clips/ids.js';
 import { thumbnailUrl } from '../clips/routes.js';
 
@@ -11,7 +12,7 @@ export type AlbumRow = typeof albums.$inferSelect;
 /** An album with its owner, as the repo hands it to routes and pages. */
 export interface AlbumWithOwner {
   album: AlbumRow;
-  owner: { username: string; displayName: string };
+  owner: UserRefRow;
   clipCount: number;
   /** The first clip's id and media version (for its thumbnail); null while empty. */
   cover: { id: string; mediaVersion: number; thumbVersion: number } | null;
@@ -35,7 +36,7 @@ function parseCover(raw: string | null): AlbumWithOwner['cover'] {
 
 const summaryColumns = (clipId?: string) => ({
   album: albums,
-  owner: { username: users.username, displayName: displayNameOf(users) },
+  owner: userRefColumns,
   clipCount: clipCountExpr,
   cover: coverExpr,
   hasClip: clipId
@@ -48,7 +49,7 @@ export function toAlbumSummary(a: AlbumWithOwner, baseUrl: string): AlbumSummary
   return {
     id: a.album.id,
     title: a.album.title,
-    owner: a.owner,
+    owner: toUserRef(a.owner, baseUrl),
     clipCount: a.clipCount,
     coverUrl: a.cover ? thumbnailUrl(a.cover, baseUrl) : null,
     shareUrl: `${baseUrl}/a/${a.album.id}`,

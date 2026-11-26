@@ -50,6 +50,9 @@
     album_full: 'That album is full (200 clips).',
     album_changed: 'The album changed meanwhile. Reload the page and try again.',
     unknown_clip: 'That clip no longer exists.',
+    not_an_image: "That file isn't a picture Klipt can read.",
+    unsupported_media_type: 'Use a JPEG, PNG or WebP picture.',
+    not_unlocked: 'Earn the achievement that unlocks it first.',
   };
   function friendly(err) {
     if (err.status === 429) return MESSAGES.rate_limited;
@@ -93,14 +96,17 @@
       if (kind === 'profile') {
         var me = await api('PATCH', '/api/me', { displayName: data.displayName });
         document.querySelectorAll('.topbar .who').forEach(function (who) {
-          var label = who.querySelector('span:not(.avatar)');
+          var label = who.querySelector('span:not(.avatar):not(.new-dot)');
           if (label) label.textContent = me.displayName;
           var avatar = who.querySelector('.avatar');
           if (avatar) {
             // same initial and hue as Avatar() in src/web/layout.tsx
             var hash = 0;
             for (var ch of me.displayName.toLowerCase()) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
-            avatar.textContent = ([...me.displayName][0] || '?').toUpperCase();
+            // The initial is the first text node; a picture over it stays.
+            var text = Array.prototype.find.call(avatar.childNodes, function (n) { return n.nodeType === 3; });
+            var initial = ([...me.displayName][0] || '?').toUpperCase();
+            if (text) text.textContent = initial; else avatar.prepend(initial);
             avatar.style.setProperty('--h', String(hash % 360));
           }
         });
@@ -447,10 +453,153 @@
   // Game chips: drop the art when Steam has none, so the chip shows just its name.
   // Errors don't bubble, hence the capture listener; the sweep catches any that failed before this ran.
   function dropBrokenArt(img) {
-    if (img.matches && img.matches('img.chip-art')) img.remove();
+    if (img.matches && img.matches('img.chip-art, img.avatar-img')) img.remove();
   }
   document.addEventListener('error', function (ev) { dropBrokenArt(ev.target); }, true);
-  document.querySelectorAll('img.chip-art').forEach(function (img) {
+  document.querySelectorAll('img.chip-art, img.avatar-img').forEach(function (img) {
     if (img.complete && img.naturalWidth === 0) dropBrokenArt(img);
+  });
+
+  // ── Profile picture: pick, crop to a square (drag + zoom, round preview), upload ──
+  var CROP_VIEW = 280;
+  var CROP_OUT = 512;
+  function cropDialog(img) {
+    var dialog = document.createElement('dialog');
+    dialog.className = 'avatar-crop';
+    dialog.innerHTML =
+      '<h2>Crop your picture</h2>' +
+      '<div class="crop-stage"><canvas></canvas></div>' +
+      '<label class="crop-zoom">Zoom <input type="range" min="1" max="4" step="0.01" value="1" aria-label="Zoom"></label>' +
+      '<p class="error" role="alert" hidden></p>' +
+      '<div class="crop-actions"><button type="button" class="btn ghost" data-crop="cancel">Cancel</button>' +
+      '<button type="button" class="btn primary" data-crop="save">Save picture</button></div>';
+    document.body.appendChild(dialog);
+    var canvas = dialog.querySelector('canvas');
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.height = Math.round(CROP_VIEW * dpr);
+    var ctx = canvas.getContext('2d');
+    var w = img.naturalWidth, h = img.naturalHeight;
+    // The visible square, in picture pixels: its side and centre.
+    var zoom = 1, cx = w / 2, cy = h / 2;
+    function side() { return Math.min(w, h) / zoom; }
+    function clamp() {
+      var half = side() / 2;
+      cx = Math.min(Math.max(cx, half), w - half);
+      cy = Math.min(Math.max(cy, half), h - half);
+    }
+    function draw(target, px) {
+      var s = side();
+      target.clearRect(0, 0, px, px);
+      target.drawImage(img, cx - s / 2, cy - s / 2, s, s, 0, 0, px, px);
+    }
+    function redraw() { clamp(); draw(ctx, canvas.width); }
+    redraw();
+    var stage = dialog.querySelector('.crop-stage');
+    var drag = null;
+    stage.addEventListener('pointerdown', function (ev) {
+      drag = { x: ev.clientX, y: ev.clientY };
+      stage.setPointerCapture(ev.pointerId);
+    });
+    stage.addEventListener('pointermove', function (ev) {
+      if (!drag) return;
+      var scale = side() / stage.clientWidth;
+      cx -= (ev.clientX - drag.x) * scale;
+      cy -= (ev.clientY - drag.y) * scale;
+      drag = { x: ev.clientX, y: ev.clientY };
+      redraw();
+    });
+    stage.addEventListener('pointerup', function () { drag = null; });
+    var slider = dialog.querySelector('input[type=range]');
+    slider.addEventListener('input', function () { zoom = Number(slider.value); redraw(); });
+    stage.addEventListener('wheel', function (ev) {
+      ev.preventDefault();
+      zoom = Math.min(4, Math.max(1, zoom * (ev.deltaY < 0 ? 1.08 : 1 / 1.08)));
+      slider.value = String(zoom);
+      redraw();
+    }, { passive: false });
+    dialog.addEventListener('close', function () { dialog.remove(); });
+    dialog.addEventListener('click', async function (ev) {
+      var btn = ev.target.closest('[data-crop]');
+      if (!btn) return;
+      if (btn.dataset.crop === 'cancel') return dialog.close();
+      btn.disabled = true;
+      var out = document.createElement('canvas');
+      out.width = out.height = CROP_OUT;
+      draw(out.getContext('2d'), CROP_OUT);
+      var blob = await new Promise(function (resolve) { out.toBlob(resolve, 'image/jpeg', 0.9); });
+      try {
+        var res = await fetch('/api/me/avatar', { method: 'PUT', headers: { 'content-type': 'image/jpeg' }, body: blob, credentials: 'same-origin' });
+        if (!res.ok) {
+          var code = '';
+          try { code = (await res.json()).error || ''; } catch (e) { /* no body */ }
+          var err = new Error(code || 'request_failed');
+          err.status = res.status;
+          throw err;
+        }
+        location.reload();
+      } catch (e) {
+        var errEl = dialog.querySelector('.error');
+        errEl.textContent = friendly(e);
+        errEl.hidden = false;
+        btn.disabled = false;
+      }
+    });
+    dialog.showModal();
+  }
+
+  document.addEventListener('click', async function (ev) {
+    var form = ev.target.closest && ev.target.closest('form[data-form=avatar]');
+    if (!form) return;
+    var action = ev.target.closest('[data-action]');
+    if (!action) return;
+    var errEl = form.querySelector('.error');
+    errEl.hidden = true;
+    if (action.dataset.action === 'choose-avatar') {
+      form.querySelector('input[type=file]').click();
+    } else if (action.dataset.action === 'remove-avatar') {
+      try {
+        await api('DELETE', '/api/me/avatar');
+        location.reload();
+      } catch (e) {
+        errEl.textContent = friendly(e);
+        errEl.hidden = false;
+      }
+    }
+  });
+
+  document.addEventListener('change', function (ev) {
+    var input = ev.target;
+    if (!input.matches || !input.matches('form[data-form=avatar] input[type=file]')) return;
+    var file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    var errEl = input.form.querySelector('.error');
+    errEl.hidden = true;
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () { cropDialog(img); };
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      errEl.textContent = MESSAGES.not_an_image;
+      errEl.hidden = false;
+    };
+    img.src = url;
+  });
+
+  // ── Looks: a choice saves at once and the page reloads in the new colours ──
+  document.addEventListener('change', async function (ev) {
+    var input = ev.target;
+    if (!input.matches || !input.matches('form[data-form=looks] input[type=radio]')) return;
+    var body = {};
+    body[input.name] = input.value === '' ? null : input.value;
+    var errEl = input.form.querySelector('.error');
+    errEl.hidden = true;
+    try {
+      await api('PUT', '/api/me/looks', body);
+      location.reload();
+    } catch (e) {
+      errEl.textContent = friendly(e);
+      errEl.hidden = false;
+    }
   });
 })();

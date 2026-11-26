@@ -616,3 +616,90 @@ kbd { font-family: var(--font); font-weight: 650; font-size: .82em; padding: 2px
   .cols { gap: 3px; }
 }
 .user-row .btn, .user-row .btn-slot { width: 5.5rem; flex: none; }
+
+/* ── Pictures, frames and banners ──────────────────────────
+   The same frame and banner rules are in desktop/src/components/looks.css: keep them in step. */
+.avatar { position: relative; }
+.avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.avatar.frame::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%; padding: 2px;
+  background: var(--ring);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+.avatar.lg.frame::after { inset: -5px; padding: 3px; }
+.frame-bronze { --ring: linear-gradient(140deg, #f2b58a, #9a5a2e 55%, #e09a66); }
+.frame-silver { --ring: linear-gradient(140deg, #ffffff, #8e97a6 50%, #e4e8ef); }
+.frame-gold { --ring: linear-gradient(140deg, #fff1a8, #d39b18 50%, #ffd75e); box-shadow: 0 0 12px rgba(255, 201, 77, 0.35); }
+.frame-rainbow { --ring: conic-gradient(#ff5d6c, #ffb547, #ffe66d, #3ccf8e, #4dabff, #9b7bff, #ff5d6c); }
+.frame-pulse { --ring: linear-gradient(140deg, var(--accent-text), var(--accent)); animation: klipt-pulse 2.4s ease-in-out infinite; }
+@keyframes klipt-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { box-shadow: 0 0 0 6px rgba(0, 0, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .frame-pulse { animation: none; box-shadow: 0 0 10px var(--accent-glow); }
+}
+
+.banner-curator {
+  --banner: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0 12px, transparent 12px 24px),
+    linear-gradient(120deg, #3b2a6b, #1c4b6b);
+}
+.banner-editor {
+  --banner: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.45) 0 10px, transparent 10px 22px) top / 100% 10px no-repeat,
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.45) 0 10px, transparent 10px 22px) bottom / 100% 10px no-repeat,
+    linear-gradient(120deg, #6b1f2a, #c2410c 60%, #ffb547);
+}
+.banner-squad {
+  --banner: radial-gradient(circle at 18% 30%, rgba(60, 207, 142, 0.5), transparent 45%),
+    radial-gradient(circle at 82% 65%, rgba(77, 171, 255, 0.5), transparent 50%),
+    linear-gradient(120deg, #122a2a, #151d3b);
+}
+.profile-head.has-banner {
+  padding: 64px 24px 20px; border-radius: var(--radius-lg);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 70%), var(--banner);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.profile-head.has-banner .handle { color: var(--text-muted); }
+
+/* ── Badges ─────────────────────────────────────────────── */
+.badge-strip { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: -8px 0 24px; padding: 0; }
+.badge-medal {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 6px;
+  border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border);
+  font-size: .85rem; font-weight: 600; color: var(--text-muted); cursor: default;
+}
+.badge-medal > span:first-child { font-size: 1.05rem; line-height: 1; }
+.new-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+
+/* ── Account: picture and looks ─────────────────────────── */
+.avatar-form { flex-direction: row; align-items: center; gap: 18px; flex-wrap: wrap; }
+.avatar-actions { display: flex; gap: 8px; }
+.looks-form fieldset { border: 0; margin: 0 0 12px; padding: 0; }
+.looks-form legend { font-weight: 600; margin-bottom: 8px; }
+.look-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.look-choice {
+  position: relative; display: inline-flex; flex-direction: column; align-items: center; gap: 6px;
+  min-width: 72px; padding: 10px 8px 8px; border-radius: var(--radius-sm);
+  background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); cursor: pointer;
+  font-size: .8rem; color: var(--text-muted);
+}
+.look-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.look-choice:has(input:checked) { box-shadow: inset 0 0 0 2px var(--accent); color: var(--text); }
+.look-choice:has(input:focus-visible) { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.look-choice.locked { cursor: not-allowed; opacity: .55; }
+.look-lock { position: absolute; top: 4px; right: 6px; font-size: .75rem; }
+.swatch { width: 28px; height: 28px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.15); }
+.theme-chip { width: 40px; height: 28px; border-radius: 7px; background: linear-gradient(135deg, var(--b) 55%, var(--s) 55%); box-shadow: inset 0 0 0 1px var(--s); }
+.banner-chip { width: 88px; height: 28px; border-radius: 7px; background: var(--banner); }
+
+/* ── Picture crop dialog ───────────────────────────────── */
+.avatar-crop { border: 0; border-radius: var(--radius-lg); background: var(--surface); color: var(--text); padding: 24px; box-shadow: var(--shadow, 0 18px 50px rgba(0, 0, 0, .55)); max-width: calc(100vw - 32px); }
+.avatar-crop::backdrop { background: rgba(0, 0, 0, 0.6); }
+.avatar-crop h2 { margin: 0 0 16px; }
+.crop-stage { width: 280px; height: 280px; max-width: 100%; margin: 0 auto; border-radius: 50%; overflow: hidden; touch-action: none; cursor: grab; background: var(--bg); box-shadow: 0 0 0 1px var(--border-strong); }
+.crop-stage canvas { display: block; width: 100%; height: 100%; }
+.crop-zoom { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
+.crop-zoom input { flex: 1; }
+.crop-actions { display: flex; justify-content: flex-end; gap: 8px; }

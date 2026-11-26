@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getActivity, getAdminStats, getGameShares, getTranscodes, isInviteActive, listActiveInvites, listAdminUsers, listFeedback } from '../admin/queries.js';
 import { toClip, versionQuery } from '../clips/routes.js';
@@ -10,6 +10,9 @@ import { listSessions } from '../auth/sessions.js';
 import { passwordResets, sessions, users } from '../db/schema.js';
 import { activeReset } from '../auth/routes.js';
 import { AccountPage } from './pages/account.js';
+import { BANNERS } from '@klipt/shared';
+import { markSeen, myAchievements } from '../achievements/engine.js';
+import { userRefColumns } from '../users/ref.js';
 import { ResetPage } from './pages/reset.js';
 import { displayNameOf, getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, shareInviter, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage, TranscodeSection } from './pages/admin.js';
@@ -138,12 +141,20 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     if (!guard(req, reply)) return reply;
     const { username } = req.params as { username: string };
     const [owner] = await db
-      .select({ username: users.username, displayName: displayNameOf(users) })
+      .select({ ...userRefColumns, banner: sql<string | null>`${users.looks}->>'banner'` })
       .from(users)
       .where(eq(users.usernameKey, username.toLowerCase()));
     if (!owner) return notFound(req, reply);
-    const [data, stats] = await Promise.all([load(req, 'user', owner.username), getProfileStats(db, req.user!, owner.username)]);
-    return html(reply, UserPage({ user: req.user!, username: owner.username, displayName: owner.displayName, ...data, stats }) as string);
+    const [data, stats, achievements] = await Promise.all([
+      load(req, 'user', owner.username),
+      getProfileStats(db, req.user!, owner.username),
+      myAchievements(db, owner.id),
+    ]);
+    const banner = BANNERS.some((b) => b.id === owner.banner) ? owner.banner : null;
+    const page = UserPage({ user: req.user!, username: owner.username, displayName: owner.displayName, ...data, stats, owner, banner, badges: achievements.earned }) as string;
+    // Opening your own profile is seeing your new achievements.
+    if (owner.id === req.user!.id && req.user!.newAchievements > 0) await markSeen(db, owner.id);
+    return html(reply, page);
   });
 
   // Public: the id is the secret (link-only clips are shareable too).
@@ -192,15 +203,16 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   app.get('/account', async (req, reply) => {
     if (!guard(req, reply)) return reply;
     const user = req.user!;
-    const [infos, devices] = await Promise.all([
+    const [infos, devices, achievements] = await Promise.all([
       listSessions(db, user),
       db.select({ id: sessions.id, appVersion: sessions.appVersion, os: sessions.os }).from(sessions).where(eq(sessions.userId, user.id)),
+      myAchievements(db, user.id),
     ]);
     const list = infos.map((s) => {
       const d = devices.find((x) => x.id === s.id);
       return { ...s, appVersion: d?.appVersion ?? null, os: d?.os ?? null };
     });
-    return html(reply, AccountPage({ user, sessions: list }) as string);
+    return html(reply, AccountPage({ user, sessions: list, unlocked: achievements.unlocked }) as string);
   });
 
   app.get('/reset/:code', async (req, reply) => {

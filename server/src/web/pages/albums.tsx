@@ -96,7 +96,7 @@ export function AlbumPage(props: { user: AuthUser | null; album: AlbumSummary; c
             <h1 data-role="album-title">{e(album.title)}</h1>
             <p class="album-byline">
               <a class="album-owner" href={`/u/${encodeURIComponent(album.owner.username)}`}>
-                <Avatar name={album.owner.displayName} size="sm" />
+                <Avatar name={album.owner.displayName} url={album.owner.avatarUrl} frame={album.owner.frame} size="sm" />
                 <strong>{e(album.owner.displayName)}</strong>
               </a>
               <span>{clipsLabel(clips.length)}</span>

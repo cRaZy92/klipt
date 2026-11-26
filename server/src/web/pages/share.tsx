@@ -146,7 +146,7 @@ export function SharePage(props: {
           {clip.gameName ? <p class="share-game">{e(clip.gameName)}</p> : ''}
           <h1>{e(clip.title)}</h1>
           <a class="share-owner" href={`/u/${encodeURIComponent(clip.owner.username)}`}>
-            <Avatar name={clip.owner.displayName} size="md" />
+            <Avatar name={clip.owner.displayName} url={clip.owner.avatarUrl} frame={clip.owner.frame} size="md" />
             <span>
               <strong>{e(clip.owner.displayName)}</strong>
               <span class="meta">

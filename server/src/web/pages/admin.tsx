@@ -281,7 +281,7 @@ export function AdminPage(props: {
       <ul class="rows plain">
         {users.map((u) => (
           <li class="row user-row" data-user-id={u.id}>
-            <Avatar name={u.displayName} size="md" />
+            <Avatar name={u.displayName} url={u.avatarUrl} size="md" />
             <div class="row-main">
               <a href={`/u/${encodeURIComponent(u.username)}`}><strong>{e(u.displayName)}</strong></a>
               {u.displayName !== u.username ? <span class="muted"> @{e(u.username)}</span> : ''}

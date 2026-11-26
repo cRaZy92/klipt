@@ -2,7 +2,30 @@ import type { SessionInfo } from '@klipt/shared';
 import type { AuthUser } from '../../auth/sessions.js';
 import { relativeDate } from '../components.js';
 import { esc as e } from '../escape.js';
-import { Layout } from '../layout.js';
+import { ACCENTS, ACHIEVEMENTS, BANNERS, FRAMES, THEMES, type CosmeticId } from '@klipt/shared';
+import { avatarUrl } from '../../users/ref.js';
+import { Avatar, Layout } from '../layout.js';
+
+/** Why a cosmetic is locked: the achievement that unlocks it (a hidden one stays a secret). */
+function unlocksWith(id: CosmeticId): string {
+  const a = ACHIEVEMENTS.find((x) => x.reward === id);
+  if (!a) return 'Locked';
+  return a.hidden ? 'Unlocks with a hidden achievement' : `Unlocks with ${a.name}`;
+}
+
+/** One choice in the looks form: a radio, disabled (with what unlocks it) while locked. */
+function Choice(props: { kind: 'accent' | 'theme' | 'frame' | 'banner'; id: string | null; name: string; checked: boolean; unlocked: Set<string>; children?: JSX.Element }): JSX.Element {
+  const cid = `${props.kind}:${props.id}` as CosmeticId;
+  const locked = props.id !== null && !props.unlocked.has(cid);
+  return (
+    <label class={`look-choice look-${props.kind}${locked ? ' locked' : ''}`} title={e(locked ? `${props.name}: ${unlocksWith(cid)}` : props.name)}>
+      <input type="radio" name={props.kind} value={props.id ?? ''} checked={props.checked} disabled={locked} />
+      {props.children ?? ''}
+      <span class="look-name">{e(props.name)}</span>
+      {locked ? <span class="look-lock" aria-label={e(unlocksWith(cid))}>🔒</span> : ''}
+    </label>
+  );
+}
 
 /** The device a session reported (desktop app version and OS), if it did. */
 export interface AccountSession extends SessionInfo {
@@ -11,8 +34,11 @@ export interface AccountSession extends SessionInfo {
 }
 
 /** Your name, password, signed-in devices, and a way to send a problem or an idea to the admin. */
-export function AccountPage(props: { user: AuthUser; sessions: AccountSession[] }): JSX.Element {
+export function AccountPage(props: { user: AuthUser; sessions: AccountSession[]; unlocked: CosmeticId[] }): JSX.Element {
   const { user } = props;
+  const unlocked = new Set<string>(props.unlocked);
+  const picture = avatarUrl({ id: user.id, avatarVersion: user.avatarVersion }, '');
+  const looks = user.looks;
   return (
     <Layout title="Account" user={user} nav="account">
       <div class="account-page">
@@ -30,6 +56,73 @@ export function AccountPage(props: { user: AuthUser; sessions: AccountSession[] 
             </label>
             <p class="error" role="alert" hidden></p>
             <button class="btn primary" type="submit">Save name</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Picture</h2>
+          <p class="muted">Friends see it on your clips, albums and profile. Any JPEG, PNG or WebP picture.</p>
+          <form class="form avatar-form" data-form="avatar">
+            <Avatar name={user.displayName} url={picture} frame={looks.frame} size="lg" />
+            <input type="file" name="picture" accept="image/jpeg,image/png,image/webp" hidden />
+            <div class="avatar-actions">
+              <button class="btn primary" type="button" data-action="choose-avatar">Choose picture</button>
+              {picture ? <button class="btn ghost" type="button" data-action="remove-avatar">Remove</button> : ''}
+            </div>
+            <p class="error" role="alert" hidden></p>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Looks</h2>
+          <p class="muted">
+            Colours and themes change what you see. Frames and banners are what friends see on you. Achievements unlock
+            more of them.
+          </p>
+          <form class="form looks-form" data-form="looks">
+            <fieldset>
+              <legend>Accent colour</legend>
+              <div class="look-row">
+                {ACCENTS.map((a) => (
+                  <Choice kind="accent" id={a.id} name={a.name} checked={looks.accent === a.id} unlocked={unlocked}>
+                    <span class="swatch" style={`--c:${a.color}`}></span>
+                  </Choice>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend>Theme</legend>
+              <div class="look-row">
+                {THEMES.map((t) => (
+                  <Choice kind="theme" id={t.id} name={t.name} checked={looks.theme === t.id} unlocked={unlocked}>
+                    <span class="theme-chip" style={`--b:${t.tokens['--bg']};--s:${t.tokens['--surface-3']};--t:${t.tokens['--text']}`}></span>
+                  </Choice>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend>Avatar frame</legend>
+              <div class="look-row">
+                <Choice kind="frame" id={null} name="None" checked={looks.frame === null} unlocked={unlocked} />
+                {FRAMES.map((f) => (
+                  <Choice kind="frame" id={f.id} name={f.name} checked={looks.frame === f.id} unlocked={unlocked}>
+                    <Avatar name={user.displayName} url={picture} frame={f.id} size="md" />
+                  </Choice>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend>Profile banner</legend>
+              <div class="look-row">
+                <Choice kind="banner" id={null} name="None" checked={looks.banner === null} unlocked={unlocked} />
+                {BANNERS.map((b) => (
+                  <Choice kind="banner" id={b.id} name={b.name} checked={looks.banner === b.id} unlocked={unlocked}>
+                    <span class={`banner-chip banner-${b.id}`}></span>
+                  </Choice>
+                ))}
+              </div>
+            </fieldset>
+            <p class="error" role="alert" hidden></p>
           </form>
         </section>
 

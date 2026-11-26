@@ -1,5 +1,7 @@
 import Html from '@kitajs/html';
 import type { AuthUser } from '../auth/sessions.js';
+import { isFrame, looksTokens } from '@klipt/shared';
+import { avatarUrl, type UserRefRow } from '../users/ref.js';
 
 import { esc as e } from './escape.js';
 
@@ -25,16 +27,33 @@ export function LogoMark(props: { size?: number }): JSX.Element {
   );
 }
 
-/** A friend's initial on a colour picked from their name, so each person keeps the same one. */
-export function Avatar(props: { name: string; size?: 'sm' | 'md' | 'lg' }): JSX.Element {
+/**
+ * A friend's picture, or their initial on a colour picked from their name (each person keeps the
+ * same one). The initial stays underneath: a picture that can't load is removed (app.js) and it shows.
+ * `frame`: the ring they wear.
+ */
+export function Avatar(props: { name: string; url?: string | null; frame?: string | null; size?: 'sm' | 'md' | 'lg' }): JSX.Element {
   let hash = 0;
   for (const ch of props.name.toLowerCase()) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
   const initial = [...props.name][0]?.toUpperCase() ?? '?';
+  const frame = isFrame(props.frame) ? ` frame frame-${props.frame}` : '';
   return (
-    <span class={`avatar ${props.size ?? 'sm'}`} style={`--h:${hash % 360}`} aria-hidden="true">
+    <span class={`avatar ${props.size ?? 'sm'}${frame}`} style={`--h:${hash % 360}`} aria-hidden="true">
       {e(initial)}
+      {props.url ? <img class="avatar-img" src={e(props.url)} alt="" loading="lazy" /> : ''}
     </span>
   );
+}
+
+/** The Avatar of a user row (`userRefColumns`). */
+export function AvatarOf(props: { who: UserRefRow; size?: 'sm' | 'md' | 'lg' }): JSX.Element {
+  return <Avatar name={props.who.displayName} url={avatarUrl(props.who, '')} frame={props.who.frame} size={props.size} />;
+}
+
+/** The logged-in user's accent and theme, over the stylesheet's defaults. */
+function looksStyle(user: AuthUser): string {
+  const vars = Object.entries(looksTokens(user.looks)).map(([k, v]) => `${k}:${v}`).join(';');
+  return `<style>:root{${e(vars)}}</style>`;
 }
 
 export function Layout(props: {
@@ -62,6 +81,7 @@ export function Layout(props: {
           <title>{e(title)} · Klipt</title>
           <link rel="preload" href="/static/fonts/bricolage-grotesque-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin="" />
           <link rel="stylesheet" href="/static/app.css" />
+          {user ? looksStyle(user) : ''}
           {props.head ?? ''}
         </head>
         <body>
@@ -81,8 +101,9 @@ export function Layout(props: {
                 </nav>
                 <div class="account">
                   <a class="who" href={`/u/${encodeURIComponent(user.username)}`} title="Your profile">
-                    <Avatar name={user.displayName} />
+                    <Avatar name={user.displayName} url={avatarUrl({ id: user.id, avatarVersion: user.avatarVersion }, '')} frame={user.looks.frame} />
                     <span>{e(user.displayName)}</span>
+                    {user.newAchievements > 0 ? <span class="new-dot" title="New achievement"></span> : ''}
                   </a>
                   <a
                     class="btn ghost small"

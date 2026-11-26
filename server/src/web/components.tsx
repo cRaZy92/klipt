@@ -3,7 +3,7 @@ import type { ClipWithOwner } from '../clips/repo.js';
 import { thumbnailUrl } from '../clips/routes.js';
 
 import { esc as e } from './escape.js';
-import { Avatar } from './layout.js';
+import { AvatarOf } from './layout.js';
 
 export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -103,7 +103,7 @@ export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
         <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>
       </div>
       <div class="card-body">
-        <Avatar name={owner.displayName} />
+        <AvatarOf who={owner} />
         <div class="card-text">
           <div class="card-title">{e(clip.title)}</div>
           <div class="meta">

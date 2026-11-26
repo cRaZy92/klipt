@@ -36,6 +36,8 @@ const APP_ORIGINS: &[&str] =
 pub struct MediaServer {
     port: u16,
     files: Arc<Mutex<HashMap<String, Served>>>,
+    /// Open connections (read by tests to see that a gone player's thread ended).
+    #[cfg_attr(not(test), allow(dead_code))]
     open: Arc<AtomicUsize>,
 }
 

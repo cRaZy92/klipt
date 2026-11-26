@@ -190,17 +190,17 @@ export async function getUserStorage(db: Db, userId: string): Promise<MyStorage>
 
 /**
  * Counts a play of `clipId`: a logged-in viewer once (never the owner), a logged-out one every
- * time. False when the clip doesn't exist.
+ * time. Returns the clip's owner; null when the clip doesn't exist.
  */
-export async function recordView(db: Db, clipId: string, viewerId: string | null): Promise<boolean> {
+export async function recordView(db: Db, clipId: string, viewerId: string | null): Promise<string | null> {
   const [clip] = await db.select({ userId: clips.userId }).from(clips).where(eq(clips.id, clipId));
-  if (!clip) return false;
+  if (!clip) return null;
   if (viewerId === null) {
     await db.update(clips).set({ anonViews: sql`${clips.anonViews} + 1` }).where(eq(clips.id, clipId));
   } else if (viewerId !== clip.userId) {
     await db.insert(clipViews).values({ clipId, userId: viewerId }).onConflictDoNothing();
   }
-  return true;
+  return clip.userId;
 }
 
 /** The friends who watched `clipId`, first viewer first. */

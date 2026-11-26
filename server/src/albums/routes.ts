@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { MAX_ALBUM_CLIPS, type Album } from '@klipt/shared';
+import { touch } from '../achievements/engine.js';
 import { requireUser } from '../auth/plugin.js';
 import { toClip } from '../clips/routes.js';
 import {
@@ -69,6 +70,7 @@ export async function albumRoutes(app: FastifyInstance): Promise<void> {
     if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
       const id = await createAlbum(db, req.user!.id, body.data.title, body.data.clipIds);
+      await touch(app, [req.user!.id]);
       return reply.code(201).send(await withClips((await getAlbum(db, id))!, req.user!.id));
     } catch (err) {
       if (err instanceof AlbumFullError) return full(reply);
@@ -119,6 +121,7 @@ export async function albumRoutes(app: FastifyInstance): Promise<void> {
         try {
           if (method === 'PUT') await addAlbumClip(db, found.album.id, p.data.clipId);
           else await removeAlbumClip(db, found.album.id, p.data.clipId);
+          if (method === 'PUT') await touch(app, [req.user!.id]);
         } catch (err) {
           if (err instanceof AlbumFullError) return full(reply);
           if (err instanceof UnknownClipError) return reply.code(404).send({ error: 'not_found' });

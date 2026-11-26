@@ -11,6 +11,7 @@ import { isUploadComplete, removeTusFiles, removeUpload, tusFilePath } from '../
 import { assertPlayable, makeThumbnail, MediaError, probeImage, probeVideo, remuxFaststart, toPng } from './media.js';
 import { newClipId } from './ids.js';
 import { toUserRef } from '../users/ref.js';
+import { touch } from '../achievements/engine.js';
 import { embedFileName, MEDIA_FILE, mediaFileName, videoFileName } from './files.js';
 import { createEmbed, EMBED_VERSION } from './embed.js';
 import { addAlbumClip, AlbumFullError, getAlbum, UnknownClipError } from '../albums/repo.js';
@@ -221,7 +222,9 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
   // so it's rate limited per address.
   app.post('/api/clips/:id/view', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
-    if (!p.success || !(await recordView(db, p.data.id, req.user?.id ?? null))) return reply.code(404).send({ error: 'not_found' });
+    const owner = p.success ? await recordView(db, p.data.id, req.user?.id ?? null) : null;
+    if (!owner) return reply.code(404).send({ error: 'not_found' });
+    await touch(app, [owner]);
     return reply.code(204).send();
   });
 
@@ -250,6 +253,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         throw err;
       }
       await db.transaction((tx) => setTags(tx, found.clip.id, ids));
+      await touch(app, [found.clip.userId, ...ids]);
     }
     const patch = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
     if (Object.keys(patch).length > 0) await db.update(clips).set(patch).where(eq(clips.id, found.clip.id));
@@ -541,6 +545,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     }
     if (row.transcodeState === 'queued') app.transcoder.kick();
     await addToAlbums(row.id);
+    await touch(app, [user.id, ...(tagIds ?? [])]);
     const created = await getClip(db, row.id, user.id);
     if (target && created) {
       return reply.code(200).send(toClip(created, config.baseUrl));

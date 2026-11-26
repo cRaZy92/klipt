@@ -10,6 +10,7 @@ import { mountTus } from './uploads/tus.js';
 import { clipRoutes } from './clips/routes.js';
 import { albumRoutes } from './albums/routes.js';
 import { userRoutes } from './users/routes.js';
+import { achievementRoutes } from './achievements/routes.js';
 import { webRoutes } from './web/routes.js';
 import { join } from 'node:path';
 import { Transcoder } from './clips/transcoder.js';
@@ -96,6 +97,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await mountTus(app, { db: deps.db, config: deps.config, disk });
   await clipRoutes(app);
   await userRoutes(app);
+  await achievementRoutes(app);
   await albumRoutes(app);
   await webRoutes(app);
 

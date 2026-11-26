@@ -4,6 +4,7 @@ import { ensureAdmin } from './admin/bootstrap.js';
 import { buildApp } from './app.js';
 import { cleanupStaleUploads } from './uploads/tus.js';
 import { cleanupExpired } from './cleanup.js';
+import { evaluateAll } from './achievements/engine.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -20,6 +21,13 @@ async function main(): Promise<void> {
   await runMigrations(db);
   await ensureAdmin(db, config);
   const app = await buildApp({ config, db, logger: true });
+  // Achievements for what was already there (first deploy, or definitions added since): awarded quietly.
+  try {
+    const n = await evaluateAll(db);
+    if (n > 0) app.log.info(`awarded ${n} achievements for past activity`);
+  } catch (err) {
+    app.log.error({ err }, 'checking achievements for past activity failed');
+  }
 
   const cleanup = async () => {
     try {

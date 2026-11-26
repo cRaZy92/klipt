@@ -23,6 +23,9 @@ fn refusal(code: &str) -> Option<&'static str> {
         "wrong_password" => "That isn't your current password.",
         "weak_password" => "The new password needs at least 8 characters.",
         "invalid_display_name" => "Names are up to 32 characters.",
+        "not_unlocked" => "Earn the achievement that unlocks it first.",
+        "not_an_image" => "Klipt can't read that file as a picture.",
+        "unsupported_media_type" => "Use a JPEG, PNG or WebP picture.",
         "rate_limited" => "Too many tries. Wait a minute and try again.",
         _ => return None,
     })
@@ -55,17 +58,24 @@ fn forget_if_unauthorized(app: &AppHandle, auth: &Auth, e: &AppError) {
     }
 }
 
-/// Keeps the display name and admin flag the server answered with (`me`) in the saved login.
+/// Keeps what the server answered (`me`: display name, admin flag, picture, looks) in the saved login.
 fn save_name(app: &AppHandle, auth: &Auth, me: &serde_json::Value) -> Result<Account> {
     let data_dir = app.state::<AppState>().data_dir.clone();
     // Only if this login is still the saved one (a logout or another login may have happened).
     let mut current = auth::load(&data_dir).filter(|a| a.token == auth.token).ok_or(AppError::Unauthorized)?;
-    let custom_name = custom_name_of(me);
-    let is_admin = me.get("isAdmin").and_then(|v| v.as_bool()).unwrap_or(current.is_admin);
-    if current.display_name != custom_name || current.is_admin != is_admin {
-        current.display_name = custom_name;
-        current.is_admin = is_admin;
-        auth::save(&data_dir, &current)?;
+    let mut next = current.clone();
+    next.display_name = custom_name_of(me);
+    next.is_admin = me.get("isAdmin").and_then(|v| v.as_bool()).unwrap_or(current.is_admin);
+    // Older servers send neither: keep what's there.
+    if let Some(url) = me.get("avatarUrl") {
+        next.avatar_url = url.as_str().map(String::from);
+    }
+    if let Some(looks) = me.get("looks").filter(|l| l.is_object()) {
+        next.looks = Some(looks.clone());
+    }
+    if next != current {
+        auth::save(&data_dir, &next)?;
+        current = next;
     }
     Ok(Account::from_auth(&current))
 }
@@ -111,6 +121,13 @@ pub async fn refresh_account(app: AppHandle) -> Result<Option<Account>> {
         }
     };
     report_device(&app, &auth);
+    // The activity report also announces achievements earned since the app last looked.
+    let app3 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::activity::report_now(&app3).await {
+            crate::elog!("klipt: can't report activity to the server: {e}");
+        }
+    });
     let app2 = app.clone();
     off_main(move || save_name(&app2, &auth, &me)).await?.map(Some)
 }
@@ -136,6 +153,77 @@ pub async fn change_password(app: AppHandle, current_password: String, new_passw
         forget_if_unauthorized(&app, &auth, e);
     })?;
     Ok(())
+}
+
+/// Your achievements (`MyAchievements`), for the Profile screen.
+#[tauri::command]
+pub async fn my_achievements(app: AppHandle) -> Result<serde_json::Value> {
+    let (auth, client) = saved(&app)?;
+    client.get_json(&auth.token, "/api/me/achievements", &[]).await.map_err(api_error).inspect_err(|e| {
+        forget_if_unauthorized(&app, &auth, e);
+    })
+}
+
+/// Equips looks (any of `accent`, `theme`, `frame`, `banner`; null frame/banner = none).
+#[tauri::command]
+pub async fn set_looks(app: AppHandle, looks: serde_json::Value) -> Result<Account> {
+    let (auth, client) = saved(&app)?;
+    let me = client.put_json(&auth.token, "/api/me/looks", &looks).await.map_err(api_error).inspect_err(|e| {
+        forget_if_unauthorized(&app, &auth, e);
+    })?;
+    let app2 = app.clone();
+    off_main(move || save_name(&app2, &auth, &me)).await?
+}
+
+/// Sets the profile picture: a square JPEG the window cropped.
+#[tauri::command]
+pub async fn set_avatar(app: AppHandle, jpeg: Vec<u8>) -> Result<Account> {
+    if jpeg.is_empty() || jpeg.len() > MAX_PICTURE_BYTES {
+        return Err(AppError::InvalidInput("picture".into()));
+    }
+    let (auth, client) = saved(&app)?;
+    let me = client.put_bytes(&auth.token, "/api/me/avatar", "image/jpeg", jpeg).await.map_err(api_error).inspect_err(|e| {
+        forget_if_unauthorized(&app, &auth, e);
+    })?;
+    let app2 = app.clone();
+    off_main(move || save_name(&app2, &auth, &me)).await?
+}
+
+/// Back to the initial.
+#[tauri::command]
+pub async fn remove_avatar(app: AppHandle) -> Result<Account> {
+    let (auth, client) = saved(&app)?;
+    let me = client.delete_json(&auth.token, "/api/me/avatar").await.map_err(api_error).inspect_err(|e| {
+        forget_if_unauthorized(&app, &auth, e);
+    })?;
+    let app2 = app.clone();
+    off_main(move || save_name(&app2, &auth, &me)).await?
+}
+
+/// The most a picture may weigh (the server's limit too).
+const MAX_PICTURE_BYTES: usize = 10 * 1024 * 1024;
+
+/// A picture file as a `data:` URL the window can draw (for cropping a new profile picture).
+#[tauri::command]
+pub async fn read_picture(path: std::path::PathBuf) -> Result<String> {
+    off_main(move || picture_data_url(&path)).await?
+}
+
+fn picture_data_url(path: &std::path::Path) -> Result<String> {
+    use base64::Engine;
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        _ => return Err(AppError::InvalidInput("Use a JPEG, PNG or WebP picture".into())),
+    };
+    let len = std::fs::metadata(path)?.len();
+    if len == 0 || len > MAX_PICTURE_BYTES as u64 {
+        return Err(AppError::Refused("Pictures can be up to 10 MB.".into()));
+    }
+    let bytes = std::fs::read(path)?;
+    Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -209,4 +297,23 @@ pub async fn open_logs_folder(app: AppHandle) -> Result<()> {
             .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
     })
     .await?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picture_data_url_by_extension_and_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = dir.path().join("me.PNG");
+        std::fs::write(&png, [1u8, 2, 3]).unwrap();
+        assert_eq!(picture_data_url(&png).unwrap(), "data:image/png;base64,AQID");
+        let gif = dir.path().join("me.gif");
+        std::fs::write(&gif, [1u8]).unwrap();
+        assert!(matches!(picture_data_url(&gif), Err(AppError::InvalidInput(_))));
+        let empty = dir.path().join("empty.jpg");
+        std::fs::write(&empty, []).unwrap();
+        assert!(matches!(picture_data_url(&empty), Err(AppError::Refused(_))));
+    }
 }

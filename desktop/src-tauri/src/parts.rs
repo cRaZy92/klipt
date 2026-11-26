@@ -176,6 +176,9 @@ pub fn make_part(
         let (clip, thumb) = {
             let library = library.lock().unwrap_or_else(PoisonError::into_inner);
             let clip = library.insert(new)?;
+            if let Err(e) = library.set_origin(&clip.id, "part") {
+                crate::elog!("klipt: can't mark a clip as made by part: {e}");
+            }
             let saved = (|| {
                 library.update_edit(&clip.id, trim, &volumes)?;
                 library.set_blur_video(&clip.id, new_edit.blur_video)?;

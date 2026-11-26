@@ -384,6 +384,8 @@ fn auth_round_trips_and_clears() {
         username: "adam".into(),
         display_name: None,
         is_admin: false,
+        avatar_url: None,
+        looks: None,
     };
     auth::save(dir.path(), &a).unwrap();
     auth::save(dir.path(), &a).unwrap(); // overwrite works
@@ -400,7 +402,7 @@ fn auth_round_trips_and_clears() {
 fn auth_file_is_private() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    let a = Auth { server_url: "u".into(), token: "t".into(), username: "n".into(), display_name: None, is_admin: false };
+    let a = Auth { server_url: "u".into(), token: "t".into(), username: "n".into(), display_name: None, is_admin: false, avatar_url: None, looks: None };
     auth::save(dir.path(), &a).unwrap();
     let mode = std::fs::metadata(dir.path().join("auth.json")).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);

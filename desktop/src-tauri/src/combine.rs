@@ -260,6 +260,9 @@ fn add_to_library(
     let (clip, thumb) = {
         let library = library.lock().unwrap_or_else(PoisonError::into_inner);
         let clip = library.insert(new)?;
+        if let Err(e) = library.set_origin(&clip.id, "combine") {
+            crate::elog!("klipt: can't mark a clip as made by combine: {e}");
+        }
         if let Err(e) = library.set_thumbnail(&clip.id, Some(thumb_ms)) {
             let _ = library.remove(&clip.id, false);
             return Err(e);

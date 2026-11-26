@@ -1,6 +1,7 @@
 //! Klipt desktop app core. All logic lives here; the Svelte UI talks to it through Tauri commands.
 
 pub mod account;
+pub mod activity;
 pub mod cleanup;
 pub mod combine;
 pub mod commands;
@@ -96,6 +97,7 @@ pub fn run() {
             app.manage(state);
             app.manage(commands::Uploads::default());
             app.manage(upload_notice::UploadBatch::default());
+            app.manage(activity::Reporter::default());
             app.manage(filmstrip::Jobs::default());
             app.manage(hotkey::HotkeyStatusState::default());
             // Development builds start in the tray, like an autostart launch, while
@@ -204,6 +206,11 @@ pub fn run() {
             account::change_password,
             account::system_info,
             account::send_feedback,
+            account::my_achievements,
+            account::set_looks,
+            account::set_avatar,
+            account::remove_avatar,
+            account::read_picture,
             account::open_logs_folder,
             hotkey::apps::shortcut_apps,
         ])

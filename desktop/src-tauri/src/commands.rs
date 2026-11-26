@@ -406,6 +406,10 @@ pub struct Account {
     pub custom_name: Option<String>,
     /// A server admin: may upload in high quality (kept as uploaded).
     pub is_admin: bool,
+    /// The profile picture; None draws the initial.
+    pub avatar_url: Option<String>,
+    /// Equipped looks (`{accent, theme, frame, banner}`); None before the server sent any.
+    pub looks: Option<serde_json::Value>,
 }
 
 impl Account {
@@ -416,6 +420,8 @@ impl Account {
             display_name: a.display_name.clone().unwrap_or_else(|| a.username.clone()),
             custom_name: a.display_name.clone(),
             is_admin: a.is_admin,
+            avatar_url: a.avatar_url.clone(),
+            looks: a.looks.clone(),
         }
     }
 }
@@ -455,11 +461,13 @@ pub async fn login(app: AppHandle, server_url: String, username: String, passwor
     let base = normalize_server_url(&server_url)?;
     let client = ApiClient::new(&base).map_err(|_| AppError::InvalidServerAddress)?;
     let session = client.login(username.trim(), &password, &device_name()).await.map_err(login_error)?;
-    let Me { username, custom_name, is_admin, .. } = session.me;
+    let Me { username, custom_name, is_admin, avatar_url, looks, .. } = session.me;
     let state = app.state::<AppState>();
-    let saved = Auth { server_url: base.clone(), token: session.token, username, display_name: custom_name, is_admin };
+    let saved = Auth { server_url: base.clone(), token: session.token, username, display_name: custom_name, is_admin, avatar_url, looks };
     auth::save(&state.data_dir, &saved)?;
     crate::account::report_device(&app, &saved);
+    // Activity saved while logged out, or the first report from this account.
+    crate::activity::changed(&app);
     // The same lock as Settings saves, and the change made to the current settings, so a save
     // finishing meanwhile isn't overwritten.
     let _saving = SAVING_SETTINGS.lock().await;
@@ -900,6 +908,8 @@ pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> Upl
             let batch = app.state::<upload_notice::UploadBatch>();
             batch.push(upload_notice::Finished { title: title.clone(), link: share_url.clone(), replaced });
             let toast = announce_finished(&app, more, copied);
+            // The upload may have earned something (first upload, 10 clips…): report and announce it.
+            crate::activity::changed(&app);
             emit(
                 &app,
                 events::UPLOAD_DONE,
@@ -1310,6 +1320,8 @@ pub fn save_edit(
     let clip = {
         let library = lock(&state.library);
         editor::save_edit(&library, &uploads, &cache_dir, &id, edit)?;
+        // Editor tools used count for achievements.
+        crate::activity::changed(&app);
         let clip = library.get(&id)?;
         if clip.thumbnail_ms == thumbnail_ms {
             return Ok(());
@@ -1512,6 +1524,7 @@ pub async fn make_part_clip(
     .await?
     .inspect_err(|e| crate::elog!("klipt: new clip from a part failed: {e}"))?;
     emit(&app, crate::import::events::CLIP_IMPORTED, &view);
+    crate::activity::changed(&app);
     Ok(view)
 }
 
@@ -1542,6 +1555,7 @@ pub async fn combine_clips(app: AppHandle, ids: Vec<String>, title: String) -> R
     .and_then(|r| r)
     .inspect_err(|e| crate::elog!("klipt: combining clips failed: {e}"))?;
     emit(&app, crate::import::events::CLIP_IMPORTED, &view);
+    crate::activity::changed(&app);
     Ok(view)
 }
 
@@ -1759,7 +1773,7 @@ mod tests {
     #[test]
     fn a_dead_token_clears_only_its_own_login() {
         let dir = tempfile::tempdir().unwrap();
-        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into(), display_name: None, is_admin: false };
+        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into(), display_name: None, is_admin: false, avatar_url: None, looks: None };
         assert!(!clear_auth_if_current(dir.path(), "old").unwrap(), "nothing saved: nothing to clear");
 
         // The user already logged in again: an old upload's 401 leaves the new login alone.

@@ -28,6 +28,21 @@ impl ClipKind {
     }
 }
 
+/// What the library tells about the user's activity, for achievements (see `Library::activity`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LocalActivity {
+    pub clips_saved: u64,
+    pub screenshots: u64,
+    /// Length of everything recorded here (clips and full recordings).
+    pub recorded_ms: u64,
+    pub recordings: u64,
+    pub imports: u64,
+    /// Different games with clips.
+    pub games: u64,
+    /// The editor tools used and the odd moments, as the server names them (`cut`, `nightOwl`…).
+    pub firsts: Vec<&'static str>,
+}
+
 /// What the save flow knows about a fresh clip.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewClip {

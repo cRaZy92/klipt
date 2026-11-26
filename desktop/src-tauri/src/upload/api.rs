@@ -26,6 +26,12 @@ pub struct Me {
     #[serde(default)]
     pub custom_name: Option<String>,
     pub is_admin: bool,
+    /// Their picture; None draws the initial (and on servers without pictures).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    /// Equipped accent, theme, frame and banner, as the server sent them.
+    #[serde(default)]
+    pub looks: Option<serde_json::Value>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -267,6 +273,18 @@ impl ApiClient {
             .send()
             .await
             .map_err(network)?;
+        parse_json(resp).await
+    }
+
+    /// An authenticated PUT of JSON; returns the answer as-is.
+    pub async fn put_json(&self, token: &str, path: &str, body: &serde_json::Value) -> Result<serde_json::Value, ApiError> {
+        let resp = self.http.put(self.url(path)).bearer_auth(token).json(body).send().await.map_err(network)?;
+        parse_json(resp).await
+    }
+
+    /// An authenticated DELETE that answers with JSON.
+    pub async fn delete_json(&self, token: &str, path: &str) -> Result<serde_json::Value, ApiError> {
+        let resp = self.http.delete(self.url(path)).bearer_auth(token).send().await.map_err(network)?;
         parse_json(resp).await
     }
 

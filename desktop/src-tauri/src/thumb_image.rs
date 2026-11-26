@@ -78,6 +78,9 @@ pub async fn set_thumbnail_image(app: AppHandle, id: String, path: Option<PathBu
         Ok::<_, AppError>((clip.server_clip_id, image))
     })
     .await??;
+    if set {
+        crate::activity::changed(&app);
+    }
     let Some(server_id) = server_id.filter(|_| set) else { return Ok(None) };
     let state = app.state::<AppState>();
     let Some(saved) = auth::load(&state.data_dir) else {

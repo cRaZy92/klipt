@@ -272,7 +272,10 @@ pub fn spawn_for_app(app: &AppHandle, data_dir: PathBuf, settings: &Settings) ->
             // Sound, notifications and the tray icon: the window is usually hidden while gaming.
             crate::feedback::on_supervisor_event(&sink_app, &event);
             let sent = match event {
-                SupervisorEvent::ClipSaved(view) => sink_app.emit(events::CLIP_SAVED, view),
+                SupervisorEvent::ClipSaved(view) => {
+                    crate::activity::changed(&sink_app);
+                    sink_app.emit(events::CLIP_SAVED, view)
+                }
                 SupervisorEvent::SaveBusy => sink_app.emit(events::SAVE_BUSY, ()),
                 SupervisorEvent::Error { code, message } => {
                     sink_app.emit(events::RECORDER_ERROR, serde_json::json!({ "code": code, "message": message }))

@@ -52,6 +52,7 @@ pub fn take_in_background(app: &AppHandle) {
                     crate::feedback::notify(&app, "Screenshot saved", view.clip.game_name.as_deref());
                 }
                 let _ = app.emit(crate::recorder::events::CLIP_SAVED, view);
+                crate::activity::changed(&app);
             }
             Err(e) => {
                 crate::elog!("klipt: screenshot failed: {e}");

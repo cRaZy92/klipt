@@ -386,6 +386,9 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
     let (clip, thumb) = {
         let library = crate::commands::lock(&state.library);
         let clip = library.insert(new)?;
+        if let Err(e) = library.set_origin(&clip.id, "download") {
+            crate::elog!("klipt: can't mark a clip as made by download: {e}");
+        }
         library.mark_uploaded(&clip.id, &id, &info.share_url, &info.visibility)?;
         if let Some(stale) = stale {
             if let Err(e) = library.remove(&stale, false) {

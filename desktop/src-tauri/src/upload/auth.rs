@@ -24,6 +24,12 @@ pub struct Auth {
     /// before this was kept; the account refresh at startup fills it in.
     #[serde(default)]
     pub is_admin: bool,
+    /// The profile picture's URL, kept so the app starts with it before reaching the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    /// Equipped looks (accent, theme, frame, banner) as the server last sent them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub looks: Option<serde_json::Value>,
 }
 
 /// Never prints the token, so a stray `{:?}` can't leak it into logs.
@@ -81,6 +87,8 @@ mod tests {
             username: "u".into(),
             display_name: None,
             is_admin: false,
+            avatar_url: None,
+            looks: None,
         };
         let shown = format!("{a:?}");
         assert!(!shown.contains("secret-token") && shown.contains("<redacted>"), "{shown}");

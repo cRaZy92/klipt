@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::{AudioRange, BlurRange, PendingUpload, Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
+use super::{AudioRange, BlurRange, LocalActivity, PendingUpload, Clip, ClipKind, ClipView, GameCount, ListFilter, NewClip, Sort, Trim, Volumes, CutRange, SubtitleRange, ZoomRange};
 use super::{MAX_SUBTITLE_CHARS, MIN_AUDIO_RANGE_MS, MAX_ZOOM, MIN_BLUR_MS, MIN_SUBTITLE_MS, MIN_ZOOM, MIN_ZOOM_MS};
 use crate::errors::{AppError, Result};
 
@@ -106,6 +106,10 @@ const MIGRATIONS: &[&str] = &["
 ", "
     -- Server albums to put an upload in once it's online: JSON list of album ids.
     ALTER TABLE pending_uploads ADD COLUMN albums TEXT NOT NULL DEFAULT '[]';
+", "
+    -- 'combine', 'part' or 'download': made from other clips or fetched from the server, not
+    -- recorded here. NULL for recorded and imported clips. Counts for achievements.
+    ALTER TABLE clips ADD COLUMN origin TEXT NULL;
 "];
 
 /// Queries that select more after these read them from index 34 on.
@@ -225,6 +229,47 @@ impl Library {
             ],
         )?;
         self.get(&id)
+    }
+
+    /// Marks clip `id` as made from other clips (`combine`, `part`) or fetched from the server (`download`).
+    pub fn set_origin(&self, id: &str, origin: &str) -> Result<()> {
+        self.conn.execute("UPDATE clips SET origin = ?2 WHERE id = ?1", params![id, origin])?;
+        Ok(())
+    }
+
+    /// What the library says about the user's activity, for achievements: counts and "firsts".
+    /// Recorded clips are the ones Klipt captured here (not imported, combined, cut out or downloaded).
+    pub fn activity(&self) -> Result<LocalActivity> {
+        const RECORDED: &str = "kind = 'clip' AND source_path IS NULL AND origin IS NULL";
+        let count = |sql: &str| -> Result<u64> { Ok(self.conn.query_row(sql, [], |r| r.get::<_, i64>(0))?.max(0) as u64) };
+        let exists = |cond: &str| -> Result<bool> { Ok(count(&format!("SELECT EXISTS (SELECT 1 FROM clips WHERE {cond})"))? == 1) };
+        let mut firsts = Vec::new();
+        let checks: [(&'static str, String); 9] = [
+            ("cut", "removed_ranges <> '[]'".into()),
+            ("zoom", "zoom_ranges <> '[]'".into()),
+            ("subtitle", "subtitles <> '[]'".into()),
+            ("blur", "blur_ranges <> '[]'".into()),
+            ("mutePart", "audio_ranges <> '[]'".into()),
+            ("combine", "origin = 'combine'".into()),
+            ("part", "origin = 'part'".into()),
+            // Saved between 3:00 and 5:00 on this PC's clock.
+            ("nightOwl", format!("{RECORDED} AND strftime('%H', created_at / 1000, 'unixepoch', 'localtime') IN ('03', '04')")),
+            ("marathon", format!("{RECORDED} AND is_recording = 1 AND duration_ms > {}", 3 * 3_600_000)),
+        ];
+        for (first, cond) in checks {
+            if exists(&cond)? {
+                firsts.push(first);
+            }
+        }
+        Ok(LocalActivity {
+            clips_saved: count(&format!("SELECT COUNT(*) FROM clips WHERE {RECORDED} AND is_recording = 0"))?,
+            screenshots: count("SELECT COUNT(*) FROM clips WHERE kind = 'screenshot' AND origin IS NULL")?,
+            recorded_ms: count(&format!("SELECT COALESCE(SUM(duration_ms), 0) FROM clips WHERE {RECORDED}"))?,
+            recordings: count(&format!("SELECT COUNT(*) FROM clips WHERE {RECORDED} AND is_recording = 1"))?,
+            imports: count("SELECT COUNT(*) FROM clips WHERE source_path IS NOT NULL")?,
+            games: count("SELECT COUNT(DISTINCT game_name) FROM clips WHERE game_name IS NOT NULL")?,
+            firsts,
+        })
     }
 
     pub fn get(&self, id: &str) -> Result<Clip> {
@@ -1341,5 +1386,54 @@ mod tests {
         f.lib.set_thumbnail(&c.id, None).unwrap();
         assert_eq!(f.lib.get(&c.id).unwrap().thumbnail_ms, None);
     }
-}
 
+    /// Unix ms of 03:30 local time today, whatever the test machine's time zone.
+    fn local_half_past_three(lib: &Library) -> i64 {
+        lib.conn
+            .query_row("SELECT CAST(strftime('%s', date('now', 'localtime') || ' 03:30', 'utc') AS INTEGER) * 1000", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn activity_counts_recorded_clips_only() {
+        let f = Fixture::new();
+        let night = local_half_past_three(&f.lib);
+        let buffer = f.add("buffer.mp4", night, Some(AM));
+        let path = f.dir.path().join("rec.mp4");
+        fs::write(&path, b"video").unwrap();
+        let rec = f
+            .lib
+            .insert(NewClip { is_recording: true, duration_ms: 3 * 3_600_000 + 60_000, ..new_clip(&path, night + 3_600_000 * 8, Some(CS)) })
+            .unwrap();
+        let imported = f.add("imported.mp4", 3_000, Some(("Doom", 1)));
+        f.lib.set_source(&imported.id, &f.dir.path().join("old.mp4")).unwrap();
+        let combined = f.add("combined.mp4", 4_000, None);
+        f.lib.set_origin(&combined.id, "combine").unwrap();
+        let shot_path = f.dir.path().join("shot.png");
+        fs::write(&shot_path, b"png").unwrap();
+        f.lib.insert(NewClip { kind: crate::library::ClipKind::Screenshot, ..new_clip(&shot_path, 5_000, None) }).unwrap();
+        f.lib.set_removed_ranges(&buffer.id, &[CutRange { start_ms: 0, end_ms: 1_000 }]).unwrap();
+
+        let a = f.lib.activity().unwrap();
+        assert_eq!(a.clips_saved, 1);
+        assert_eq!(a.recordings, 1);
+        assert_eq!(a.imports, 1);
+        assert_eq!(a.screenshots, 1);
+        assert_eq!(a.recorded_ms, buffer.duration_ms + rec.duration_ms);
+        assert_eq!(a.games, 3);
+        for first in ["nightOwl", "marathon", "combine", "cut"] {
+            assert!(a.firsts.contains(&first), "{first} in {:?}", a.firsts);
+        }
+        for first in ["zoom", "part", "subtitle"] {
+            assert!(!a.firsts.contains(&first), "{first} in {:?}", a.firsts);
+        }
+    }
+
+    #[test]
+    fn activity_of_an_empty_library_is_zero() {
+        let f = Fixture::new();
+        let a = f.lib.activity().unwrap();
+        assert_eq!((a.clips_saved, a.recorded_ms, a.games), (0, 0, 0));
+        assert!(a.firsts.is_empty());
+    }
+}

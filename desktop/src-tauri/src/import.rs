@@ -882,6 +882,7 @@ fn start_import(app: AppHandle, source: Source) -> Result<bool> {
         let _running = RunningGuard;
         let summary = run(&app, &tools, &checked, &copies);
         let _ = app.emit(events::FINISHED, summary);
+        crate::activity::changed(&app);
     });
     if let Err(e) = spawned {
         RUNNING.store(false, Ordering::SeqCst);

@@ -21,10 +21,18 @@
   import Library from "./views/Library.svelte";
   import Login from "./views/Login.svelte";
   import SettingsView from "./views/Settings.svelte";
+  import Profile from "./views/Profile.svelte";
+  import { applyLooks } from "./lib/looks";
 
   // The screens. Library is home.
-  type Screen = "library" | "feed" | "albums" | "settings";
-  type View = { name: "library" } | { name: "feed" } | { name: "albums" } | { name: "editor"; clip: ClipView } | { name: "settings" };
+  type Screen = "library" | "feed" | "albums" | "settings" | "profile";
+  type View =
+    | { name: "library" }
+    | { name: "feed" }
+    | { name: "albums" }
+    | { name: "editor"; clip: ClipView }
+    | { name: "settings" }
+    | { name: "profile" };
   /** Where the user asked to go while the current screen had unsaved changes. */
   type Leaving = { to: "view"; view: View } | { to: "logout" };
 
@@ -46,6 +54,9 @@
   /** Friends' clips you haven't seen (the Feed tab's badge). */
   let feedNew = $state(0);
   let leaving = $state<Leaving | null>(null);
+
+  // Your accent and theme, everywhere (the defaults while logged out).
+  $effect(() => applyLooks(account?.looks));
 
   const hotkey = $derived(hotkeyStatus.display ?? (settings ? hotkeyLabel(settings.hotkey) : ""));
 
@@ -96,6 +107,10 @@
       ),
       on("clip-saved", (clip) =>
         toast(clip.kind === "screenshot" ? "Screenshot saved" : clip.isRecording ? "Recording saved" : "Clip saved", "success"),
+      ),
+      // An achievement earned while the window is in front (in the background it's a notification).
+      on("achievement", ({ title, body }) =>
+        toast(`${title}. ${body}`, "success", { label: "View", run: () => go({ name: "profile" }) }),
       ),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
       on("feed-new", ({ count }) => (feedNew = count)),
@@ -369,18 +384,21 @@
             aria-label="Account: {account.displayName}"
             title={account.displayName}
           >
-            <Avatar name={account.displayName} size={36} />
+            <Avatar name={account.displayName} url={account.avatarUrl} frame={account.looks?.frame} size={36} />
           </button>
           {#if accountMenu}
             <div class="menu" role="menu" use:menu={{ close: () => (accountMenu = false) }}>
               <div class="who">
-                <Avatar name={account.displayName} size={38} />
+                <Avatar name={account.displayName} url={account.avatarUrl} frame={account.looks?.frame} size={38} />
                 <div>
                   <strong>{account.displayName}</strong>
                   <span>{hostOf(account.serverUrl)}</span>
                 </div>
               </div>
               <hr />
+              <button role="menuitem" onclick={() => ((accountMenu = false), go({ name: "profile" }))}>
+                <Icon name="user" size={16} /> Profile and achievements
+              </button>
               <button role="menuitem" onclick={openWebsite}><Icon name="external" size={16} /> Open website</button>
               <button role="menuitem" onclick={() => ((accountMenu = false), (feedbackKind = "bug"))}>
                 <Icon name="alert" size={16} /> Report a problem
@@ -454,6 +472,19 @@
           {/key}
         </main>
       {/if}
+      {#if visited.has("profile")}
+        <main class="screen" class:here={view.name === "profile"} use:keepScroll={view.name === "profile"} inert={view.name !== "profile"}>
+          <Profile
+            active={view.name === "profile"}
+            {account}
+            onaccount={(a) => (account = a)}
+            onunauthorized={() => {
+              account = null;
+              loginNotice = "Your session has expired. Log in again to see your profile.";
+            }}
+          />
+        </main>
+      {/if}
       {#if visited.has("settings") && settings}
         <main class="screen" class:here={view.name === "settings"} use:keepScroll={view.name === "settings"} inert={view.name !== "settings"}>
           {#key settingsEpoch}
@@ -466,6 +497,7 @@
               onsaved={settingsSaved}
               onlogout={requestLogout}
               onaccount={(a) => (account = a)}
+              onprofile={() => go({ name: "profile" })}
             />
           {/key}
         </main>

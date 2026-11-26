@@ -43,6 +43,9 @@
   import Keys from "../components/Keys.svelte";
   import ResourcesPanel from "../components/ResourcesPanel.svelte";
   import FeedbackDialog from "../components/FeedbackDialog.svelte";
+  import Avatar from "../components/Avatar.svelte";
+  import AvatarCropDialog from "../components/AvatarCropDialog.svelte";
+  import { pickProfilePicture } from "../lib/thumbnailImage";
 
   let {
     active = true,
@@ -52,6 +55,7 @@
     onsaved,
     onlogout,
     onaccount,
+    onprofile,
     dirty = $bindable(false),
   }: {
     /** This is the screen shown (it's kept alive, hidden, while another one is). */
@@ -67,6 +71,8 @@
     onlogout: () => void;
     /** The account changed (a new display name). */
     onaccount: (account: Account) => void;
+    /** Open the Profile screen (achievements and looks). */
+    onprofile: () => void;
     /** Whether there are unsaved changes, for the app's "Discard changes?" guard. */
     dirty?: boolean;
   } = $props();
@@ -180,7 +186,16 @@
   const clashingApps = $derived(shortcutApps.filter((a) => a.clashes.length > 0));
   const otherApps = $derived(shortcutApps.filter((a) => a.clashes.length === 0));
 
-  // Settings → Account: the name friends see, and the password.
+  // Settings → Account: the picture (cropped in a dialog), the name friends see, and the password.
+  let cropping = $state<string | null>(null);
+  async function choosePicture() {
+    try {
+      cropping = await pickProfilePicture();
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    }
+  }
+
   // svelte-ignore state_referenced_locally
   let nameDraft = $state(account.customName ?? "");
   let savingName = $state(false);
@@ -976,6 +991,16 @@
     </section>
 
     <section>
+      <h2>Picture</h2>
+      <p class="intro muted">Friends see it on your clips. Colours, themes and frames are on your profile.</p>
+      <div class="picture-row">
+        <Avatar name={account.displayName} url={account.avatarUrl} frame={account.looks?.frame} size={56} />
+        <button class="btn btn-primary" onclick={choosePicture}>Change picture</button>
+        <button class="btn" onclick={onprofile}><Icon name="user" size={16} /> Profile and achievements</button>
+      </div>
+    </section>
+
+    <section>
       <h2>Name</h2>
       <p class="intro muted">Friends see this name on your clips. You still log in as {account.username}.</p>
       <form class="inline-form" onsubmit={saveName}>
@@ -1086,6 +1111,18 @@
 
 {#if feedbackKind}
   <FeedbackDialog kind={feedbackKind} onclose={() => (feedbackKind = null)} />
+{/if}
+
+{#if cropping}
+  <AvatarCropDialog
+    src={cropping}
+    onclose={() => (cropping = null)}
+    onsaved={(a) => {
+      cropping = null;
+      onaccount(a);
+      toast("Picture saved", "success");
+    }}
+  />
 {/if}
 
 <style>
@@ -1646,5 +1683,11 @@
     height: 1px;
     overflow: hidden;
     clip: rect(0 0 0 0);
+  }
+  .picture-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
   }
 </style>

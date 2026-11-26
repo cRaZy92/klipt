@@ -239,7 +239,7 @@
   <div class="player" class:fullscreen role="dialog" aria-modal="true" aria-label={clip.title}>
     {#if !fullscreen}
       <div class="player-head">
-        <Avatar name={nameOf(clip.owner)} size={38} />
+        <Avatar name={nameOf(clip.owner)} url={clip.owner.avatarUrl} frame={clip.owner.frame} size={38} />
         <div class="text">
           <div class="title">{clip.title}</div>
           <div class="meta">

@@ -1,6 +1,7 @@
 // Typed access to the Rust core: Tauri commands and events. Errors from commands arrive as
 // `{ code, message }`; the UI branches on `code` but only ever shows `message`.
 
+import type { Looks, MyAchievements } from "@klipt/shared";
 import type { EditorProgress } from "./progress";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -134,7 +135,7 @@ export interface AlbumSummary {
 
 /** An album with its clips, in order (`Album` in packages/shared). */
 export interface Album extends AlbumSummary {
-  owner: { username: string; displayName?: string };
+  owner: Person;
   clips: FeedClip[];
 }
 
@@ -223,6 +224,14 @@ export interface AudioDevice {
   name: string;
 }
 
+/** Someone on the server as lists show them; picture and frame are missing on older servers. */
+export interface Person {
+  username: string;
+  displayName?: string;
+  avatarUrl?: string | null;
+  frame?: string | null;
+}
+
 export interface Account {
   serverUrl: string;
   username: string;
@@ -232,6 +241,10 @@ export interface Account {
   customName: string | null;
   /** A server admin: may upload in high quality. */
   isAdmin: boolean;
+  /** Your picture; null draws the initial. */
+  avatarUrl: string | null;
+  /** Equipped accent, theme, frame and banner; null before the server sent any. */
+  looks: Looks | null;
 }
 
 /** A line of what a problem report says about this PC. */
@@ -402,7 +415,7 @@ export interface FeedClip {
   width: number;
   height: number;
   createdAt: string;
-  owner: { username: string; displayName?: string };
+  owner: Person;
   shareUrl: string;
   videoUrl: string;
   thumbnailUrl: string;
@@ -567,6 +580,13 @@ export const api = {
   /** What a problem report says about this PC. */
   systemInfo: () => invoke<InfoLine[]>("system_info"),
   /** Sends a problem or an idea to the server's admin; `includeLogs` adds system info and the log. */
+  myAchievements: () => invoke<MyAchievements>("my_achievements"),
+  setLooks: (looks: Partial<Looks>) => invoke<Account>("set_looks", { looks }),
+  /** A square JPEG (the crop) as the profile picture. */
+  setAvatar: (jpeg: Uint8Array) => invoke<Account>("set_avatar", { jpeg: Array.from(jpeg) }),
+  removeAvatar: () => invoke<Account>("remove_avatar"),
+  /** A picture file as a data: URL, to crop. */
+  readPicture: (path: string) => invoke<string>("read_picture", { path }),
   sendFeedback: (kind: FeedbackKind, message: string, includeLogs: boolean) =>
     invoke<void>("send_feedback", { kind, message, includeLogs }),
   openLogsFolder: () => invoke<void>("open_logs_folder"),
@@ -622,7 +642,7 @@ export const api = {
     albums: string[] = [],
   ) => invoke<void>("upload_clip", { id, title, visibility, tagged, replace, more, highQuality, albums }),
   /** The server's users, for tagging friends in a clip. */
-  listUsers: () => invoke<{ username: string; displayName?: string }[]>("list_users"),
+  listUsers: () => invoke<Person[]>("list_users"),
   /** One page of the feed; `search` matches title, game and uploader on the server. */
   feedClips: (
     game: string | null,
@@ -760,6 +780,8 @@ export interface Events {
    * nothing; it's asked again every minute while hidden.
    */
   "release-window-check": null;
+  /** An achievement to show as a toast (the window is in front). */
+  achievement: { title: string; body: string };
 }
 
 /**

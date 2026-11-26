@@ -357,7 +357,7 @@
                   </button>
                 {/if}
                 <div class="body">
-                  <Avatar name={nameOf(clip.owner)} size={32} />
+                  <Avatar name={nameOf(clip.owner)} url={clip.owner.avatarUrl} frame={clip.owner.frame} size={32} />
                   <div class="text">
                     <div class="title" title={clip.title}>
                       {#if isNewClip(clip, seenBefore, me)}

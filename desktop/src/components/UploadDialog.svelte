@@ -3,6 +3,7 @@
   import { uploadTitle } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import { fraction, isBusy, retryUpload, startUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
+  import Avatar from "./Avatar.svelte";
   import AlbumPicker from "./AlbumPicker.svelte";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
@@ -20,6 +21,8 @@
   let friends = $state<string[] | null>(null);
   /** Display names by username, for the friend chips. */
   let names = $state<Record<string, string>>({});
+  /** Pictures by username (null: the initial). */
+  let pictures = $state<Record<string, string | null>>({});
   let tagged = $state<string[]>([]);
   /** Admins may keep a video as it is (no server compression): for edits and compilations. */
   let isAdmin = $state(false);
@@ -33,6 +36,7 @@
         isAdmin = !!account?.isAdmin;
         const me = account?.username.toLowerCase();
         names = Object.fromEntries(users.map((u) => [u.username, nameOf(u)]));
+        pictures = Object.fromEntries(users.map((u) => [u.username, u.avatarUrl ?? null]));
         friends = users.map((u) => u.username).filter((name) => name.toLowerCase() !== me);
       })
       .catch(() => (friends = null));
@@ -166,7 +170,7 @@
                 aria-pressed={tagged.includes(name)}
                 onclick={() => toggleTag(name)}
               >
-                {#if tagged.includes(name)}<Icon name="check" size={13} />{/if}
+                {#if tagged.includes(name)}<Icon name="check" size={13} />{:else}<Avatar name={names[name] ?? name} url={pictures[name]} size={18} />{/if}
                 {names[name] ?? name}
               </button>
             {/each}
@@ -270,7 +274,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    padding: 0.3rem 0.75rem;
+    padding: 0.3rem 0.75rem 0.3rem 0.4rem;
     border: 1px solid var(--border);
     border-radius: 999px;
     background: var(--surface);

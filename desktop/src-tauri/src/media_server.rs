@@ -58,6 +58,9 @@ enum Served {
 const REMOTE_WAIT: Duration = Duration::from_secs(30);
 /// Remote clips are copied out of the cache in pieces this big, each once it has arrived.
 const REMOTE_PIECE: u64 = 256 * 1024;
+/// A range starting this far past what the cache has downloaded (a seek far into a long
+/// recording) is fetched from the server on its own instead of waiting for the download.
+const PASS_THROUGH_AHEAD: u64 = 8 * 1024 * 1024;
 
 impl MediaServer {
     /// Binds to a random free port on loopback and serves in background threads.
@@ -262,6 +265,10 @@ fn serve_remote(
         return Ok(());
     }
     let end = start + len; // exclusive
+    let (written, done) = download.written();
+    if !done && start > written + PASS_THROUGH_AHEAD {
+        return pass_through(out, url, start, end);
+    }
     let mut file: Option<File> = None;
     let mut at = start;
     let mut buf = vec![0u8; REMOTE_PIECE as usize];
@@ -279,6 +286,35 @@ fn serve_remote(
         at = upto;
     }
     out.flush()
+}
+
+/// Copies bytes `start..end` of `url` straight from the server (one ranged request), for a range
+/// the cache won't have for a while. The head has been sent already.
+fn pass_through(mut out: TcpStream, url: &str, start: u64, end: u64) -> io::Result<()> {
+    let url = url.to_string();
+    tauri::async_runtime::block_on(async move {
+        let http = crate::player_cache::http_client().map_err(io::Error::other)?;
+        let mut res = http
+            .get(&url)
+            .header("Range", format!("bytes={start}-{}", end - 1))
+            .send()
+            .await
+            .map_err(io::Error::other)?;
+        if res.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Err(io::Error::other(format!("the server answered {} to a range", res.status())));
+        }
+        let mut left = end - start;
+        while left > 0 {
+            let Some(chunk) = res.chunk().await.map_err(io::Error::other)? else { break };
+            let take = chunk.len().min(left as usize);
+            out.write_all(&chunk[..take])?; // fails once the player has gone
+            left -= take as u64;
+        }
+        if left > 0 {
+            return Err(io::Error::other("the server's answer was cut short"));
+        }
+        out.flush()
+    })
 }
 
 fn respond_status(out: &mut TcpStream, status: &str) -> io::Result<()> {
@@ -310,7 +346,7 @@ fn parse_range(header: &str, size: u64) -> Option<(u64, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::player_cache::tests::{body, serve, Answer};
+    use crate::player_cache::tests::{body, serve, serve_at, Answer};
 
     fn test_server() -> MediaServer {
         let dir = tempfile::tempdir().unwrap().keep();
@@ -345,6 +381,23 @@ mod tests {
         let (_, first) = split(&fetch(&server, &url, "Range: bytes=0-99\r\n"));
         assert_eq!(first, body(3_000_000)[..100]);
         assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_seek_far_ahead_of_the_download_is_answered_from_the_server_at_once() {
+        // ~6 s to download all of it; a seek near the end mustn't wait for that.
+        let len = 20_000_000;
+        let (remote, count) = serve_at(len, vec![Answer::Body], Duration::from_millis(20));
+        let server = test_server();
+        let url = server.url_for_remote(&remote);
+        let (_, first) = split(&fetch(&server, &url, "Range: bytes=0-99\r\n"));
+        assert_eq!(first, body(len)[..100]);
+        let asked = std::time::Instant::now();
+        let (head, data) = split(&fetch(&server, &url, "Range: bytes=18000000-18099999\r\n"));
+        assert!(asked.elapsed() < Duration::from_secs(2), "took {:?}", asked.elapsed());
+        assert!(head.contains("Content-Range: bytes 18000000-18099999/20000000"), "{head}");
+        assert_eq!(data, body(len)[18_000_000..18_100_000]);
+        assert_eq!(count.load(Ordering::SeqCst), 2, "the cache's download plus one ranged request");
     }
 
     #[test]

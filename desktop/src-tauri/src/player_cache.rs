@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -50,6 +51,9 @@ pub struct Download {
     done: PathBuf,
     progress: Mutex<Progress>,
     changed: Condvar,
+    /// Another clip was opened: stop (only one clip plays at a time, and a download left running
+    /// would slow the one being watched).
+    cancelled: AtomicBool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -73,8 +77,14 @@ impl PlayerCache {
 
     /// The running or finished download for `url`, starting one if there is none (or the last one
     /// failed, or its file was evicted).
+    /// Other clips' running downloads are cancelled: one clip plays at a time.
     pub fn open(&self, url: &str) -> Arc<Download> {
         let mut downloads = lock(&self.inner.downloads);
+        for (other, d) in downloads.iter() {
+            if other != url && lock(&d.progress).phase == Phase::Running {
+                d.cancelled.store(true, Ordering::SeqCst);
+            }
+        }
         if let Some(d) = downloads.get(url) {
             let phase = lock(&d.progress).phase;
             if phase == Phase::Running || (phase == Phase::Done && d.done.is_file()) {
@@ -92,6 +102,7 @@ impl PlayerCache {
                 done,
                 progress: Mutex::new(Progress { total: Some(meta.len()), written: meta.len(), phase: Phase::Done }),
                 changed: Condvar::new(),
+                cancelled: AtomicBool::new(false),
             });
             downloads.insert(url.to_string(), d.clone());
             return d;
@@ -101,6 +112,7 @@ impl PlayerCache {
             done,
             progress: Mutex::new(Progress { total: None, written: 0, phase: Phase::Running }),
             changed: Condvar::new(),
+            cancelled: AtomicBool::new(false),
         });
         downloads.insert(url.to_string(), d.clone());
         drop(downloads);
@@ -109,7 +121,9 @@ impl PlayerCache {
             let ok = match fetch(&url, &task).await {
                 Ok(()) => true,
                 Err(e) => {
-                    crate::elog!("klipt: player cache download failed: {e}");
+                    if !task.cancelled.load(Ordering::SeqCst) {
+                        crate::elog!("klipt: player cache download failed: {e}");
+                    }
                     false
                 }
             };
@@ -162,14 +176,19 @@ impl PlayerCache {
     }
 }
 
-/// Streams `url` into the download's `.part` file, then renames it to its finished name.
-async fn fetch(url: &str, d: &Download) -> Result<(), String> {
+/// An HTTP client for server videos: gives up on a server that stalls.
+pub(crate) fn http_client() -> Result<reqwest::Client, String> {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let http = reqwest::Client::builder()
+    reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(STALL_TIMEOUT)
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
+
+/// Streams `url` into the download's `.part` file, then renames it to its finished name.
+async fn fetch(url: &str, d: &Download) -> Result<(), String> {
+    let http = http_client()?;
     let mut res = http.get(url).send().await.map_err(|e| e.to_string())?;
     if !res.status().is_success() {
         return Err(format!("the server answered {}", res.status()));
@@ -185,6 +204,9 @@ async fn fetch(url: &str, d: &Download) -> Result<(), String> {
         file.write_all(&chunk).map_err(|e| e.to_string())?;
         written += chunk.len() as u64;
         d.update(|p| p.written = written);
+        if d.cancelled.load(Ordering::SeqCst) {
+            return Err("cancelled: another clip was opened".into());
+        }
     }
     if written != total {
         return Err(format!("cut off after {written} of {total} bytes"));
@@ -236,6 +258,12 @@ impl Download {
         self.wait(timeout, |p| p.written >= end_exclusive || p.phase == Phase::Done).map(|_| ())
     }
 
+    /// How far it has got: bytes on disk, and whether it's finished.
+    pub fn written(&self) -> (u64, bool) {
+        let p = lock(&self.progress);
+        (p.written, p.phase == Phase::Done)
+    }
+
     /// The file to read from (still being written, or finished).
     pub fn path(&self) -> PathBuf {
         if lock(&self.progress).phase == Phase::Done { self.done.clone() } else { self.part.clone() }
@@ -273,6 +301,12 @@ pub(crate) mod tests {
     /// A slow HTTP server for one file: answers request N with `answers[N]` (the last repeats),
     /// writing 64 KB every 5 ms. Returns its base URL and the request count.
     pub(crate) fn serve(len: usize, answers: Vec<Answer>) -> (String, Arc<AtomicUsize>) {
+        serve_at(len, answers, Duration::from_millis(5))
+    }
+
+    /// [`serve`] with `delay` between 64 KB writes. Answers `Range: bytes=a-b` / `bytes=a-` with a
+    /// 206 and that slice.
+    pub(crate) fn serve_at(len: usize, answers: Vec<Answer>, delay: Duration) -> (String, Arc<AtomicUsize>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let url = format!("http://127.0.0.1:{}/media/clip.v1.mp4", listener.local_addr().unwrap().port());
         let count = Arc::new(AtomicUsize::new(0));
@@ -286,7 +320,13 @@ pub(crate) mod tests {
                 std::thread::spawn(move || {
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
                     let mut line = String::new();
+                    let mut range: Option<(usize, usize)> = None;
                     while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                        if let Some(v) = line.to_ascii_lowercase().strip_prefix("range: bytes=") {
+                            let (a, b) = v.trim().split_once('-').unwrap();
+                            let end = if b.is_empty() { len - 1 } else { b.parse().unwrap() };
+                            range = Some((a.parse().unwrap(), end));
+                        }
                         line.clear();
                     }
                     let mut out = stream;
@@ -294,16 +334,23 @@ pub(crate) mod tests {
                         let _ = out.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                         return;
                     }
-                    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n");
+                    let (from, to) = range.unwrap_or((0, len - 1));
+                    let head = match range {
+                        Some(_) => format!(
+                            "HTTP/1.1 206 Partial Content\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\nContent-Range: bytes {from}-{to}/{len}\r\nConnection: close\r\n\r\n",
+                            to - from + 1
+                        ),
+                        None => format!("HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"),
+                    };
                     if out.write_all(head.as_bytes()).is_err() {
                         return;
                     }
-                    let send = if let Answer::CutOffHalfway = answer { len / 2 } else { len };
-                    for chunk in data[..send].chunks(64 * 1024) {
+                    let send = if let Answer::CutOffHalfway = answer { (to - from + 1) / 2 } else { to - from + 1 };
+                    for chunk in data[from..from + send].chunks(64 * 1024) {
                         if out.write_all(chunk).is_err() {
                             return;
                         }
-                        std::thread::sleep(Duration::from_millis(5));
+                        std::thread::sleep(delay);
                     }
                 });
             }
@@ -363,6 +410,28 @@ pub(crate) mod tests {
         let d = cache.open(&url);
         assert!(d.wait_for(1_000_000, T).is_err());
         assert!(finished_files(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn opening_another_clip_cancels_the_running_download() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, _) = serve(3_000_000, vec![Answer::Body]);
+        let (second, _) = serve(300_000, vec![Answer::Body]);
+        let cache = PlayerCache::new(dir.path().to_path_buf(), PLAYER_CACHE_MAX_BYTES);
+        let a = cache.open(&first);
+        a.wait_for(100_000, T).unwrap();
+        let b = cache.open(&second);
+        // The clip left behind stops downloading (it would slow the one being watched).
+        assert!(a.wait_for(3_000_000, T).is_err());
+        b.wait_for(300_000, T).unwrap();
+        let deadline = std::time::Instant::now() + T;
+        let parts = || {
+            std::fs::read_dir(dir.path()).unwrap().flatten().filter(|e| e.path().extension().is_some_and(|x| x == "part")).count()
+        };
+        while parts() > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(parts(), 0, "the cancelled download's partial file is gone");
     }
 
     #[test]

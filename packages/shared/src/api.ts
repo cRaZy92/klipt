@@ -1,3 +1,6 @@
+import type { ActivityCounter, ActivityFirst } from './achievements.js';
+import type { CosmeticId, Looks } from './looks.js';
+
 export interface HealthResponse {
   ok: true;
 }
@@ -17,6 +20,57 @@ export interface Me {
   /** The display name as set, null when none is (`PATCH /api/me`). */
   customName: string | null;
   isAdmin: boolean;
+  /** Your picture; null draws the initial (`PUT`/`DELETE /api/me/avatar`). */
+  avatarUrl: string | null;
+  /** What you picked (`PUT /api/me/looks`). */
+  looks: Looks;
+  /** Achievements you haven't seen yet. */
+  newAchievements: number;
+}
+
+/** A person as lists show them: name, picture and the frame they wear. */
+export interface UserRef {
+  username: string;
+  displayName: string;
+  /** Null: draw the initial. */
+  avatarUrl: string | null;
+  /** Their equipped avatar frame, or null. */
+  frame: string | null;
+}
+
+/** `PUT /api/me/looks`: only the fields sent change; a locked one is refused (403 `not_unlocked`). */
+export type UpdateLooksRequest = Partial<Looks>;
+
+/**
+ * `POST /api/me/activity`: what only the desktop app knows. Counters are totals (the server keeps
+ * the highest it has seen), firsts are kept forever. `backfill`: the first report from this
+ * account, built from what the app already had, so its awards arrive quietly.
+ */
+export interface ActivityReport {
+  counters: Partial<Record<ActivityCounter, number>>;
+  firsts: ActivityFirst[];
+  backfill?: boolean;
+}
+
+export interface EarnedAchievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  earnedAt: string;
+  seen: boolean;
+  /** Earned for past activity (startup run or the app's first report): announced in one summary. */
+  quiet: boolean;
+  reward: CosmeticId | null;
+  rewardName: string | null;
+}
+
+/** `GET /api/me/achievements` (also the answer to an activity report). */
+export interface MyAchievements {
+  /** Newest first. */
+  earned: EarnedAchievement[];
+  looks: Looks;
+  unlocked: CosmeticId[];
 }
 
 /** `PATCH /api/me`: a blank or null display name clears it. */
@@ -58,7 +112,7 @@ export interface FeedbackItem {
   hasLogs: boolean;
   createdAt: string;
   resolvedAt: string | null;
-  user: { username: string; displayName: string };
+  user: UserRef;
 }
 
 /** `POST /api/admin/users/:id/password-reset`: a one-time link for the user to set a new password. */
@@ -103,6 +157,7 @@ export interface AdminUser {
   lastSeenAt: string | null;
   /** Their most recently used desktop app: version, OS and GPU it reported. */
   app: { version: string | null; os: string | null; gpu: string | null; lastUsedAt: string } | null;
+  avatarUrl: string | null;
   isAdmin: boolean;
   disabled: boolean;
   clipCount: number;
@@ -200,7 +255,7 @@ export interface Clip {
    */
   processing: 'queued' | 'running' | null;
   createdAt: string;
-  owner: { username: string; displayName: string };
+  owner: UserRef;
   shareUrl: string;
   videoUrl: string;
   thumbnailUrl: string;
@@ -225,9 +280,7 @@ export interface UpdateClipRequest {
 }
 
 /** `GET /api/clips/:id/viewers` (owner only): friends who watched the clip, first viewer first. */
-export interface ClipViewer {
-  username: string;
-  displayName: string;
+export interface ClipViewer extends UserRef {
   viewedAt: string;
 }
 
@@ -238,7 +291,7 @@ export const MAX_ALBUM_CLIPS = 200;
 export interface AlbumSummary {
   id: string;
   title: string;
-  owner: { username: string; displayName: string };
+  owner: UserRef;
   clipCount: number;
   /** The first clip's thumbnail; null while the album is empty. */
   coverUrl: string | null;

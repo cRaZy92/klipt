@@ -13,7 +13,7 @@ import { newClipId } from './ids.js';
 import { toUserRef } from '../users/ref.js';
 import { touch } from '../achievements/engine.js';
 import { embedFileName, MEDIA_FILE, mediaFileName, videoFileName } from './files.js';
-import { createEmbed, EMBED_VERSION } from './embed.js';
+import { createEmbed, EMBED_THREADS, EMBED_VERSION, embedPlan } from './embed.js';
 import { addAlbumClip, AlbumFullError, getAlbum, UnknownClipError } from '../albums/repo.js';
 import {
   getClip,
@@ -52,6 +52,7 @@ export function toClip(item: ClipWithOwner, baseUrl: string): Clip {
     favorite,
     kind: row.kind,
     processing: processingOf(row),
+    shareReady: shareReadyOf(row),
     createdAt: row.createdAt.toISOString(),
     owner: toUserRef(owner, baseUrl),
     shareUrl: `${baseUrl}/c/${row.id}`,
@@ -86,13 +87,22 @@ export function processingOf(row: Pick<ClipRow, 'transcodeState'>): 'queued' | '
   return row.transcodeState === 'queued' || row.transcodeState === 'running' ? row.transcodeState : null;
 }
 
+/**
+ * Whether the share link may be handed out: a Discord embed of it works. Not while a long clip's
+ * embed copy is still being made, nor, for a clip that has no copy, while it's being compressed
+ * (the uploaded file is often too big for Discord to fetch, and Discord remembers a failed embed).
+ */
+export function shareReadyOf(row: Pick<ClipRow, 'kind' | 'transcodeState' | 'embedVersion' | 'embedPending'>): boolean {
+  if (row.kind === 'screenshot') return true;
+  if (row.embedPending) return false;
+  return row.embedVersion > 0 || processingOf(row) === null;
+}
+
 /** Pictures the app may send as a thumbnail, and how big. */
 export const THUMB_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export const MAX_THUMB_BYTES = 10 * 1024 * 1024;
 
 const CLAIM_TTL_MS = 30 * 60 * 1000;
-/** The embed copy is made while the uploader waits (a few seconds), so it gets more cores than compression. */
-const EMBED_THREADS = 4;
 
 class AlreadyFinalizedError extends Error {}
 /** The clip an upload was to replace is gone (deleted meanwhile). */
@@ -445,6 +455,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
 
     let row: ClipRow;
     let embedMade = false;
+    let embedPending = false;
     try {
       const source = tusFilePath(config.dataDir, upload.id);
       // A screenshot is kept as a PNG; anything else must be a playable video.
@@ -464,8 +475,14 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         await remuxFaststart(source, tmpVideo);
         await makeThumbnail(tmpVideo, tmpThumb, info.durationMs, body.thumbnailMs);
         size = (await stat(tmpVideo)).size;
-        // Made now, not queued: the share link is handed out the moment this request answers.
-        embedMade = await createEmbed({ clipsDir, clip: { id, ...info }, source: tmpVideo, threads: EMBED_THREADS, log: req.log });
+        // A short clip's copy is made now: the share link is handed out the moment this request
+        // answers. A long one's takes minutes, so it's made in the background and the app waits
+        // for `shareReady` (only when there is a background worker to make it).
+        const plan = embedPlan(info);
+        if (plan && !plan.background) {
+          embedMade = await createEmbed({ clipsDir, clip: { id, ...info }, source: tmpVideo, threads: EMBED_THREADS, log: req.log });
+        }
+        embedPending = !!plan?.background && !!app.embedBackfill;
         await rename(tmpVideo, videoPath);
       }
       // A replaced clip keeps its old thumbnail until the swap is committed.
@@ -483,6 +500,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
         height: info.height,
         sizeBytes: size,
         embedVersion: embedMade ? EMBED_VERSION : 0,
+        embedPending,
       };
       row = await db.transaction(async (tx) => {
         const [inserted] = target
@@ -544,6 +562,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       app.transcoder.removeLater(...Array.from({ length: version }, (_, v) => join(clipsDir, videoFileName(id, v))));
     }
     if (row.transcodeState === 'queued') app.transcoder.kick();
+    if (embedPending) app.embedBackfill?.kick();
     await addToAlbums(row.id);
     await touch(app, [user.id, ...(tagIds ?? [])]);
     const created = await getClip(db, row.id, user.id);

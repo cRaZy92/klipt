@@ -9,7 +9,11 @@ function meta(attr: 'property' | 'name', key: string, value: string | number): s
   return `<meta ${attr}="${key}" content="${e(String(value))}" />`;
 }
 
-/** The small copy of the video that link embeds use instead of the full one (see clips/embed.ts). */
+/**
+ * The video link embeds play: the small copy (see clips/embed.ts), or the full video when that is
+ * small itself. Null means no video in the embed, only the thumbnail as a large image, because
+ * Discord drops the whole embed, title card included, when its og:video takes too long to fetch.
+ */
 export interface ShareEmbed {
   url: string;
   width: number;
@@ -33,20 +37,32 @@ export function shareHead(clip: Clip, embed: ShareEmbed | null = null): string {
     ].join('\n');
   }
   const description = clip.gameName ? `${clip.gameName} · clipped by ${clip.owner.displayName}` : clip.owner.displayName;
-  const video = embed ?? { url: clip.videoUrl, width: clip.width, height: clip.height };
-  return [
+  const common = [
     '<meta name="robots" content="noindex" />',
     meta('property', 'og:site_name', 'Klipt'),
-    meta('property', 'og:type', 'video.other'),
     meta('property', 'og:title', clip.title),
     meta('property', 'og:description', description),
     meta('property', 'og:url', clip.shareUrl),
     meta('property', 'og:image', clip.thumbnailUrl),
-    meta('property', 'og:video', video.url),
-    meta('property', 'og:video:secure_url', video.url),
+  ];
+  if (!embed) {
+    return [
+      ...common,
+      meta('property', 'og:type', 'website'),
+      meta('property', 'og:image:width', clip.width),
+      meta('property', 'og:image:height', clip.height),
+      meta('name', 'twitter:card', 'summary_large_image'),
+      meta('name', 'theme-color', '#7c5cff'),
+    ].join('\n');
+  }
+  return [
+    ...common,
+    meta('property', 'og:type', 'video.other'),
+    meta('property', 'og:video', embed.url),
+    meta('property', 'og:video:secure_url', embed.url),
     meta('property', 'og:video:type', 'video/mp4'),
-    meta('property', 'og:video:width', video.width),
-    meta('property', 'og:video:height', video.height),
+    meta('property', 'og:video:width', embed.width),
+    meta('property', 'og:video:height', embed.height),
     meta('name', 'twitter:card', 'player'),
     meta('name', 'theme-color', '#7c5cff'),
   ].join('\n');
@@ -119,7 +135,7 @@ function People(props: { clip: Clip; viewers?: string[] }): JSX.Element {
 export function SharePage(props: {
   user: AuthUser | null;
   clip: Clip;
-  /** The clip's embed copy, when it has one. */
+  /** The video link embeds play, or null for a thumbnail-only embed (see ShareEmbed). */
   embed?: ShareEmbed | null;
   canDelete: boolean;
   /** Friends who watched it; only given to the owner. */

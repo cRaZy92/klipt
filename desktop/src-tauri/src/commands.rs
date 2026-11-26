@@ -1028,7 +1028,13 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
         quality: if job.high_quality { UploadQuality::High } else { UploadQuality::Standard },
         albums: job.albums.clone(),
     };
-    let server_clip = client.finalize(token, &request).await?;
+    let mut server_clip = client.finalize(token, &request).await?;
+    if !server_clip.share_ready {
+        // A long clip's embed copy is still being made: a link posted now would show no embed in
+        // Discord (which remembers that), so it's handed out only once it's ready.
+        progress(app, id, "preparing", 0, 0);
+        server_clip.share_url = wait_for_share_link(&client, token, &server_clip).await;
+    }
     let replaced = job.replaces.as_deref() == Some(server_clip.id.as_str());
     let visibility = match server_clip.visibility {
         Visibility::Feed => "feed",
@@ -1062,6 +1068,26 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
         }
     }
     Ok((server_clip.share_url, replaced))
+}
+
+/// Asks the server every few seconds until the clip's share link is ready, then returns it. Gives
+/// up after half an hour (the link works either way, just maybe without a video in its embed).
+async fn wait_for_share_link(client: &ApiClient, token: &str, clip: &crate::upload::api::ServerClip) -> String {
+    const EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+    const AT_MOST: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+    let path = format!("/api/clips/{}", clip.id);
+    let start = std::time::Instant::now();
+    while start.elapsed() < AT_MOST {
+        tokio::time::sleep(EVERY).await;
+        match client.get_json(token, &path, &[]).await {
+            Ok(now) if now.get("shareReady").and_then(|v| v.as_bool()) != Some(false) => break,
+            Ok(_) => {}
+            // Logged out or the clip deleted meanwhile: there's nothing to wait for.
+            Err(crate::upload::api::ApiError::Unauthorized | crate::upload::api::ApiError::Server { status: 404, .. }) => break,
+            Err(e) => crate::elog!("klipt: can't check whether clip {} is ready to share: {e}", clip.id),
+        }
+    }
+    clip.share_url.clone()
 }
 
 fn set_upload_progress(app: &AppHandle, id: &str, progress: Option<(&str, u64)>) {

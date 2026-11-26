@@ -28,12 +28,12 @@ export const uploads = $state<Record<string, UploadJob>>({});
 
 /** True while the core is working on the clip. */
 export function isBusy(job: UploadJob | undefined): boolean {
-  return !!job && ["queued", "starting", "exporting", "uploading", "finalizing"].includes(job.status);
+  return !!job && ["queued", "starting", "exporting", "uploading", "finalizing", "preparing"].includes(job.status);
 }
 
 /** 0..1 for the current phase, or null when there's no measurable progress. */
 export function fraction(job: UploadJob): number | null {
-  if (job.status === "finalizing" || job.status === "queued" || job.total <= 0) return null;
+  if (job.status === "finalizing" || job.status === "preparing" || job.status === "queued" || job.total <= 0) return null;
   return Math.min(1, Math.max(0, job.sent / job.total));
 }
 
@@ -57,6 +57,8 @@ export function statusLabel(job: UploadJob): string {
       return `Uploading…${percent}`;
     case "finalizing":
       return "Finishing up…";
+    case "preparing":
+      return "Preparing link…";
     case "done":
       return "Uploaded";
     case "needsLogin":

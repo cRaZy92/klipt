@@ -110,6 +110,14 @@ pub struct ServerClip {
     pub share_url: String,
     pub video_url: String,
     pub thumbnail_url: String,
+    /// The share link works as a Discord embed. A long clip's embed copy is made in the background
+    /// first; servers from before this answer without it, and their links are always ready.
+    #[serde(default = "ready")]
+    pub share_ready: bool,
+}
+
+fn ready() -> bool {
+    true
 }
 
 /// How long finalize keeps retrying while the server is still processing the upload.

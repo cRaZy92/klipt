@@ -159,7 +159,13 @@
   </div>
 
   <div class="actions">
-    <button class="btn btn-sm grow" onclick={oncopy}><Icon name="link" size={15} /> Copy link</button>
+    {#if upload.shareReady === false}
+      <button class="btn btn-sm grow" disabled title="The link works in a few minutes, once its Discord preview is made">
+        <Icon name="link" size={15} /> Preparing link…
+      </button>
+    {:else}
+      <button class="btn btn-sm grow" onclick={oncopy}><Icon name="link" size={15} /> Copy link</button>
+    {/if}
     <button
       class="btn btn-sm btn-ghost btn-icon"
       onclick={ondownload}

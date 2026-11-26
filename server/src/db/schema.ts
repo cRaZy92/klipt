@@ -145,6 +145,11 @@ export const clips = pgTable(
      * before this was recorded. A lower one than current is remade by the embed backfill.
      */
     embedVersion: integer('embed_version').notNull().default(0),
+    /**
+     * A long clip waiting for its embed copy, made in the background: its share link isn't handed
+     * out until this clears (made, or given up on).
+     */
+    embedPending: boolean('embed_pending').notNull().default(false),
     /** The uploaded file's size, once a compression ran (sizeBytes is then the stored file's). */
     originalBytes: bigint('original_bytes', { mode: 'number' }),
     transcodeError: text('transcode_error'),

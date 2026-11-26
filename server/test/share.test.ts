@@ -30,6 +30,27 @@ describe('share page', () => {
     expect(res.body).toMatch(/<video controls[^>]*playsinline[^>]*preload="metadata"/);
   });
 
+  it('a long clip without an embed copy still embeds its full video when Discord can fetch it in time', async () => {
+    const u = await createUser(t.db, { username: 'frank' });
+    await addClip(u.id, 'shareclip011', { durationMs: 20 * 60_000, width: 1920, height: 1080, sizeBytes: 95 * 1024 * 1024 });
+    const res = await get('/c/shareclip011');
+    expect(res.body).toContain('<meta property="og:video" content="http://localhost/media/shareclip011.mp4"');
+    expect(res.body).toContain('content="player"');
+  });
+
+  it('a huge clip without an embed copy embeds its thumbnail only, as a large image', async () => {
+    const u = await createUser(t.db, { username: 'erin' });
+    // A long upload before compression: far too big for Discord to fetch in time.
+    await addClip(u.id, 'shareclip010', { durationMs: 20 * 60_000, width: 1920, height: 1080, sizeBytes: 680 * 1024 * 1024 });
+    const res = await get('/c/shareclip010');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('og:video');
+    expect(res.body).toContain('<meta property="og:image" content="http://localhost/media/shareclip010.jpg"');
+    expect(res.body).toContain('<meta property="og:image:width" content="1920" />');
+    expect(res.body).toContain('<meta name="twitter:card" content="summary_large_image" />');
+    expect(res.body).toContain('<meta property="og:title" content="Ace" />');
+  });
+
   it('serves link-only clips, escapes titles, omits game when absent', async () => {
     const u = await createUser(t.db, { username: 'bob' });
     await addClip(u.id, 'shareclip002', { visibility: 'link', title: 'A&B "x" <i>' });

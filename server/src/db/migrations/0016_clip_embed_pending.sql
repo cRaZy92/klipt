@@ -1,0 +1,1 @@
+ALTER TABLE "clips" ADD COLUMN "embed_pending" boolean DEFAULT false NOT NULL;

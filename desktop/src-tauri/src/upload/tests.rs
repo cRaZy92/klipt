@@ -489,3 +489,17 @@ fn finalize_sends_albums_only_when_some_are_picked() {
     let picked = serde_json::to_value(FinalizeRequest { albums: vec!["album0000001".into()], ..req() }).unwrap();
     assert_eq!(picked["albums"], serde_json::json!(["album0000001"]));
 }
+
+#[test]
+fn a_clip_from_an_older_server_is_ready_to_share() {
+    let mut clip = serde_json::json!({
+        "id": "abcdefghijkl", "title": "Ace", "gameName": null, "steamAppId": null, "visibility": "feed",
+        "durationMs": 1000, "width": 1280, "height": 720, "sizeBytes": 10, "createdAt": "2026-11-26T00:00:00Z",
+        "shareUrl": "https://k/c/abcdefghijkl", "videoUrl": "https://k/media/a.mp4", "thumbnailUrl": "https://k/media/a.jpg"
+    });
+    let old: crate::upload::api::ServerClip = serde_json::from_value(clip.clone()).unwrap();
+    assert!(old.share_ready);
+    clip["shareReady"] = serde_json::json!(false);
+    let waiting: crate::upload::api::ServerClip = serde_json::from_value(clip).unwrap();
+    assert!(!waiting.share_ready);
+}

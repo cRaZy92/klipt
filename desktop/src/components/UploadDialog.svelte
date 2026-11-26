@@ -58,8 +58,13 @@
     { status: "uploading", label: "Upload" },
     { status: "finalizing", label: "Finish" },
   ] as const;
+  // Preparing the link is the end of finishing up.
   const stepIndex = $derived(
-    job?.status === "done" ? 3 : Math.max(0, STEPS.findIndex((s) => s.status === job?.status)),
+    job?.status === "done"
+      ? 3
+      : job?.status === "preparing"
+        ? 2
+        : Math.max(0, STEPS.findIndex((s) => s.status === job?.status)),
   );
 
   function submit(e: SubmitEvent) {

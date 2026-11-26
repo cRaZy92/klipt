@@ -21,7 +21,7 @@ import { GetAppPage } from './pages/getApp.js';
 import { InvitePage } from './pages/invite.js';
 import { LoginPage } from './pages/login.js';
 import { SharePage } from './pages/share.js';
-import { embedPlan, hasEmbed } from '../clips/embed.js';
+import { embedPlan, FULL_VIDEO_EMBED_MAX_BYTES, hasEmbed } from '../clips/embed.js';
 import { embedFileName } from '../clips/files.js';
 import { MePage } from './pages/me.js';
 import { NotFoundPage } from './pages/notFound.js';
@@ -167,10 +167,14 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const viewers = req.user?.id === found.clip.userId ? (await listViewers(db, clip.id)).map((v) => v.displayName) : undefined;
     const signup = !req.user && config.shareSignup && (await shareInviter(db, clip.id)) !== null;
     const plan = clip.kind === 'clip' ? embedPlan(clip) : null;
+    // Without a small copy the full video goes in the embed only when Discord can fetch it in time:
+    // it gives up on a huge one (an upload still being compressed) and then shows no embed at all.
     const embed =
       plan && (await hasEmbed(join(config.dataDir, 'clips'), clip.id))
         ? { url: `${config.baseUrl}/media/${embedFileName(clip.id)}${versionQuery(found.clip)}`, width: plan.width, height: plan.height }
-        : null;
+        : clip.kind === 'clip' && clip.sizeBytes <= FULL_VIDEO_EMBED_MAX_BYTES
+          ? { url: clip.videoUrl, width: clip.width, height: clip.height }
+          : null;
     return html(reply, SharePage({ user: req.user, clip, embed, canDelete, viewers, signup }) as string);
   });
 

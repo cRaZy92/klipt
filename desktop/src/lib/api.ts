@@ -289,7 +289,8 @@ export interface AppError {
   fields?: FieldError[];
 }
 
-export type UploadPhase = "exporting" | "uploading" | "finalizing";
+/** `preparing`: uploaded, waiting for the server to make the clip's link ready to share. */
+export type UploadPhase = "exporting" | "uploading" | "finalizing" | "preparing";
 
 export interface UploadProgress {
   id: string;
@@ -433,6 +434,9 @@ export interface FeedClip {
   /** The server is still compressing it (it plays meanwhile): waiting its turn, or being
    * compressed. Null when done; missing from older servers. */
   processing?: "queued" | "running" | null;
+  /** False while the server is making a long clip's Discord embed: the link isn't handed out yet.
+   * Missing from older servers (ready). */
+  shareReady?: boolean;
 }
 
 /** What "Check for updates" found. On Linux `command` installs it (run in a terminal). */

@@ -14,7 +14,7 @@ import { achievementRoutes } from './achievements/routes.js';
 import { webRoutes } from './web/routes.js';
 import { join } from 'node:path';
 import { Transcoder } from './clips/transcoder.js';
-import { EmbedBackfill } from './clips/embed.js';
+import { EMBED_THREADS, EmbedBackfill } from './clips/embed.js';
 import { ServerErrorPage } from './web/pages/serverError.js';
 import { DiskGuard } from './disk.js';
 
@@ -66,7 +66,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     const backfill = new EmbedBackfill({
       db: deps.db,
       clipsDir: join(deps.config.dataDir, 'clips'),
-      threads: deps.config.transcode.threads,
+      // Someone may be waiting for a long clip's copy to share it.
+      threads: EMBED_THREADS,
       log: app.log,
       disk,
     });

@@ -257,10 +257,10 @@
     };
   });
 
-  // While the server compresses one of your uploads, check back so its "Queued" / "Processing"
-  // pill goes away once it's done.
+  // While the server compresses one of your uploads or prepares its link, check back so its
+  // "Queued" / "Processing" pill goes away and its Copy link turns on once it's done.
   $effect(() => {
-    if (!uploads?.some((u) => u.processing === "queued" || u.processing === "running")) return;
+    if (!uploads?.some((u) => u.processing === "queued" || u.processing === "running" || u.shareReady === false)) return;
     const timer = setInterval(() => void loadUploads(), 15_000);
     return () => clearInterval(timer);
   });

@@ -254,6 +254,11 @@ export interface Clip {
    * compressed. It plays meanwhile (the uploaded file); null once it's done or for screenshots.
    */
   processing: 'queued' | 'running' | null;
+  /**
+   * The share link is ready to hand out: its Discord embed works. False for a few minutes after a
+   * long clip is uploaded (its embed copy is being made), so the app waits before copying it.
+   */
+  shareReady: boolean;
   createdAt: string;
   owner: UserRef;
   shareUrl: string;

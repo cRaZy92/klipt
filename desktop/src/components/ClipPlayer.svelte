@@ -289,7 +289,13 @@
               <Icon name={favorite ? "starFilled" : "star"} size={16} />
             </button>
           {/if}
-          <button class="btn btn-sm" onclick={copyLink}><Icon name="link" size={15} /> Copy link</button>
+          {#if clip.shareReady === false}
+            <button class="btn btn-sm" disabled title="The link works in a few minutes, once its Discord preview is made">
+              <Icon name="link" size={15} /> Preparing link…
+            </button>
+          {:else}
+            <button class="btn btn-sm" onclick={copyLink}><Icon name="link" size={15} /> Copy link</button>
+          {/if}
           <button class="btn btn-sm btn-ghost" onclick={() => (albumOpen = true)} title="Put it in one of your albums">
             <Icon name="album" size={15} /> Album
           </button>

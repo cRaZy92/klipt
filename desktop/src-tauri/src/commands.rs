@@ -640,6 +640,27 @@ pub async fn clip_preview_url(app: AppHandle, id: String) -> Result<String> {
     .await?
 }
 
+/// Whether `url` is a video on the server at `server_url` (same origin, under `/media/`).
+fn is_server_media(server_url: &str, url: &str) -> bool {
+    match (reqwest::Url::parse(server_url.trim()), reqwest::Url::parse(url)) {
+        (Ok(server), Ok(media)) => server.origin() == media.origin() && media.path().starts_with("/media/"),
+        _ => false,
+    }
+}
+
+/// A local URL that plays a server clip through the read-ahead cache (see `player_cache`): WebKit
+/// reads server videos in small requests, each a round trip, so they start slowly when loaded
+/// directly. Only videos on the saved server go through it.
+#[tauri::command]
+pub async fn player_video_url(app: AppHandle, url: String) -> Result<String> {
+    let data_dir = app.state::<AppState>().data_dir.clone();
+    let auth = off_main(move || auth::load(&data_dir)).await?.ok_or(AppError::Unauthorized)?;
+    if !is_server_media(&auth.server_url, &url) {
+        return Err(AppError::InvalidInput("not a video on your server".into()));
+    }
+    Ok(app.state::<crate::media_server::MediaServer>().url_for_remote(&url))
+}
+
 /// Copies the clip's share link to the clipboard and returns it.
 #[tauri::command]
 pub async fn copy_share_link(app: AppHandle, id: String) -> Result<String> {
@@ -1526,6 +1547,18 @@ pub async fn combine_clips(app: AppHandle, ids: Vec<String>, title: String) -> R
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn is_server_media_only_accepts_media_on_the_saved_server() {
+        let server = "https://klipt.example";
+        assert!(super::is_server_media(server, "https://klipt.example/media/abc.v1.mp4"));
+        assert!(super::is_server_media("https://klipt.example/", "https://klipt.example/media/abc.mp4?v=2"));
+        assert!(!super::is_server_media(server, "https://other.example/media/abc.mp4"));
+        assert!(!super::is_server_media(server, "http://klipt.example/media/abc.mp4"));
+        assert!(!super::is_server_media(server, "https://klipt.example:8443/media/abc.mp4"));
+        assert!(!super::is_server_media(server, "https://klipt.example/api/me"));
+        assert!(!super::is_server_media(server, "not a url"));
+    }
+
     use super::*;
     use std::path::PathBuf;
 

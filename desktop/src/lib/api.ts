@@ -646,6 +646,8 @@ export const api = {
   /** Stops checking, or stops the import (the file being converted is dropped). */
   cancelImport: () => invoke<void>("cancel_import"),
   /** Stars or unstars a server clip (yours or a friend's); kept on the server. */
+  /** A local URL that plays a server clip through the app's read-ahead cache (starts much faster). */
+  playerVideoUrl: (url: string) => invoke<string>("player_video_url", { url }),
   setServerFavorite: (id: string, favorite: boolean) => invoke<void>("set_server_favorite", { id, favorite }),
   feedGames: () => invoke<FeedGame[]>("feed_games"),
   /** Your albums, most recently changed first; with `clip` (a server clip id), which hold it. */

@@ -156,6 +156,7 @@ pub fn run() {
             commands::delete_clip,
             commands::show_in_folder,
             commands::clip_preview_url,
+            commands::player_video_url,
             commands::copy_share_link,
             commands::copy_text_to_clipboard,
             commands::feed_clips,

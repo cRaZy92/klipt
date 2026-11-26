@@ -7,9 +7,16 @@
 
   let {
     games,
+    allCount,
     selected,
     onselect,
-  }: { games: GameCount[]; selected: string | null; onselect: (game: string | null) => void } = $props();
+  }: {
+    games: GameCount[];
+    /** Shown on the "All games" chip when given. */
+    allCount?: number;
+    selected: string | null;
+    onselect: (game: string | null) => void;
+  } = $props();
 
   // One line of chips; whatever doesn't fit goes behind "+N more". A hidden selection is pinned
   // next to it so the active filter is always on screen. Widths come from an invisible copy of
@@ -110,6 +117,7 @@
 <div class="filter" role="group" aria-label="Filter by game" bind:this={row}>
   <button class="chip all" class:active={selected === null} aria-pressed={selected === null} onclick={() => onselect(null)}>
     All games
+    {#if allCount !== undefined}<span class="count">{allCount}</span>{/if}
   </button>
   {#each shown as game (game.name)}
     {@render chip(game)}
@@ -148,7 +156,7 @@
 
   <div class="measure-box" aria-hidden="true">
     <div class="measure" bind:this={measure}>
-      <span class="chip all">All games</span>
+      <span class="chip all">All games{#if allCount !== undefined}<span class="count">{allCount}</span>{/if}</span>
       {#each games as game (game.name)}
         <span class="chip">
           <span class="game-dot"></span>
@@ -213,6 +221,10 @@
 
   .chip.all {
     padding-right: 0.85rem;
+  }
+
+  .chip.all:has(.count) {
+    padding-right: 0.6rem;
   }
 
   .chip.more {

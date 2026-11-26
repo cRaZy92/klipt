@@ -98,6 +98,8 @@
   const uploadById = $derived(new Map((uploads ?? []).map((u) => [u.id, u])));
   /** The game chips: their counts follow every other filter (myClips.ts). */
   const games = $derived(gameChips(items, place, game, search, media));
+  /** The "All games" chip's count: what would show with no game picked, every other filter applied. */
+  const allGamesCount = $derived(visibleClips(items, place, null, sort, search, media).length);
   /** Every game with a clip in this place: the "Set game" suggestions, and whether the game filter still has anything. */
   const placeGames = $derived(gameCounts(items.filter((i) => matchesPlace(i, place))));
   const visible = $derived(visibleClips(items, place, game, sort, search, media));
@@ -615,7 +617,7 @@
     </div>
 
     {#if games.length > 0}
-      <GameFilter {games} selected={game} onselect={(g) => (game = g)} />
+      <GameFilter {games} allCount={allGamesCount} selected={game} onselect={(g) => (game = g)} />
     {/if}
   </div>
 

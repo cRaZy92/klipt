@@ -61,7 +61,7 @@
     min-width: 2.4em;
     height: 2.2em;
     padding: 0 0.65em;
-    border-color: rgba(124, 92, 255, 0.55);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
     border-bottom-width: 5px;
     border-radius: 12px;
     background: linear-gradient(180deg, #2c2742, #1d1a2b);

@@ -566,7 +566,7 @@
     padding: 0;
     border: none;
     border-radius: 13px;
-    background: linear-gradient(145deg, #9479ff, #6a4bf0);
+    background: linear-gradient(145deg, var(--accent-hover), color-mix(in srgb, var(--accent) 88%, #000));
     box-shadow:
       0 8px 22px -8px var(--accent-glow),
       inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -638,8 +638,8 @@
     padding: 0 0.3rem;
     border: 2px solid var(--bg, #0b0a10);
     border-radius: 999px;
-    background: var(--surface-3, #2a2638);
-    color: var(--accent-text, #c9bcff);
+    background: var(--surface-3);
+    color: var(--accent-text);
     font-size: 0.62rem;
     font-weight: 750;
     line-height: 0.95rem;
@@ -788,7 +788,7 @@
     flex-direction: column;
     min-width: 0;
     background:
-      radial-gradient(60rem 22rem at 20% -6rem, rgba(124, 92, 255, 0.11), transparent 70%),
+      radial-gradient(60rem 22rem at 20% -6rem, color-mix(in srgb, var(--accent) 11%, transparent), transparent 70%),
       var(--bg);
   }
 
@@ -799,9 +799,9 @@
     flex: none;
     margin: 0.85rem 2rem 0;
     padding: 0.55rem 0.6rem 0.55rem 0.7rem;
-    border: 1px solid rgba(124, 92, 255, 0.35);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
     border-radius: var(--radius);
-    background: linear-gradient(90deg, rgba(124, 92, 255, 0.24), rgba(124, 92, 255, 0.06));
+    background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, var(--accent) 6%, transparent));
     animation: rise 0.35s var(--ease-out);
   }
 

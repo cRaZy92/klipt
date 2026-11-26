@@ -527,7 +527,7 @@
     height: 3.25rem;
     padding-left: 3px;
     border-radius: 50%;
-    background: rgba(124, 92, 255, 0.9);
+    background: color-mix(in srgb, var(--accent) 90%, transparent);
     box-shadow: 0 8px 26px -4px var(--accent-glow);
     color: #fff;
     opacity: 0;

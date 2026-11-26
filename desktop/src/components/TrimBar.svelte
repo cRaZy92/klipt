@@ -748,7 +748,7 @@
     bottom: 0;
     border-top: 2px solid var(--accent);
     border-bottom: 2px solid var(--accent);
-    background: linear-gradient(180deg, rgba(124, 92, 255, 0.24), rgba(124, 92, 255, 0.08));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, var(--accent) 8%, transparent));
     box-shadow: 0 0 24px -8px var(--accent-glow);
     pointer-events: none;
   }
@@ -790,7 +790,7 @@
     display: grid;
     place-items: center;
     width: 0.9rem;
-    background: linear-gradient(180deg, #9479ff, #6d4ff2);
+    background: linear-gradient(180deg, var(--accent-hover), color-mix(in srgb, var(--accent) 88%, #000));
     cursor: ew-resize;
     touch-action: none;
     transition: filter 0.15s;

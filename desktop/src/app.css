@@ -174,7 +174,7 @@ select {
 
 .btn-primary {
   border-color: transparent;
-  background: linear-gradient(180deg, #8a6dff, #7152f5);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 90%, #fff), color-mix(in srgb, var(--accent) 92%, #000));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
     0 4px 14px -4px var(--accent-glow);
@@ -183,7 +183,7 @@ select {
 
 .btn-primary:hover:not(:disabled) {
   border-color: transparent;
-  background: linear-gradient(180deg, #9a81ff, #7c5cff);
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
     0 6px 20px -4px var(--accent-glow);
@@ -192,13 +192,13 @@ select {
 /* A quieter accent button, for actions repeated on every card. */
 .btn-soft {
   border-color: transparent;
-  background: rgba(124, 92, 255, 0.2);
-  color: #d2c8ff;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent-text);
 }
 
 .btn-soft:hover:not(:disabled) {
   border-color: transparent;
-  background: rgba(124, 92, 255, 0.26);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
   color: #fff;
 }
 
@@ -378,7 +378,7 @@ select.input option {
   inset: 0 auto 0 0;
   width: calc(var(--value, 0.35) * 100%);
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--accent), #b18cff);
+  background: linear-gradient(90deg, var(--accent), var(--accent-text));
   box-shadow: 0 0 12px var(--accent-glow);
   /* Progress arrives about every 100 ms: a short linear glide joins the steps into one motion. */
   transition: width 0.2s linear;
@@ -461,7 +461,7 @@ select.input option {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(60rem 22rem at 20% -6rem, rgba(124, 92, 255, 0.11), transparent 70%),
+    radial-gradient(60rem 22rem at 20% -6rem, color-mix(in srgb, var(--accent) 11%, transparent), transparent 70%),
     var(--bg);
 }
 

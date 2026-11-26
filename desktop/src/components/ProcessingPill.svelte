@@ -29,10 +29,10 @@
     align-items: center;
     gap: 0.3rem;
     padding: 0.2rem 0.5rem 0.2rem 0.4rem;
-    border: 1px solid rgba(124, 92, 255, 0.35);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
     border-radius: 999px;
-    background: rgba(20, 14, 40, 0.9);
-    color: var(--accent-text, #c9bcff);
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    color: var(--accent-text);
     font-size: 0.72rem;
     font-weight: 700;
     pointer-events: auto;

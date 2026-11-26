@@ -175,7 +175,7 @@
     padding: 3rem 3rem 3rem 3.25rem;
     border-right: 1px solid var(--border);
     background:
-      radial-gradient(36rem 28rem at -10% -10%, rgba(124, 92, 255, 0.42), transparent 65%),
+      radial-gradient(36rem 28rem at -10% -10%, color-mix(in srgb, var(--accent) 42%, transparent), transparent 65%),
       radial-gradient(28rem 24rem at 110% 115%, rgba(255, 77, 109, 0.2), transparent 65%),
       var(--bg-2);
   }
@@ -211,7 +211,7 @@
     width: 3rem;
     height: 3rem;
     border-radius: 14px;
-    background: linear-gradient(145deg, #9479ff, #6a4bf0);
+    background: linear-gradient(145deg, var(--accent-hover), color-mix(in srgb, var(--accent) 88%, #000));
     box-shadow:
       0 10px 28px -8px var(--accent-glow),
       inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -264,7 +264,7 @@
     flex: none;
     width: 2.25rem;
     height: 2.25rem;
-    border: 1px solid rgba(124, 92, 255, 0.3);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-radius: 11px;
     background: var(--accent-soft);
     color: var(--accent-text);
@@ -322,7 +322,7 @@
 
   .notice {
     padding: 0.7rem 0.85rem;
-    border: 1px solid rgba(124, 92, 255, 0.3);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-radius: var(--radius-sm);
     background: var(--accent-soft);
     font-size: 0.9rem;

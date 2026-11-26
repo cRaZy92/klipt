@@ -326,7 +326,7 @@
   }
 
   .option.selected {
-    border-color: rgba(124, 92, 255, 0.7);
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
     background: var(--accent-softer);
     box-shadow: 0 0 0 3px var(--accent-softer);
   }

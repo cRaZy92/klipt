@@ -2089,7 +2089,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: #000;
-    box-shadow: 0 24px 60px -30px rgba(124, 92, 255, 0.35);
+    box-shadow: 0 24px 60px -30px color-mix(in srgb, var(--accent) 35%, transparent);
   }
 
   .frame {

@@ -121,7 +121,7 @@
   }
 
   .pct {
-    color: var(--accent-text, #c9bcff);
+    color: var(--accent-text);
     font-weight: 750;
     font-variant-numeric: tabular-nums;
   }

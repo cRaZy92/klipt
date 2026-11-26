@@ -143,7 +143,7 @@
   .breakdown li :global(svg) {
     flex: none;
     margin-top: 0.1rem;
-    color: var(--accent-text, #c9bcff);
+    color: var(--accent-text);
   }
 
   .breakdown li.slow :global(svg) {

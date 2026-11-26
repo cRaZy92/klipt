@@ -153,6 +153,20 @@
 
 <svelte:window onclick={closeMenuOutside} oncontextmenu={closeMenuOutside} />
 
+{#snippet linkOnly()}
+  <button
+    class="link-only"
+    onclick={(e) => {
+      e.stopPropagation();
+      onvisibility?.();
+    }}
+    disabled={busy || !onvisibility}
+    title="Only people with the link can see it. Click to show it in the feed"
+  >
+    Link only
+  </button>
+{/snippet}
+
 {#snippet selectPill()}
   <Icon name="check" size={15} />
   {selected ? "Unselect" : "Select"}
@@ -214,6 +228,9 @@
       <span class="badge badge-icon {uploaded ? 'badge-uploaded' : 'badge-local'}" role="img" aria-label={where.title} title={where.title}>
         <Icon name={where.icon} size={14} />
       </span>
+    {/if}
+    {#if uploaded && clip.visibility === "link" && !clip.fileMissing}
+      {@render linkOnly()}
     {/if}
     <ProcessingPill state={processing} />
     {#if clip.kind === "screenshot"}

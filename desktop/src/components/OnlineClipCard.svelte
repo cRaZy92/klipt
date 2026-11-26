@@ -110,6 +110,18 @@
     <span class="badge badge-icon badge-online" role="img" aria-label={WHERE.online.title} title={WHERE.online.title}>
       <Icon name={WHERE.online.icon} size={14} />
     </span>
+    {#if upload.visibility === "link"}
+      <button
+        class="link-only"
+        onclick={(e) => {
+          e.stopPropagation();
+          onvisibility();
+        }}
+        title="Only people with the link can see it. Click to show it in the feed"
+      >
+        Link only
+      </button>
+    {/if}
     <ProcessingPill state={upload.processing} />
     {#if onfavorite}
       <button
@@ -142,10 +154,6 @@
       {#if upload.views > 0}
         <span aria-hidden="true">·</span>
         <span class="when">{viewsLabel(upload.views)}</span>
-      {/if}
-      {#if upload.visibility === "link"}
-        <span aria-hidden="true">·</span>
-        <span class="when" title="Only people with the link can see it">Link only</span>
       {/if}
     </p>
   </div>

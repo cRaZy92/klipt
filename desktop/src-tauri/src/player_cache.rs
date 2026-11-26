@@ -250,7 +250,7 @@ impl Download {
 
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
@@ -327,8 +327,8 @@ mod tests {
         assert!(Arc::ptr_eq(&a, &b));
         assert_eq!(a.wait_total(T).unwrap(), 3_000_000);
         a.wait_for(3_000_000, T).unwrap();
-        // Give the rename a moment; either path holds the whole body.
-        let bytes = std::fs::read(a.path()).unwrap();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut a.open_file().unwrap(), &mut bytes).unwrap();
         assert_eq!(bytes, body(3_000_000));
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }
@@ -340,7 +340,7 @@ mod tests {
         let cache = PlayerCache::new(dir.path().to_path_buf(), PLAYER_CACHE_MAX_BYTES);
         let d = cache.open(&url);
         d.wait_for(2_000_000, T).unwrap();
-        assert!(std::fs::metadata(d.path()).unwrap().len() >= 2_000_000);
+        assert!(d.open_file().unwrap().metadata().unwrap().len() >= 2_000_000);
     }
 
     #[test]
@@ -397,7 +397,9 @@ mod tests {
         let d = second.open(&url);
         assert_eq!(d.wait_total(T).unwrap(), 400_000);
         d.wait_for(400_000, T).unwrap();
-        assert_eq!(std::fs::read(d.path()).unwrap(), body(400_000));
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut d.open_file().unwrap(), &mut bytes).unwrap();
+        assert_eq!(bytes, body(400_000));
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }
 }

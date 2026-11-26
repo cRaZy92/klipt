@@ -84,7 +84,15 @@ pub fn run() {
             if let Err(e) = app.asset_protocol_scope().allow_directory(data_dir.join("thumbs"), false) {
                 crate::elog!("klipt: can't allow thumbnails in the asset scope: {e}");
             }
-            app.manage(media_server::MediaServer::start()?);
+            // Server clips play through a read-ahead cache (see player_cache); leftovers of a
+            // download cut off by quitting are cleared, off the start-up path.
+            let player_cache = player_cache::PlayerCache::new(
+                app.path().app_cache_dir()?.join("player"),
+                player_cache::PLAYER_CACHE_MAX_BYTES,
+            );
+            let sweep = player_cache.clone();
+            std::thread::spawn(move || sweep.evict());
+            app.manage(media_server::MediaServer::start(player_cache)?);
             app.manage(state);
             app.manage(commands::Uploads::default());
             app.manage(upload_notice::UploadBatch::default());

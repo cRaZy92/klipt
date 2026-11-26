@@ -12,13 +12,13 @@
 .frame-silver { --ring: linear-gradient(140deg, #ffffff, #8e97a6 50%, #e4e8ef); }
 .frame-gold { --ring: linear-gradient(140deg, #fff1a8, #d39b18 50%, #ffd75e); box-shadow: 0 0 12px rgba(255, 201, 77, 0.35); }
 .frame-rainbow { --ring: conic-gradient(#ff5d6c, #ffb547, #ffe66d, #3ccf8e, #4dabff, #9b7bff, #ff5d6c); }
-.frame-pulse { --ring: linear-gradient(140deg, var(--accent-text), var(--accent)); animation: klipt-pulse 2.4s ease-in-out infinite; }
+.frame-pulse { --ring: linear-gradient(140deg, #ffd6f5, #c04cff 50%, #5b8cff); animation: klipt-pulse 2.4s ease-in-out infinite; }
 @keyframes klipt-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(192, 76, 255, 0.5); }
   50% { box-shadow: 0 0 0 6px rgba(0, 0, 0, 0); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .frame-pulse { animation: none; box-shadow: 0 0 10px var(--accent-glow); }
+  .frame-pulse { animation: none; box-shadow: 0 0 10px rgba(192, 76, 255, 0.5); }
 }
 
 .banner-curator {

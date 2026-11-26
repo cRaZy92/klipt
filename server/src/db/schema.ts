@@ -12,7 +12,10 @@ export const users = pgTable('users', {
   isAdmin: boolean('is_admin').notNull().default(false),
   disabledAt: ts('disabled_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
-  /** Bumped each time the profile picture changes (`<data>/avatars/<id>.jpg`); 0 = none, draw the initial. */
+  /**
+   * The profile picture's version (`<data>/avatars/<id>.jpg?v=<n>`). 0 or negative: none, draw the
+   * initial; a removal negates it so the next picture still gets a new URL.
+   */
   avatarVersion: integer('avatar_version').notNull().default(0),
   /** Equipped accent, theme, frame and banner (`Looks`); read through `sanitizeLooks`. Null = defaults. */
   looks: jsonb('looks'),

@@ -23,7 +23,7 @@ export interface UserRefRow {
   frame: string | null;
 }
 
-/** The picture's URL (`baseUrl` '' gives a path on this site); null without one. */
+/** The picture's URL (`baseUrl` '' gives a path on this site); null without one (version 0 or below). */
 export function avatarUrl(u: { id: string; avatarVersion: number }, baseUrl: string): string | null {
   return u.avatarVersion > 0 ? `${baseUrl}/avatars/${u.id}.jpg?v=${u.avatarVersion}` : null;
 }

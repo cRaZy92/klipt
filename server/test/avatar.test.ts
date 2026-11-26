@@ -74,6 +74,13 @@ describe('profile pictures', () => {
     expect((await t.app.inject({ method: 'GET', url: `/avatars/${a.id}.jpg` })).statusCode).toBe(404);
   });
 
+  it('a picture set after removing one gets a new URL (the old one is cached for good)', async () => {
+    await put(a.h, (await picture('png')).buf);
+    await t.app.inject({ method: 'DELETE', url: '/api/me/avatar', headers: a.h });
+    const again = await put(a.h, (await picture('jpg')).buf, 'image/jpeg');
+    expect(again.json().avatarUrl).toBe(`http://localhost/avatars/${a.id}.jpg?v=2`);
+  });
+
   it('serves only avatar names', async () => {
     await writeFile(join(t.dataDir, 'secret.jpg'), 'x');
     expect((await t.app.inject({ method: 'GET', url: '/avatars/..%2Fsecret.jpg' })).statusCode).toBe(404);

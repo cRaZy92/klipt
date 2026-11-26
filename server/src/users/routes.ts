@@ -46,13 +46,15 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     } finally {
       await Promise.all([tmpIn, tmpOut].map((f) => rm(f, { force: true })));
     }
-    await db.update(users).set({ avatarVersion: sql`${users.avatarVersion} + 1` }).where(eq(users.id, id));
+    // Versions only grow, also across a removal: each picture's URL is new (they're cached for good).
+    await db.update(users).set({ avatarVersion: sql`abs(${users.avatarVersion}) + 1` }).where(eq(users.id, id));
     return meOf(db, id, config.baseUrl);
   });
 
   app.delete('/api/me/avatar', { preHandler: requireUser }, async (req) => {
     const id = req.user!.id;
-    await db.update(users).set({ avatarVersion: 0 }).where(eq(users.id, id));
+    // Negative: no picture, but the next one still gets a version never used before.
+    await db.update(users).set({ avatarVersion: sql`-abs(${users.avatarVersion})` }).where(eq(users.id, id));
     await rm(join(avatarsDir, `${id}.jpg`), { force: true });
     return meOf(db, id, config.baseUrl);
   });

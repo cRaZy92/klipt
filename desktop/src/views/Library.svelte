@@ -80,7 +80,10 @@
   let selected = $state<Set<string>>(new Set());
   let anchor: string | null = null;
   let deletingOnline = $state<MyUpload | null>(null);
-  let playing = $state<MyUpload | null>(null);
+  /** The upload playing, and the clip on this PC it was opened from (its star is the local one). */
+  let playing = $state<{ upload: MyUpload; localId: string | null } | null>(null);
+  const playingLocal = $derived(playing?.localId ? (local.find((c) => c.id === playing!.localId) ?? null) : null);
+  const playingUpload = $derived(playing ? (uploads?.find((u) => u.id === playing!.upload.id) ?? playing.upload) : null);
   let downloading = $state<Set<string>>(new Set());
   let saving = $state(false);
   /** When the running full recording started (Unix ms), or null. */
@@ -699,7 +702,7 @@
                   onupload={() => (uploading = clip)}
                   onedit={clip.kind === "screenshot" ? undefined : onedit ? () => onedit(clip) : undefined}
                   onview={clip.kind === "screenshot" ? () => (viewing = clip) : undefined}
-                  onplay={served ? () => (playing = served) : undefined}
+                  onplay={served ? () => (playing = { upload: served, localId: clip.id }) : undefined}
                   processing={served?.processing}
                   onrename={() => (renaming = { kind: "local", id: clip.id, value: clip.title })}
                   onsetgame={() => (tagging = { clips: [clip], value: clip.gameName ?? "", skipped: 0 })}
@@ -721,7 +724,7 @@
                   {now}
                   index={i}
                   downloading={downloading.has(upload.id)}
-                  onplay={() => (playing = upload)}
+                  onplay={() => (playing = { upload, localId: null })}
                   oncopy={() => act(() => api.copyText(upload.shareUrl), "Link copied!")}
                   onopenweb={() => act(() => api.openWebsite(upload.shareUrl))}
                   onrename={() => (renaming = { kind: "online", id: upload.id, value: upload.title })}
@@ -852,8 +855,19 @@
   <UploadDialog clip={uploading} onclose={() => (uploading = null)} />
 {/if}
 
-{#if playing}
-  <ClipPlayer clip={playing} {now} own onclose={() => (playing = null)} />
+{#if playing && playingUpload}
+  <ClipPlayer
+    clip={playingUpload}
+    {now}
+    own
+    onclose={() => (playing = null)}
+    favorite={playingLocal ? playingLocal.favorite : !!playingUpload.favorite}
+    onfavorite={playingLocal
+      ? () => toggleFavorite(playingLocal)
+      : playingUpload.favorite !== undefined
+        ? () => toggleOnlineFavorite(playingUpload)
+        : undefined}
+  />
 {/if}
 
 {#if viewing}

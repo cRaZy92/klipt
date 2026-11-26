@@ -154,17 +154,23 @@
     void load();
   }
 
+  /** The playing clip as the list has it now, so the player's star follows its card. */
+  const playingNow = $derived(playing ? (clips.find((c) => c.id === playing!.id) ?? playing) : null);
+
   /** Stars or unstars a clip: shown at once, put back if the server refuses. */
   async function toggleFavorite(clip: FeedClip) {
     const favorite = !clip.favorite;
     const set = (on: boolean) => (clips = clips.map((c) => (c.id === clip.id ? { ...c, favorite: on } : c)));
     set(favorite);
+    // The player keeps showing it even once it leaves the Favorites list.
+    if (playing?.id === clip.id) playing = { ...playing, favorite };
     try {
       await api.setServerFavorite(clip.id, favorite);
       // Unstarred while viewing favorites: it no longer belongs here.
       if (favoritesOnly && !favorite) clips = clips.filter((c) => c.id !== clip.id);
     } catch (e) {
       set(!favorite);
+      if (playing?.id === clip.id) playing = { ...playing, favorite: !favorite };
       toast(failed(e), "error");
     }
   }
@@ -400,6 +406,8 @@
     next={around.next}
     onnavigate={(c) => (playing = c)}
     onclose={() => (playing = null)}
+    favorite={!!playingNow?.favorite}
+    onfavorite={playingNow && playingNow.favorite !== undefined ? () => toggleFavorite(playingNow) : undefined}
   />
 {/if}
 

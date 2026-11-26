@@ -38,6 +38,12 @@
     onfavorite?: () => void;
   } = $props();
 
+  // Keyed on these, not on `clip`: a new clip object for the same clip (starred, say) mustn't
+  // reload the video.
+  const clipId = $derived(clip.id);
+  const videoUrl = $derived(clip.videoUrl);
+  const isShot = $derived(clip.kind === "screenshot");
+
   // The first play of each clip counts as a view (the server ignores your own clips).
   let counted: string | null = null;
   function countView() {
@@ -48,7 +54,7 @@
 
   let viewers = $state<string[] | null>(null);
   $effect(() => {
-    const id = clip.id;
+    const id = clipId;
     viewers = null;
     if (!own) return;
     api
@@ -65,7 +71,7 @@
 
   // A new clip starts fresh, without the previous one's "Up next".
   $effect(() => {
-    void clip.id;
+    void clipId;
     ended = false;
     wake();
   });
@@ -76,10 +82,10 @@
   let src = $state<string | null>(null);
   let cached = false;
   $effect(() => {
-    const direct = clip.videoUrl;
+    const direct = videoUrl;
     src = null;
     cached = false;
-    if (clip.kind === "screenshot") return;
+    if (isShot) return;
     let live = true;
     api.playerVideoUrl(direct).then(
       (url) => {

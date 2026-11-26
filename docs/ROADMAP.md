@@ -1,6 +1,6 @@
 # Klipt roadmap
 
-As of 2026-11-25. Update this file when an item is done or a plan changes.
+As of 2026-11-26. Update this file when an item is done or a plan changes.
 
 All of v1 is built for Windows and Linux, and every desktop change pushed to `main` ships itself as a
 signed Windows release. What's missing is mostly proof on real machines and with real friends, not code.
@@ -9,6 +9,8 @@ signed Windows release. What's missing is mostly proof on real machines and with
 
 | Date       | Milestone                | What it means                                                                                         |
 | ---------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 2026-11-26 | Clip player rework | The in-app player has Klipt's own bar over the video (seek, volume, speed 0.5–2×, time; hides while playing), fullscreen (button, F or double-click; Esc leaves), keys (Space, M, J / L ±5 s), starts by itself, and a ★ and ⋯ menu in its header. Server clips play through a read-ahead cache in the app (WebKit read them in ~1 MB round trips): first open ~1–2 s instead of 2–8 s, re-opening is instant; at most 1 GB, oldest dropped first. My clips cards of uploads hidden from the Feed show "Link only" (click puts them in the Feed) |
+| 2026-11-26 | My clips counts and upload albums | The "All games" chip counts what the place, search and media filters let through (`7adafa0`); uploading (one clip or several) can put the new clips in albums, with "New album" inline (`80a9d6c`, server `d62ab64`) |
 | 2026-11-25 | Thumbnail from a picture | Editor ⋯ "Thumbnail from a picture…" (cut to the clip's shape; "Use a frame for the thumbnail" undoes it) replaces the frame marker; uploads send it, an uploaded clip gets it at once, and an online clip's ⋯ "Change thumbnail…" sets it on the server (`PUT /api/clips/:id/thumbnail`, new `?v=` so caches and Discord refresh). Untested in the app and on Windows; server needs redeploy (migration 0014) |
 | 2026-11-25 | Blur part of a clip | Editor "Blur" under the player (B key) blurs the whole picture from the playhead on its own Blur lane, as strongly as "Blur video"; parts move, resize and undo like zooms, and come along into exports, uploads, new clips from parts and combined clips. Full resolution is kept (only "Blur video" drops to 720p) |
 | 2026-11-24 | Server stability | A dropped database connection no longer stops the server. The data disk keeps `MIN_FREE_MB` (default 2 GB) free: new uploads wait (the app retries them), compression and embed copies hold back, and the admin page shows free space. Expired logins, password links and unused invites are cleaned up hourly; clips, logins and uploads are indexed by user. Server needs redeploy; the desktop's 507 message is untested |

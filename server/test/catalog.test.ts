@@ -11,6 +11,7 @@ import {
   cosmeticName,
   earnedIds,
   sanitizeLooks,
+  themeTokens,
   unlockedCosmetics,
 } from '@klipt/shared';
 
@@ -41,11 +42,34 @@ describe('looks catalog', () => {
     const freeAccents = ACCENTS.filter((a) => a.free).map((a) => a.id);
     expect(freeAccents).toHaveLength(6);
     expect(freeAccents).toContain('klipt');
-    expect(THEMES.filter((t) => t.free).map((t) => t.id)).toEqual(['klipt']);
+    const freeThemes = THEMES.filter((t) => t.free).map((t) => t.id);
+    expect(freeThemes).toEqual(['klipt', 'oled', 'crimson', 'forest', 'ocean', 'slate']);
     const free = unlockedCosmetics([]);
-    expect([...free].sort()).toEqual([...freeAccents.map((id) => `accent:${id}`), 'theme:klipt'].sort());
+    expect([...free].sort()).toEqual([...freeAccents.map((id) => `accent:${id}`), ...freeThemes.map((id) => `theme:${id}`)].sort());
     expect(FRAMES.length).toBeGreaterThan(0);
     expect(BANNERS.length).toBeGreaterThan(0);
+  });
+
+  it('has every theme token as a colour', () => {
+    for (const t of THEMES) {
+      expect(Object.keys(t.tokens), t.id).toHaveLength(10);
+      for (const v of Object.values(t.tokens)) expect(v, t.id).toMatch(/^#[0-9a-f]{6}$/);
+    }
+  });
+
+  it('generates themes on the klipt ladder', () => {
+    const chan = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const klipt = THEMES.find((t) => t.id === 'klipt')!.tokens;
+    const made = themeTokens(250, 1);
+    for (const [k, v] of Object.entries(klipt)) {
+      const [a, b] = [chan(v), chan(made[k as keyof typeof made])];
+      for (let i = 0; i < 3; i++) expect(Math.abs(a[i]! - b[i]!), k).toBeLessThanOrEqual(2);
+    }
+    for (const v of Object.values(themeTokens(0, 0))) {
+      const [r, g, b] = chan(v);
+      expect(r).toBe(g);
+      expect(g).toBe(b);
+    }
   });
 
   it('keeps klipt purple as it is today', () => {
@@ -93,5 +117,11 @@ describe('achievements catalog', () => {
   it('unlocks the rewards of earned achievements', () => {
     expect(unlockedCosmetics(['night-owl']).has('theme:midnight')).toBe(true);
     expect(unlockedCosmetics([]).has('theme:midnight')).toBe(false);
+    const rewardOf = (id: string) => ACHIEVEMENTS.find((a) => a.id === id)!.reward;
+    expect(rewardOf('views-100')).toBe('theme:sand');
+    expect(rewardOf('first-tag')).toBe('theme:rose');
+    expect(rewardOf('first-combine')).toBe('theme:synthwave');
+    expect(rewardOf('new-year')).toBe('theme:arctic');
+    expect(rewardOf('hours-10')).toBe('theme:ember');
   });
 });

@@ -52,6 +52,43 @@ export const ACCENTS: AccentDef[] = [
   { id: 'ice', name: 'Ice', color: '#0369a1' },
 ];
 
+/** Lightness and saturation (%) of each token, taken from the Klipt theme, so every generated
+ *  theme has Klipt's depth and readability; only the hue and tint strength change. */
+const LADDER: Record<ThemeToken, [number, number]> = {
+  '--bg': [5.1, 23.1],
+  '--bg-2': [7.45, 21.1],
+  '--surface': [9.61, 18.4],
+  '--surface-2': [12.75, 20],
+  '--surface-3': [16.86, 18.6],
+  '--border': [17.65, 20],
+  '--border-strong': [26.08, 20.3],
+  '--text': [94.51, 28.6],
+  '--text-muted': [67.65, 13.9],
+  '--text-faint': [53.33, 11.8],
+};
+
+function hslHex(h: number, s: number, l: number): string {
+  const [sat, lit] = [Math.min(s, 100) / 100, l / 100];
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = sat * Math.min(lit, 1 - lit);
+  const f = (n: number) => lit - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return '#' + [0, 8, 4].map((n) => Math.round(f(n) * 255).toString(16).padStart(2, '0')).join('');
+}
+
+/** A theme's 10 tokens from a hue (0–360) and a tint strength (0 = neutral grey, 1 = as tinted as Klipt). */
+export function themeTokens(hue: number, tint: number): ThemeTokens {
+  return Object.fromEntries(
+    Object.entries(LADDER).map(([token, [l, s]]) => [token, hslHex(hue, s * tint, l)]),
+  ) as ThemeTokens;
+}
+
+const made = (id: string, name: string, hue: number, tint: number, free?: true): ThemeDef => ({
+  id,
+  name,
+  tokens: themeTokens(hue, tint),
+  ...(free ? { free } : {}),
+});
+
 export const THEMES: ThemeDef[] = [
   {
     id: 'klipt',
@@ -89,6 +126,7 @@ export const THEMES: ThemeDef[] = [
   {
     id: 'oled',
     name: 'OLED',
+    free: true,
     tokens: {
       '--bg': '#000000',
       '--bg-2': '#050505',
@@ -118,6 +156,14 @@ export const THEMES: ThemeDef[] = [
       '--text-faint': '#957a6c',
     },
   },
+  made('crimson', 'Crimson', 355, 1.9, true),
+  made('forest', 'Forest', 140, 1.4, true),
+  made('ocean', 'Ocean', 200, 1.7, true),
+  made('slate', 'Slate', 0, 0, true),
+  made('sand', 'Sand', 35, 1.3),
+  made('rose', 'Rose', 330, 1.6),
+  made('synthwave', 'Synthwave', 285, 2.2),
+  made('arctic', 'Arctic', 210, 0.9),
 ];
 
 export const FRAMES: FrameDef[] = [

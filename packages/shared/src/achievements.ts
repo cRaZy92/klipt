@@ -78,11 +78,11 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'first-import', name: 'Moving in', description: 'Imported clips from a folder', icon: '📦', category: 'milestones', rule: { stat: 'imports', min: 1 } },
   // Social
   { id: 'views-10', name: 'Noticed', description: 'Your clips have 10 views', icon: '👀', category: 'social', rule: { stat: 'totalViews', min: 10 } },
-  { id: 'views-100', name: 'Crowd pleaser', description: 'Your clips have 100 views', icon: '🍿', category: 'social', reward: 'theme:oled', rule: { stat: 'totalViews', min: 100 } },
+  { id: 'views-100', name: 'Crowd pleaser', description: 'Your clips have 100 views', icon: '🍿', category: 'social', reward: 'theme:sand', rule: { stat: 'totalViews', min: 100 } },
   { id: 'views-1000', name: 'Famous', description: 'Your clips have 1,000 views', icon: '🌟', category: 'social', reward: 'frame:pulse', rule: { stat: 'totalViews', min: 1000 } },
   { id: 'seen-by-everyone', name: 'Seen by everyone', description: 'Everyone on the server watched one of your clips', icon: '🌈', category: 'social', reward: 'frame:rainbow', rule: { stat: 'seenByEveryone', min: 1 } },
   { id: 'tagged-10', name: 'Squad member', description: 'Friends tagged you in 10 clips', icon: '🤝', category: 'social', reward: 'banner:squad', rule: { stat: 'taggedIn', min: 10 } },
-  { id: 'first-tag', name: 'Shout-out', description: 'Tagged a friend in a clip', icon: '🏷️', category: 'social', rule: { stat: 'tagsGiven', min: 1 } },
+  { id: 'first-tag', name: 'Shout-out', description: 'Tagged a friend in a clip', icon: '🏷️', category: 'social', reward: 'theme:rose', rule: { stat: 'tagsGiven', min: 1 } },
   { id: 'curator', name: 'Curator', description: 'Made an album with 10 or more clips', icon: '🗂️', category: 'social', reward: 'banner:curator', rule: { stat: 'maxAlbumClips', min: 10 } },
   // Editor (a tour of the editor)
   { id: 'first-cut', name: 'Snip', description: 'Cut a part out of a clip', icon: '✂️', category: 'editor', rule: { first: 'cut' } },
@@ -90,7 +90,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'first-subtitle', name: 'Narrator', description: 'Added a subtitle', icon: '💬', category: 'editor', rule: { first: 'subtitle' } },
   { id: 'first-blur', name: 'Nothing to see here', description: 'Blurred a part of the picture', icon: '🌫️', category: 'editor', rule: { first: 'blur' } },
   { id: 'first-mute', name: 'Hush', description: 'Muted a part of a clip', icon: '🔇', category: 'editor', rule: { first: 'mutePart' } },
-  { id: 'first-combine', name: 'Montage', description: 'Combined clips into one', icon: '🧩', category: 'editor', rule: { first: 'combine' } },
+  { id: 'first-combine', name: 'Montage', description: 'Combined clips into one', icon: '🧩', category: 'editor', reward: 'theme:synthwave', rule: { first: 'combine' } },
   { id: 'first-part', name: 'Spin-off', description: 'Made a new clip from a part', icon: '🪄', category: 'editor', rule: { first: 'part' } },
   { id: 'first-thumbnail', name: 'Cover art', description: 'Used a picture as a thumbnail', icon: '🖼️', category: 'editor', rule: { first: 'thumbnailImage' } },
   { id: 'editor-all', name: "Director's cut", description: 'Used every editor tool', icon: '🎞️', category: 'editor', reward: 'banner:editor', rule: { allOf: EDITOR_IDS } },
@@ -98,7 +98,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'night-owl', name: 'Night owl', description: 'Saved a clip between 3 and 5 in the morning', icon: '🦉', category: 'hidden', hidden: true, reward: 'theme:midnight', rule: { first: 'nightOwl' } },
   { id: 'blink', name: 'Blink', description: 'Uploaded a clip shorter than 5 seconds', icon: '⚡', category: 'hidden', hidden: true, rule: { stat: 'blinkUploads', min: 1 } },
   { id: 'marathon', name: 'Marathon', description: 'Made a full recording longer than 3 hours', icon: '🏃', category: 'hidden', hidden: true, reward: 'accent:mint', rule: { first: 'marathon' } },
-  { id: 'new-year', name: 'Happy new year', description: 'Uploaded a clip on 1 January', icon: '🎆', category: 'hidden', hidden: true, rule: { stat: 'newYearUploads', min: 1 } },
+  { id: 'new-year', name: 'Happy new year', description: 'Uploaded a clip on 1 January', icon: '🎆', category: 'hidden', hidden: true, reward: 'theme:arctic', rule: { stat: 'newYearUploads', min: 1 } },
   { id: 'archivist', name: 'Archivist', description: 'A clip of yours is still on the server a year after upload', icon: '🏛️', category: 'hidden', hidden: true, reward: 'accent:ice', rule: { stat: 'yearOld', min: 1 } },
 ];
 

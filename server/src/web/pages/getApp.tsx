@@ -6,11 +6,11 @@ import { Layout } from '../layout.js';
 const LINUX_INSTALL = 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/cRaZy92/klipt/main/packaging/aur/update.sh)"';
 
 /**
- * How to install the desktop app and connect it to this server. New accounts land here; it's also
+ * How to install the desktop app. New accounts land here; it's also
  * in the top bar. `next` is where "Continue" goes (the feed, or the clip someone signed up from).
  */
-export function GetAppPage(props: { user: AuthUser | null; server: string; next: string; welcome: boolean }): JSX.Element {
-  const { user, server, next, welcome } = props;
+export function GetAppPage(props: { user: AuthUser | null; next: string; welcome: boolean }): JSX.Element {
+  const { user, next, welcome } = props;
   const continueLabel = next.startsWith('/c/') ? 'Back to the clip' : 'Go to the feed';
   return (
     <Layout title="Get the app" user={user} nav="get-app">
@@ -52,14 +52,10 @@ export function GetAppPage(props: { user: AuthUser | null; server: string; next:
 
           <li class="step">
             <h2>Log in</h2>
-            <p>Open Klipt and enter this server's address:</p>
-            <p class="copy-line">
-              <code>{e(server)}</code>
-              <button type="button" class="btn small" data-action="copy" data-url={e(server)}>
-                Copy
-              </button>
+            <p>
+              Open Klipt and log in with {user ? <>your username <strong>{e(user.username)}</strong></> : 'your username'} and
+              password.{user ? '' : <> No account yet? <a href="/signup">Sign up here</a>.</>}
             </p>
-            <p>Then log in with {user ? <>your username <strong>{e(user.username)}</strong></> : 'your username'} and password.</p>
           </li>
 
           <li class="step">

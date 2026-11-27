@@ -110,3 +110,12 @@ describe('friends page', () => {
     expect((await get('/friends?ref=invalid', me.cookie)).body).toContain('already used or expired');
   });
 });
+
+describe('install guide', () => {
+  it("doesn't ask for a server address anymore", async () => {
+    const res = await get('/get-app', me.cookie);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain("server's address");
+    expect(res.body).toContain('Open Klipt and log in');
+  });
+});

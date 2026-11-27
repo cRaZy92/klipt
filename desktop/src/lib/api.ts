@@ -590,6 +590,10 @@ export const api = {
   clipsFolderSize: () => invoke<number>("clips_folder_size"),
   getAccount: () => invoke<Account | null>("get_account"),
   checkServer: (serverUrl: string) => invoke<string>("check_server", { serverUrl }),
+  /** klipt.adamko.tech, or KLIPT_SERVER when set (development). */
+  getDefaultServer: () => invoke<string>("get_default_server"),
+  /** The server's sign-up page in the browser (works logged out). */
+  openSignup: (server: string) => invoke<void>("open_signup", { server }),
   login: (serverUrl: string, username: string, password: string) =>
     invoke<Account>("login", { serverUrl, username, password }),
   logout: () => invoke<void>("logout"),

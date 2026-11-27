@@ -127,7 +127,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   // here (`welcome=1`), and `next` is where its Continue button goes.
   app.get('/get-app', async (req, reply) => {
     const q = req.query as { next?: unknown; welcome?: unknown };
-    return html(reply, GetAppPage({ user: req.user, server: config.baseUrl, next: safeNext(q.next), welcome: q.welcome === '1' }) as string);
+    return html(reply, GetAppPage({ user: req.user, next: safeNext(q.next), welcome: q.welcome === '1' }) as string);
   });
 
   // The download button: the newest installer, found through the release's latest.json.

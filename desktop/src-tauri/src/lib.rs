@@ -138,6 +138,8 @@ pub fn run() {
             commands::set_settings,
             commands::get_account,
             commands::check_server,
+            commands::get_default_server,
+            commands::open_signup,
             commands::login,
             commands::logout,
             commands::get_hotkey_status,

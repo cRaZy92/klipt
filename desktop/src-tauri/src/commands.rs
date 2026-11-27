@@ -98,6 +98,30 @@ pub fn normalize_server_url(input: &str) -> Result<String> {
     Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
+/// The one Klipt server the app talks to unless a login says otherwise.
+pub const DEFAULT_SERVER: &str = "https://klipt.adamko.tech";
+
+/// The server a new login goes to: `KLIPT_SERVER` (for development) when set, else klipt.adamko.tech.
+pub fn default_server() -> String {
+    std::env::var("KLIPT_SERVER")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .and_then(|v| normalize_server_url(&v).ok())
+        .unwrap_or_else(|| DEFAULT_SERVER.to_string())
+}
+
+/// The sign-up page of `server`, opened in the browser from the login screen (logged out, so it
+/// can't go through `open_website`). Only https, or http on this machine for development.
+pub fn signup_url(server: &str) -> Result<String> {
+    let base = normalize_server_url(server)?;
+    let url = reqwest::Url::parse(&base).map_err(|_| AppError::InvalidServerAddress)?;
+    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1"));
+    if url.scheme() != "https" && !(url.scheme() == "http" && local) {
+        return Err(AppError::InvalidServerAddress);
+    }
+    Ok(format!("{base}/signup"))
+}
+
 /// True when both URLs have the same scheme, host and port.
 pub fn same_origin(a: &str, b: &str) -> bool {
     match (reqwest::Url::parse(a), reqwest::Url::parse(b)) {
@@ -435,6 +459,19 @@ impl Account {
 pub async fn get_account(app: AppHandle) -> Option<Account> {
     let data_dir = app.state::<AppState>().data_dir.clone();
     off_main(move || auth::load(&data_dir).map(|a| Account::from_auth(&a))).await.ok().flatten()
+}
+
+/// The server the login screen uses when none is saved.
+#[tauri::command]
+pub fn get_default_server() -> String {
+    default_server()
+}
+
+/// Opens the sign-up page of `server` in the browser.
+#[tauri::command]
+pub async fn open_signup(app: AppHandle, server: String) -> Result<()> {
+    let url = signup_url(&server)?;
+    app.opener().open_url(url, None::<&str>).map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
 }
 
 /// Checks that `server_url` is a Klipt server and returns its normalized address.
@@ -1789,6 +1826,26 @@ mod tests {
         assert_eq!(fields(bad_key), ["hotkey"]);
         let both = checked_settings(Settings { fps: 45, hotkey: "".into(), ..Settings::default() }).unwrap_err();
         assert_eq!(fields(both), ["fps", "hotkey"], "an empty hotkey is reported once");
+    }
+
+    #[test]
+    fn default_server_uses_env_override() {
+        // One test, so nothing else changes KLIPT_SERVER meanwhile.
+        std::env::remove_var("KLIPT_SERVER");
+        assert_eq!(default_server(), "https://klipt.adamko.tech");
+        std::env::set_var("KLIPT_SERVER", "http://localhost:3000/");
+        assert_eq!(default_server(), "http://localhost:3000");
+        std::env::set_var("KLIPT_SERVER", "  ");
+        assert_eq!(default_server(), "https://klipt.adamko.tech");
+        std::env::remove_var("KLIPT_SERVER");
+    }
+
+    #[test]
+    fn signup_url_only_for_web_servers() {
+        assert_eq!(signup_url("https://klipt.adamko.tech").unwrap(), "https://klipt.adamko.tech/signup");
+        assert_eq!(signup_url("http://localhost:3000").unwrap(), "http://localhost:3000/signup");
+        assert!(signup_url("file:///etc/passwd").is_err());
+        assert!(signup_url("http://example.com").is_err());
     }
 
     #[test]

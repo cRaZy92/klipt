@@ -16,29 +16,23 @@
 
   // svelte-ignore state_referenced_locally
   let server = $state<string | null>(initialServer);
-  // svelte-ignore state_referenced_locally
-  let address = $state(initialServer ?? "");
   let username = $state("");
   let password = $state("");
   let busy = $state(false);
   let error = $state<string | null>(null);
 
-  async function checkServer(e: SubmitEvent) {
-    e.preventDefault();
-    if (!address.trim()) {
-      error = "Enter your server's address.";
-      return;
+  // There's one Klipt server: no address to type. A login saved for another one keeps it.
+  $effect(() => {
+    if (!server) {
+      api
+        .getDefaultServer()
+        .then((s) => (server = s))
+        .catch((e) => (error = errorMessage(e)));
     }
-    busy = true;
-    error = null;
-    try {
-      server = await api.checkServer(address);
-      address = server;
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      busy = false;
-    }
+  });
+
+  function signUp() {
+    if (server) api.openSignup(server).catch((e) => (error = errorMessage(e)));
   }
 
   async function logIn(e: SubmitEvent) {
@@ -61,18 +55,6 @@
     }
   }
 
-  function changeServer() {
-    server = null;
-    error = null;
-  }
-
-  function hostOf(url: string): string {
-    try {
-      return new URL(url).host;
-    } catch {
-      return url;
-    }
-  }
 </script>
 
 <div class="screen">
@@ -94,7 +76,7 @@
         </li>
         <li>
           <span class="f-icon"><Icon name="users" size={18} /></span>
-          <div><strong>Share with friends</strong><small>Clips show up in your group's feed and play right in Discord.</small></div>
+          <div><strong>Share with friends</strong><small>Clips show up in your friends' feed and play right in Discord.</small></div>
         </li>
       </ul>
     </div>
@@ -103,9 +85,9 @@
   <div class="panel">
     <div class="form-card">
       <div class="head">
-        <h2>{server ? "Log in" : "Connect to your server"}</h2>
+        <h2>Log in</h2>
         <p class="muted">
-          {server ? "With the account from your invite." : "The address your admin gave you, like clips.example.com."}
+          No account yet? <button class="link-button" type="button" onclick={signUp} disabled={!server}>Create one</button> on the website.
         </p>
       </div>
 
@@ -113,49 +95,21 @@
         <p class="notice">{notice}</p>
       {/if}
 
-      {#if !server}
-        <form onsubmit={checkServer}>
-          <label class="field">
-            <span>Server address</span>
-            <!-- svelte-ignore a11y_autofocus -->
-            <input
-              class="input"
-              bind:value={address}
-              placeholder="clips.example.com"
-              autocomplete="url"
-              spellcheck="false"
-              autofocus
-            />
-          </label>
-          {#if error}<p class="form-error" role="alert">{error}</p>{/if}
-          <button class="btn btn-primary btn-block btn-lg" type="submit" disabled={busy}>
-            {#if busy}<span class="spinner"></span> Checking…{:else}Continue{/if}
-          </button>
-        </form>
-      {:else}
-        <div class="server">
-          <span class="server-icon"><Icon name="server" size={16} /></span>
-          <span class="host" title={server}>{hostOf(server)}</span>
-          <button class="btn btn-ghost btn-sm" type="button" onclick={changeServer} disabled={busy}>Change</button>
-        </div>
-        <form onsubmit={logIn}>
-          <label class="field">
-            <span>Username</span>
-            <!-- svelte-ignore a11y_autofocus -->
-            <input class="input" bind:value={username} autocomplete="username" spellcheck="false" autofocus />
-          </label>
-          <label class="field">
-            <span>Password</span>
-            <input class="input" type="password" bind:value={password} autocomplete="current-password" />
-          </label>
-          {#if error}<p class="form-error" role="alert">{error}</p>{/if}
-          <button class="btn btn-primary btn-block btn-lg" type="submit" disabled={busy}>
-            {#if busy}<span class="spinner"></span> Logging in…{:else}Log in{/if}
-          </button>
-        </form>
-      {/if}
-
-      <p class="invite">Don't have an account? Ask your admin for an invite link.</p>
+      <form onsubmit={logIn}>
+        <label class="field">
+          <span>Username</span>
+          <!-- svelte-ignore a11y_autofocus -->
+          <input class="input" bind:value={username} autocomplete="username" spellcheck="false" autofocus />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input class="input" type="password" bind:value={password} autocomplete="current-password" />
+        </label>
+        {#if error}<p class="form-error" role="alert">{error}</p>{/if}
+        <button class="btn btn-primary btn-block btn-lg" type="submit" disabled={busy || !server}>
+          {#if busy}<span class="spinner"></span> Logging in…{:else}Log in{/if}
+        </button>
+      </form>
     </div>
   </div>
 </div>
@@ -328,39 +282,18 @@
     font-size: 0.9rem;
   }
 
-  .server {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.4rem 0.4rem 0.4rem 0.45rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface);
-    color: var(--text-muted);
-  }
-
-  .server-icon {
-    display: grid;
-    place-items: center;
-    width: 1.9rem;
-    height: 1.9rem;
-    border-radius: 7px;
-    background: var(--success-soft);
-    color: var(--success);
-  }
-
-  .host {
-    flex: 1;
-    overflow: hidden;
-    color: var(--text);
+  .link-button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent-text);
+    font: inherit;
     font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    cursor: pointer;
   }
 
-  .invite {
-    color: var(--text-faint);
-    font-size: 0.87rem;
+  .link-button:hover:not(:disabled) {
+    text-decoration: underline;
   }
 
   @media (max-width: 760px) {

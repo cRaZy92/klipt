@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { joinedLabel } from "@klipt/shared";
   import { api, errorMessage, type UserProfile } from "../lib/api";
   import { forgetProfiles, hideCard, holdCard, hoverCard, loadProfile, openProfile, releaseCard } from "../lib/profiles.svelte";
   import { toast } from "../lib/toasts.svelte";
@@ -83,19 +84,13 @@
       </span>
     </button>
 
+    {#if profile.joinedAt}
+      <p class="joined">{joinedLabel(profile.joinedAt)}</p>
+    {/if}
     {#if profile.stats}
       <p class="line">{plural(profile.stats.clips, "clip")} · {plural(profile.stats.views, "view")}</p>
     {:else if !profile.full}
       <p class="line">Only friends see everything {profile.user.displayName} posts.</p>
-    {/if}
-
-    {#if profile.badges.length > 0}
-      <ul class="badges" aria-label="Achievements">
-        {#each profile.badges.slice(0, 4) as b (b.id)}
-          <li title="{b.name}: {b.description}"><span aria-hidden="true">{b.icon}</span>{b.name}</li>
-        {/each}
-        {#if profile.badges.length > 4}<li class="more">+{profile.badges.length - 4}</li>{/if}
-      </ul>
     {/if}
 
     <div class="actions">
@@ -189,36 +184,18 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .joined {
+    margin: 10px 16px 0;
+    color: var(--text-faint);
+    font-size: 0.82rem;
+  }
+  .joined + .line {
+    margin-top: 2px;
+  }
   .line {
     margin: 12px 16px 0;
     color: var(--text-muted);
     font-size: 0.88rem;
-  }
-  .badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin: 10px 16px 0;
-    padding: 0;
-    list-style: none;
-  }
-  .badges li {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 9px 3px 6px;
-    border-radius: 999px;
-    background: var(--surface-3);
-    box-shadow: inset 0 0 0 1px var(--border);
-    color: var(--text-muted);
-    font-size: 0.78rem;
-    font-weight: 600;
-  }
-  .badges li.more {
-    padding: 3px 4px;
-    background: none;
-    box-shadow: none;
-    color: var(--text-faint);
   }
   .actions {
     display: flex;

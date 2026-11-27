@@ -249,6 +249,8 @@ export interface UserProfile {
   friendState: FriendState | null;
   /** Their profile page on the website. */
   profileUrl: string;
+  /** When they made their account (ISO); missing from older servers. */
+  joinedAt?: string;
 }
 
 /** `listFriends`: your friends and the requests either way. */

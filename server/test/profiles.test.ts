@@ -131,6 +131,7 @@ describe('GET /api/users/:username/profile (hover card)', () => {
     expect(p.badges).toEqual([]);
     expect(p.friendState).toBeNull();
     expect(p.profileUrl).toBe('http://localhost/u/me');
+    expect(Date.parse(p.joinedAt)).not.toBeNaN();
   });
 
   it('a friend sees stats over the clips they may see, and Friends', async () => {
@@ -158,5 +159,12 @@ describe('clip cards link the owner', () => {
     const res = await get('/u/me', friend.cookie);
     expect(res.body).toContain('class="owner person-link" href="/u/me"');
     expect(res.body).toContain('class="card-title card-link" href="/c/mepublic0000"');
+  });
+});
+
+describe('join date', () => {
+  it('the profile page says when they joined', async () => {
+    await t.db.update(users).set({ createdAt: new Date('2026-03-15T12:00:00Z') }).where(eq(users.id, me.id));
+    expect((await get('/u/me')).body).toContain('Joined March 2026');
   });
 });

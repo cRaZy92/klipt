@@ -168,6 +168,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
       badges: profile.badges,
       friendState: state,
       loginNext: req.url,
+      joinedAt: profile.joinedAt,
     }) as string;
     // Opening your own profile is seeing your new achievements.
     if (viewer && owner.id === viewer.id && viewer.newAchievements > 0) await markSeen(db, owner.id);

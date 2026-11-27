@@ -16,6 +16,7 @@ export interface LoadedProfile {
   stats: ProfileStats | null;
   badges: EarnedAchievement[];
   friendState: FriendState | null;
+  joinedAt: Date;
 }
 
 /**
@@ -25,7 +26,7 @@ export interface LoadedProfile {
 export async function loadProfile(db: Db, viewer: AuthUser | null, username: string): Promise<LoadedProfile | null> {
   if (username.length > 64) return null;
   const [owner] = await db
-    .select({ ...userRefColumns, banner: sql<string | null>`${users.looks}->>'banner'`, profileVisibility: users.profileVisibility })
+    .select({ ...userRefColumns, banner: sql<string | null>`${users.looks}->>'banner'`, profileVisibility: users.profileVisibility, joinedAt: users.createdAt })
     .from(users)
     .where(and(eq(users.usernameKey, username.toLowerCase()), isNull(users.disabledAt)));
   if (!owner) return null;
@@ -35,7 +36,7 @@ export async function loadProfile(db: Db, viewer: AuthUser | null, username: str
     full ? getProfileStats(db, viewer, owner.username) : null,
     full ? myAchievements(db, owner.id) : null,
   ]);
-  const { banner, profileVisibility: _, ...ref } = owner;
+  const { banner, profileVisibility: _, joinedAt, ...ref } = owner;
   return {
     owner: ref,
     full,
@@ -43,6 +44,7 @@ export async function loadProfile(db: Db, viewer: AuthUser | null, username: str
     stats,
     badges: achievements?.earned ?? [],
     friendState: state,
+    joinedAt,
   };
 }
 
@@ -55,5 +57,6 @@ export function toUserProfile(p: LoadedProfile, baseUrl: string): UserProfile {
     badges: p.badges.map(({ id, name, description, icon }) => ({ id, name, description, icon })),
     friendState: p.friendState,
     profileUrl: `${baseUrl}/u/${encodeURIComponent(p.owner.username)}`,
+    joinedAt: p.joinedAt.toISOString(),
   };
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { joinedLabel } from "@klipt/shared";
   import { api, errorCode, errorMessage, type FeedClip, type GameCount, type UserProfile } from "../lib/api";
   import { neighbors } from "../lib/clipNav";
   import { groupByDay, viewsLabel } from "../lib/format";
@@ -204,7 +205,9 @@
       <Avatar name={name} url={profile?.user.avatarUrl ?? null} frame={profile?.user.frame ?? null} size={88} />
       <div class="names">
         <h1>{name}</h1>
-        <p class="handle">@{profile?.user.username ?? username}</p>
+        <p class="handle">
+          @{profile?.user.username ?? username}{#if profile?.joinedAt}<span class="joined">{" · "}{joinedLabel(profile.joinedAt)}</span>{/if}
+        </p>
       </div>
       {#if profile && profile.friendState !== "self"}
         <div class="actions">

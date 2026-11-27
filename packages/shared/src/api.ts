@@ -70,6 +70,14 @@ export interface UserProfile {
   friendState: FriendState | null;
   /** Their profile page on the website. */
   profileUrl: string;
+  /** When they made their account (ISO). */
+  joinedAt: string;
+}
+
+/** "Joined November 2026": the month someone made their account, in Slovak time. */
+export function joinedLabel(joinedAt: Date | string): string {
+  const month = new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric', timeZone: 'Europe/Bratislava' }).format(new Date(joinedAt));
+  return `Joined ${month}`;
 }
 
 /** `PUT /api/me/looks`: only the fields sent change; a locked one is refused (403 `not_unlocked`). */

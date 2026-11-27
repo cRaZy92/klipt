@@ -5,7 +5,7 @@ import type { ClipWithOwner, ProfileStats } from '../../clips/repo.js';
 import { ClipGrid, emptyText, GameFilter, Pager, SearchBox, viewsLabel } from '../components.js';
 import { AvatarOf, Layout } from '../layout.js';
 import { BadgeStrip } from '../badges.js';
-import type { EarnedAchievement } from '@klipt/shared';
+import { joinedLabel, type EarnedAchievement } from '@klipt/shared';
 import type { UserRefRow } from '../../users/ref.js';
 
 /** Add friend / Requested / Accept / Friends, for someone else's profile. */
@@ -53,6 +53,7 @@ export function UserPage(props: {
   /** Their equipped banner, if any. */
   banner: string | null;
   badges: EarnedAchievement[];
+  joinedAt: Date;
 }): JSX.Element {
   const { stats } = props;
   const base = `/u/${encodeURIComponent(props.username)}`;
@@ -62,7 +63,10 @@ export function UserPage(props: {
         <AvatarOf who={props.owner} size="lg" />
         <div>
           <h1>{e(props.displayName)}</h1>
-          {props.displayName !== props.username ? <p class="muted handle">@{e(props.username)}</p> : ''}
+          <p class="muted handle">
+            {props.displayName !== props.username ? <>@{e(props.username)} · </> : ''}
+            <span class="joined">{joinedLabel(props.joinedAt)}</span>
+          </p>
         </div>
         <FriendButton state={props.friendState} username={props.username} loginNext={props.loginNext} />
       </div>

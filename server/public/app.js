@@ -722,22 +722,11 @@
       names.appendChild(el('span', 'hc-handle', '@' + p.user.username));
       head.appendChild(names);
       c.appendChild(head);
+      c.appendChild(el('p', 'hc-joined', 'Joined ' + new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric', timeZone: 'Europe/Bratislava' }).format(new Date(p.joinedAt))));
       if (p.stats) {
         c.appendChild(el('p', 'hc-stats', plural(p.stats.clips, 'clip') + ' · ' + (p.stats.views === 1 ? '1 view' : compact.format(p.stats.views) + ' views')));
       } else if (!p.full) {
         c.appendChild(el('p', 'hc-private', 'Only friends see everything ' + p.user.displayName + ' posts.'));
-      }
-      if (p.badges.length) {
-        var list = el('ul', 'hc-badges');
-        p.badges.slice(0, 4).forEach(function (b) {
-          var li = el('li', 'badge-medal', null);
-          li.title = b.name + ': ' + b.description;
-          li.appendChild(el('span', null, b.icon)).setAttribute('aria-hidden', 'true');
-          li.appendChild(el('span', 'badge-name', b.name));
-          list.appendChild(li);
-        });
-        if (p.badges.length > 4) list.appendChild(el('li', 'hc-more', '+' + (p.badges.length - 4)));
-        c.appendChild(list);
       }
       if (p.friendState !== 'self') c.appendChild(friendButtons(p));
       return c;

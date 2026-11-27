@@ -204,15 +204,17 @@ describe('web pages', () => {
     expect((await get('/me', c.cookie)).body).not.toContain('data-role="storage"');
   });
 
-  it('me page says where each clip is visible and the button says what it does', async () => {
+  it('me page says where each clip is visible and offers all three levels', async () => {
     const a = await mk('alice');
-    await addClip(a.u.id, { title: 'Pub' });
+    await addClip(a.u.id, { title: 'Fr' });
     await addClip(a.u.id, { title: 'Priv', visibility: 'link' });
+    await addClip(a.u.id, { title: 'Pub', visibility: 'public' });
     const body = (await get('/me', a.cookie)).body;
-    expect(body).toContain('Hide from feed');
-    expect(body).toContain('Show in feed');
-    expect(body).toMatch(/data-role="visibility">In feed</);
+    expect(body).toMatch(/data-role="visibility">Friends</);
     expect(body).toMatch(/data-role="visibility">Link only</);
+    expect(body).toMatch(/data-role="visibility">Public</);
+    expect(body).toContain('<option value="public" selected>Public</option>');
+    expect(body).toContain('data-action-change="visibility"');
   });
 
   it('admin page is admin only', async () => {

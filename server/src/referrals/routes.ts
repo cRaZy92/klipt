@@ -48,6 +48,16 @@ export async function referrerOf(db: Db, code: string | undefined): Promise<{ id
   return row ?? null;
 }
 
+/** `userId`'s links that still work, oldest first. */
+export async function listReferrals(db: Db, userId: string, baseUrl: string): Promise<Referral[]> {
+  const rows = await db
+    .select()
+    .from(invites)
+    .where(and(eq(invites.createdBy, userId), activeInvite()))
+    .orderBy(asc(invites.createdAt));
+  return rows.map((r) => ({ code: r.code, url: referralUrl(baseUrl, r.code), expiresAt: r.expiresAt.toISOString() }));
+}
+
 export function clearRefCookie(reply: FastifyReply, secure: boolean): void {
   reply.clearCookie(REF_COOKIE, { path: '/', httpOnly: true, sameSite: 'lax', secure });
 }
@@ -68,14 +78,7 @@ export async function referralRoutes(app: FastifyInstance): Promise<void> {
     return toReferral(row!);
   });
 
-  app.get('/api/referrals', { preHandler: requireUser }, async (req): Promise<Referral[]> => {
-    const rows = await db
-      .select()
-      .from(invites)
-      .where(and(eq(invites.createdBy, req.user!.id), activeInvite()))
-      .orderBy(asc(invites.createdAt));
-    return rows.map(toReferral);
-  });
+  app.get('/api/referrals', { preHandler: requireUser }, async (req): Promise<Referral[]> => listReferrals(db, req.user!.id, config.baseUrl));
 
   app.delete('/api/referrals/:code', { preHandler: requireUser }, async (req, reply) => {
     const { code } = req.params as { code: string };

@@ -6,7 +6,7 @@ import { avatarUrl, type UserRefRow } from '../users/ref.js';
 import { esc as e } from './escape.js';
 
 /** The top bar's sections; the page passes its own so the bar can mark it. */
-export type NavSection = 'feed' | 'me' | 'albums' | 'get-app' | 'admin' | 'account';
+export type NavSection = 'feed' | 'me' | 'albums' | 'friends' | 'get-app' | 'admin' | 'account';
 
 /** The app icon: a play triangle between two clip brackets (desktop/src-tauri/icons/source.svg). */
 export function LogoMark(props: { size?: number }): JSX.Element {
@@ -96,6 +96,7 @@ export function Layout(props: {
                   {link('feed', '/', 'Feed')}
                   {link('me', '/me', 'My clips')}
                   {link('albums', '/albums', 'Albums')}
+                  <a href="/friends" aria-current={props.nav === 'friends' ? 'page' : undefined}>Friends{user.friendRequests > 0 ? <span class="badge accent nav-count">{user.friendRequests}</span> : ''}</a>
                   {link('get-app', '/get-app', 'Get the app')}
                   {user.isAdmin ? link('admin', '/admin', 'Admin') : ''}
                 </nav>
@@ -117,7 +118,10 @@ export function Layout(props: {
                 </div>
               </>
             ) : (
-              ''
+              <div class="account">
+                <a class="btn ghost small" href="/login">Log in</a>
+                <a class="btn primary small" href="/signup">Sign up</a>
+              </div>
             )}
           </header>
           <main class="container">{props.children}</main>

@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { isFrame, sanitizeLooks, type Me, type ProfileVisibility, type UserRef } from '@klipt/shared';
 import type { Db } from '../db/client.js';
-import { userAchievements, users } from '../db/schema.js';
+import { friendships, userAchievements, users } from '../db/schema.js';
 
 /** The name a user shows to friends: their display name, or their username without one. */
 export const displayNameOf = (t: { displayName: unknown; username: unknown }) =>
@@ -40,6 +40,11 @@ export function toUserRef(r: UserRefRow, baseUrl: string): UserRef {
 /** How many achievements `userId` hasn't seen yet. */
 export const unseenCountExpr = (userId: unknown) =>
   sql<number>`(select count(*) from ${userAchievements} ua where ua.user_id = ${userId} and ua.seen_at is null)::int`;
+
+/** How many people asked `userId` to be friends and wait for an answer. */
+export const friendRequestCountExpr = (userId: unknown) =>
+  sql<number>`(select count(*) from ${friendships} f join ${users} fu on fu.id = f.requested_by
+    where f.status = 'pending' and f.requested_by <> ${userId} and (f.user_a = ${userId} or f.user_b = ${userId}) and fu.disabled_at is null)::int`;
 
 export function toMe(
   u: { id: string; username: string; displayName: string | null; isAdmin: boolean; avatarVersion: number; looks: unknown; profileVisibility: ProfileVisibility },

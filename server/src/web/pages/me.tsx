@@ -22,26 +22,25 @@ function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element
           {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
           <span>{relativeDate(clip.createdAt)}</span>
           <span data-role="views">{viewsLabel(views)}</span>
-          <span class="badge" data-role="visibility">{clip.visibility !== 'link' ? 'In feed' : 'Link only'}</span>
+          <span class="badge" data-role="visibility">{VISIBILITY_LABEL[clip.visibility]}</span>
         </div>
         <div class="actions">
           <button type="button" class="btn small" data-action="copy" data-url={e(`${props.baseUrl}/c/${clip.id}`)}>Copy link</button>
           <button type="button" class="btn small" data-action="rename" data-title={e(clip.title)}>Rename</button>
-          <button
-            type="button"
-            class="btn small"
-            data-action="visibility"
-            data-visibility={clip.visibility}
-            title="Feed clips are listed for everyone logged in; link-only clips open only from their link"
-          >
-            {clip.visibility !== 'link' ? 'Hide from feed' : 'Show in feed'}
-          </button>
+          <select class="select small" data-action-change="visibility" aria-label="Who finds this clip" title="The link works for anyone in all three; this decides where the clip is listed">
+            {(['link', 'friends', 'public'] as const).map((v) => (
+              <option value={v} selected={clip.visibility === v}>{VISIBILITY_LABEL[v]}</option>
+            ))}
+          </select>
           <button type="button" class="btn small danger" data-action="delete">Delete</button>
         </div>
       </div>
     </li>
   );
 }
+
+/** How each visibility reads in lists. */
+export const VISIBILITY_LABEL = { link: 'Link only', friends: 'Friends', public: 'Public' } as const;
 
 export function MePage(props: {
   user: AuthUser;

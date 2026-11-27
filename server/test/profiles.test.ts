@@ -85,3 +85,28 @@ describe('profile pages', () => {
     expect(res.body).toContain('Accept');
   });
 });
+
+describe('friends page', () => {
+  it('needs a login', async () => {
+    const res = await get('/friends');
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('/login?next=%2Ffriends');
+  });
+
+  it('lists requests, friends and referral links; the top bar counts requests', async () => {
+    await t.app.inject({ method: 'POST', url: '/api/friends/me', headers: { cookie: stranger.cookie } });
+    await t.app.inject({ method: 'POST', url: '/api/referrals', headers: { cookie: me.cookie } });
+    const res = await get('/friends', me.cookie);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatch(/data-section="incoming"[\s\S]*stranger[\s\S]*data-action="friend-add"[\s\S]*Accept/);
+    expect(res.body).toMatch(/data-section="friends"[\s\S]*friend/);
+    expect(res.body).toContain('data-action="make-referral"');
+    expect(res.body).toMatch(/http:\/\/localhost\/r\/[A-Za-z0-9_-]{16}/);
+    expect(res.body).toMatch(/href="\/friends"[^>]*>Friends<span class="badge accent nav-count">1<\/span>/);
+  });
+
+  it('says when your own or a used link was opened', async () => {
+    expect((await get('/friends?ref=own', me.cookie)).body).toContain('your own link');
+    expect((await get('/friends?ref=invalid', me.cookie)).body).toContain('already used or expired');
+  });
+});

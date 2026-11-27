@@ -29,7 +29,8 @@
   }
 
   var MESSAGES = {
-    unknown_user: "One of those names isn't a Klipt user.",
+    unknown_user: "Klipt doesn't know that name, or they aren't your friend yet.",
+    self: "You can't add yourself.",
     invalid_credentials: 'Wrong username or password.',
     account_disabled: 'This account is disabled.',
     username_taken: 'That username is taken.',
@@ -128,6 +129,12 @@
         btn.disabled = false;
         return;
       }
+      if (kind === 'add-friend') {
+        var added = await api('POST', '/api/friends/' + encodeURIComponent(data.username.trim()));
+        toast(added.state === 'friends' ? 'You are friends now' : 'Request sent');
+        setTimeout(function () { location.reload(); }, 800);
+        return;
+      }
       if (kind === 'album') {
         var made = await api('POST', '/api/albums', { title: data.title });
         location.assign('/a/' + encodeURIComponent(made.id));
@@ -165,6 +172,16 @@
         if (action === 'friend-remove' && btn.textContent.trim() === 'Unfriend' && !confirm('Unfriend ' + btn.dataset.username + '?')) return;
         await api(action === 'friend-add' ? 'POST' : 'DELETE', '/api/friends/' + encodeURIComponent(btn.dataset.username));
         location.reload();
+      } else if (action === 'make-referral') {
+        var ref = await api('POST', '/api/referrals');
+        await copy(ref.url);
+        location.reload();
+      } else if (action === 'revoke-referral') {
+        var refRow = btn.closest('[data-code]');
+        if (!confirm('Revoke this link? It stops working.')) return;
+        await api('DELETE', '/api/referrals/' + encodeURIComponent(refRow.dataset.code));
+        refRow.remove();
+        toast('Revoked');
       } else if (action === 'logout') {
         await api('POST', '/api/auth/logout');
         location.assign('/login');
@@ -183,14 +200,6 @@
         var list = names.split(',').map(function (n) { return n.trim(); }).filter(Boolean);
         await api('PATCH', '/api/clips/' + clipRow.dataset.clipId, { tagged: list });
         location.reload();
-      } else if (action === 'visibility') {
-        var vis = btn.dataset.visibility === 'feed' ? 'link' : 'feed';
-        await api('PATCH', '/api/clips/' + clipRow.dataset.clipId, { visibility: vis });
-        btn.dataset.visibility = vis;
-        btn.textContent = vis === 'feed' ? 'Hide from feed' : 'Show in feed';
-        var badge = clipRow.querySelector('[data-role=visibility]');
-        if (badge) badge.textContent = vis === 'feed' ? 'In feed' : 'Link only';
-        toast(vis === 'feed' ? 'Now visible in the feed' : 'Now link-only');
       } else if (action === 'delete') {
         if (!confirm('Delete this clip? This cannot be undone.')) return;
         await api('DELETE', '/api/clips/' + clipRow.dataset.clipId);
@@ -585,6 +594,18 @@
   // ── Looks: a choice saves at once and the page reloads in the new colours ──
   document.addEventListener('change', async function (ev) {
     var input = ev.target;
+    if (input.matches && input.matches('select[data-action-change=visibility]')) {
+      var row = input.closest('[data-clip-id]');
+      try {
+        await api('PATCH', '/api/clips/' + row.dataset.clipId, { visibility: input.value });
+        var vBadge = row.querySelector('[data-role=visibility]');
+        if (vBadge) vBadge.textContent = input.selectedOptions[0].textContent;
+        toast({ link: 'Now link-only', friends: 'Now friends only', public: 'Now public' }[input.value]);
+      } catch (e) {
+        toast(friendly(e));
+      }
+      return;
+    }
     if (input.matches && input.matches('form[data-form=profile-visibility] input[type=radio]')) {
       var pvErr = input.form.querySelector('.error');
       pvErr.hidden = true;

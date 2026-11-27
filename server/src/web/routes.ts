@@ -12,9 +12,10 @@ import { activeReset } from '../auth/routes.js';
 import { AccountPage } from './pages/account.js';
 import { BANNERS } from '@klipt/shared';
 import { markSeen, myAchievements } from '../achievements/engine.js';
-import { userRefColumns } from '../users/ref.js';
-import { friendState } from '../friends/repo.js';
-import { referrerOf, REF_COOKIE } from '../referrals/routes.js';
+import { toUserRef, userRefColumns } from '../users/ref.js';
+import { friendState, listFriendRows } from '../friends/repo.js';
+import { FriendsPage } from './pages/friends.js';
+import { listReferrals, referrerOf, REF_COOKIE } from '../referrals/routes.js';
 import { ResetPage } from './pages/reset.js';
 import { displayNameOf, getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage, TranscodeSection } from './pages/admin.js';
@@ -195,6 +196,16 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
           ? { url: clip.videoUrl, width: clip.width, height: clip.height }
           : null;
     return html(reply, SharePage({ user: req.user, clip, embed, canDelete, viewers, signup }) as string);
+  });
+
+  app.get('/friends', async (req, reply) => {
+    if (!guard(req, reply)) return reply;
+    const user = req.user!;
+    const [rows, referrals] = await Promise.all([listFriendRows(db, user.id), listReferrals(db, user.id, config.baseUrl)]);
+    const refs = (list: typeof rows.friends) => list.map((r) => toUserRef(r, config.baseUrl));
+    const ref = (req.query as { ref?: unknown }).ref;
+    const notice = ref === 'own' || ref === 'invalid' ? ref : null;
+    return html(reply, FriendsPage({ user, friends: refs(rows.friends), incoming: refs(rows.incoming), outgoing: refs(rows.outgoing), referrals, notice }) as string);
   });
 
   app.get('/albums', async (req, reply) => {

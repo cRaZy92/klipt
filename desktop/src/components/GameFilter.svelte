@@ -238,10 +238,13 @@
     color: var(--text);
   }
 
+  /* A game chip glows in its game's colour; "All games" (no --hue) in the accent. Without --hue,
+     --tint is invalid, so var(--tint, var(--accent)) falls back to the accent. */
   .chip.active {
-    border-color: hsl(var(--hue, 255) 80% 66% / 0.7);
-    background: hsl(var(--hue, 255) 80% 60% / 0.14);
-    box-shadow: 0 0 18px -6px hsl(var(--hue, 255) 80% 60% / 0.7);
+    --tint: hsl(var(--hue) 80% 62%);
+    border-color: color-mix(in srgb, var(--tint, var(--accent)) 70%, transparent);
+    background: color-mix(in srgb, var(--tint, var(--accent)) 14%, transparent);
+    box-shadow: 0 0 18px -6px color-mix(in srgb, var(--tint, var(--accent)) 70%, transparent);
     color: var(--text);
   }
 
@@ -264,7 +267,7 @@
   }
 
   .chip.active .count {
-    background: hsl(var(--hue, 255) 80% 60% / 0.3);
+    background: color-mix(in srgb, var(--tint, var(--accent)) 30%, transparent);
     color: var(--text);
   }
 

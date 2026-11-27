@@ -9,7 +9,7 @@ let alice: Record<string, string>;
 let bob: Record<string, string>;
 let aliceId: string;
 
-const insertClip = async (id: string, userId: string, visibility: 'feed' | 'link' = 'feed') => {
+const insertClip = async (id: string, userId: string, visibility: 'friends' | 'link' | 'public' = 'friends') => {
   await t.db.insert(clips).values({ id, userId, title: id, visibility, durationMs: 1000, width: 1, height: 1, sizeBytes: 1 });
 };
 

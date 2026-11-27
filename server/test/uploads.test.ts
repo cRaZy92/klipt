@@ -38,7 +38,7 @@ describe('uploads and finalize', () => {
     expect(res.statusCode).toBe(201);
     const clip = res.json();
     expect(clip.shareUrl).toMatch(/^http:\/\/localhost\/c\/[A-Za-z0-9_-]{12}$/);
-    expect(clip).toMatchObject({ title: 'Nice', gameName: 'Doom', steamAppId: 42, visibility: 'feed', owner: { username: 'alice' } });
+    expect(clip).toMatchObject({ title: 'Nice', gameName: 'Doom', steamAppId: 42, visibility: 'friends', owner: { username: 'alice' } });
     expect(clip.videoUrl).toBe(`http://localhost/media/${clip.id}.mp4`);
     expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.mp4`))).toBe(true);
     expect(existsSync(join(t.dataDir, 'clips', `${clip.id}.jpg`))).toBe(true);

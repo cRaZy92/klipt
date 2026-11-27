@@ -1,5 +1,5 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { isFrame, sanitizeLooks, type Me, type UserRef } from '@klipt/shared';
+import { isFrame, sanitizeLooks, type Me, type ProfileVisibility, type UserRef } from '@klipt/shared';
 import type { Db } from '../db/client.js';
 import { userAchievements, users } from '../db/schema.js';
 
@@ -42,7 +42,7 @@ export const unseenCountExpr = (userId: unknown) =>
   sql<number>`(select count(*) from ${userAchievements} ua where ua.user_id = ${userId} and ua.seen_at is null)::int`;
 
 export function toMe(
-  u: { id: string; username: string; displayName: string | null; isAdmin: boolean; avatarVersion: number; looks: unknown },
+  u: { id: string; username: string; displayName: string | null; isAdmin: boolean; avatarVersion: number; looks: unknown; profileVisibility: ProfileVisibility },
   baseUrl: string,
   newAchievements: number,
 ): Me {
@@ -55,6 +55,7 @@ export function toMe(
     avatarUrl: avatarUrl(u, baseUrl),
     looks: sanitizeLooks(u.looks),
     newAchievements,
+    profileVisibility: u.profileVisibility,
   };
 }
 

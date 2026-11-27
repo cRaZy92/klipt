@@ -59,7 +59,7 @@ afterEach(() => t.close());
 
 describe('clip listing and visibility', () => {
   it('hides link clips from other users but not by direct id', async () => {
-    await addClip(a.id, { gameName: 'Doom', visibility: 'feed' });
+    await addClip(a.id, { gameName: 'Doom', visibility: 'friends' });
     const linkId = await addClip(a.id, { gameName: 'Quake', visibility: 'link' });
     expect((await get('/api/clips?scope=feed', b.h)).json().items).toHaveLength(1);
     expect((await get('/api/clips?scope=user&username=alice', b.h)).json().items).toHaveLength(1);

@@ -21,7 +21,26 @@ export const users = pgTable('users', {
   looks: jsonb('looks'),
   /** What the desktop app reported (`StoredActivity`): counters (highest seen) and firsts. */
   activity: jsonb('activity'),
+  /** Who sees the profile in full: friends only, or everyone. Also the default for new uploads. */
+  profileVisibility: text('profile_visibility', { enum: ['friends', 'public'] }).notNull().default('friends'),
 });
+
+/**
+ * A friendship or a pending request. One row per pair, stored with `userA < userB`;
+ * `requestedBy` says who asked.
+ */
+export const friendships = pgTable(
+  'friendships',
+  {
+    userA: uuid('user_a').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    userB: uuid('user_b').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    requestedBy: uuid('requested_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: ['pending', 'accepted'] }).notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    acceptedAt: ts('accepted_at'),
+  },
+  (t) => [primaryKey({ columns: [t.userA, t.userB] }), index('friendships_user_b_idx').on(t.userB)],
+);
 
 /** Achievements a user earned; never removed. `quiet`: earned for past activity, announced in one summary. */
 export const userAchievements = pgTable(
@@ -119,7 +138,7 @@ export const clips = pgTable(
     title: text('title').notNull(),
     gameName: text('game_name'),
     steamAppId: integer('steam_app_id'),
-    visibility: text('visibility', { enum: ['feed', 'link'] }).notNull().default('feed'),
+    visibility: text('visibility', { enum: ['link', 'friends', 'public'] }).notNull().default('friends'),
     durationMs: integer('duration_ms').notNull(),
     width: integer('width').notNull(),
     height: integer('height').notNull(),

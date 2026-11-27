@@ -26,6 +26,8 @@ export interface Me {
   looks: Looks;
   /** Achievements you haven't seen yet. */
   newAchievements: number;
+  /** Who sees your profile in full; the default for new uploads (`PATCH /api/me`). */
+  profileVisibility: ProfileVisibility;
 }
 
 /** A person as lists show them: name, picture and the frame they wear. */
@@ -211,7 +213,10 @@ export interface AdminStats {
   diskLow: boolean;
 }
 
-export type Visibility = 'feed' | 'link';
+/** Where a clip is listed. Its share link works for anyone in all three. */
+export type Visibility = 'link' | 'friends' | 'public';
+/** Who sees a profile in full; also the default visibility for new uploads. */
+export type ProfileVisibility = 'friends' | 'public';
 
 export interface FinalizeRequest {
   uploadId: string;

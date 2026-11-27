@@ -69,12 +69,12 @@ export function decodeCursor(cursor: string): { createdAt: Date; id: string } {
  */
 function scopeCondition(viewer: AuthUser, scope: Scope, username?: string, ownOnly = false): SQL {
   if (scope === 'mine') return eq(clips.userId, viewer.id);
-  if (scope === 'feed') return eq(clips.visibility, 'feed');
+  if (scope === 'feed') return eq(clips.visibility, 'friends');
   const key = (username ?? '').toLowerCase();
   const isSelf = key === viewer.username.toLowerCase();
   const owner = eq(users.usernameKey, key);
-  const own = isSelf ? owner : and(owner, eq(clips.visibility, 'feed'))!;
-  return ownOnly ? own : or(own, and(eq(clips.visibility, 'feed'), taggedIn(key)))!;
+  const own = isSelf ? owner : and(owner, eq(clips.visibility, 'friends'))!;
+  return ownOnly ? own : or(own, and(eq(clips.visibility, 'friends'), taggedIn(key)))!;
 }
 
 /**

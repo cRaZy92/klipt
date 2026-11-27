@@ -6,7 +6,7 @@ let t: TestApp;
 let alice: Record<string, string>;
 let bob: Record<string, string>;
 
-const insertClip = async (id: string, userId: string, visibility: 'feed' | 'link' = 'feed', title = id) => {
+const insertClip = async (id: string, userId: string, visibility: 'friends' | 'link' | 'public' = 'friends', title = id) => {
   await t.db.insert(clips).values({ id, userId, title, visibility, durationMs: 1000, width: 1, height: 1, sizeBytes: 1 });
 };
 

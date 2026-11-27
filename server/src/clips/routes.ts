@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import type { Clip } from '@klipt/shared';
+import type { Clip, Visibility } from '@klipt/shared';
 import { clips, uploads } from '../db/schema.js';
 import fastifyStatic from '@fastify/static';
 import { requireUser } from '../auth/plugin.js';
@@ -108,12 +108,15 @@ class AlreadyFinalizedError extends Error {}
 /** The clip an upload was to replace is gone (deleted meanwhile). */
 class ReplaceTargetGoneError extends Error {}
 
+/** Visibility as sent; older apps say 'feed', which is 'friends' now. */
+export const visibilityInput = z.enum(['link', 'friends', 'public', 'feed']).transform((v): Visibility => (v === 'feed' ? 'friends' : v));
+
 const finalizeBody = z.object({
   uploadId: z.string().min(1).max(128),
   title: z.string().trim().min(1).max(100),
   gameName: z.string().trim().min(1).max(100).nullish(),
   steamAppId: z.number().int().positive().nullish(),
-  visibility: z.enum(['feed', 'link']).optional(),
+  visibility: visibilityInput.optional(),
   /** The frame (ms into the uploaded video) to use as the thumbnail. */
   thumbnailMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).nullish(),
   /** Friends in the clip, by username. */
@@ -174,7 +177,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
   const patchBody = z
     .object({
       title: z.string().trim().min(1).max(100),
-      visibility: z.enum(['feed', 'link']),
+      visibility: visibilityInput,
       gameName: z.string().trim().min(1).max(100).nullable(),
       steamAppId: z.number().int().positive().nullable(),
       tagged: z.array(z.string().max(64)).max(20),
@@ -519,7 +522,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
               .returning()) as ClipRow[])
           : ((await tx
               .insert(clips)
-              .values({ ...media, id, userId: user.id, visibility: body.visibility ?? 'feed', kind: image ? 'screenshot' : 'clip' })
+              .values({ ...media, id, userId: user.id, visibility: body.visibility ?? user.profileVisibility, kind: image ? 'screenshot' : 'clip' })
               .returning()) as ClipRow[]);
         if (!inserted) throw new ReplaceTargetGoneError();
         const tomb = await tx

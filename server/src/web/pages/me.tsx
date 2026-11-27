@@ -22,7 +22,7 @@ function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element
           {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
           <span>{relativeDate(clip.createdAt)}</span>
           <span data-role="views">{viewsLabel(views)}</span>
-          <span class="badge" data-role="visibility">{clip.visibility === 'feed' ? 'In feed' : 'Link only'}</span>
+          <span class="badge" data-role="visibility">{clip.visibility !== 'link' ? 'In feed' : 'Link only'}</span>
         </div>
         <div class="actions">
           <button type="button" class="btn small" data-action="copy" data-url={e(`${props.baseUrl}/c/${clip.id}`)}>Copy link</button>
@@ -34,7 +34,7 @@ function MyClipRow(props: { item: ClipWithOwner; baseUrl: string }): JSX.Element
             data-visibility={clip.visibility}
             title="Feed clips are listed for everyone logged in; link-only clips open only from their link"
           >
-            {clip.visibility === 'feed' ? 'Hide from feed' : 'Show in feed'}
+            {clip.visibility !== 'link' ? 'Hide from feed' : 'Show in feed'}
           </button>
           <button type="button" class="btn small danger" data-action="delete">Delete</button>
         </div>

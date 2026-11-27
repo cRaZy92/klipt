@@ -120,6 +120,13 @@
       "when": 1795725596714,
       "tag": "0016_clip_embed_pending",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795786150974,
+      "tag": "0017_public_klipt",
+      "breakpoints": true
     }
   ]
 }

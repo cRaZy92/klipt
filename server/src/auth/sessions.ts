@@ -1,4 +1,4 @@
-import { sanitizeLooks, type Looks, type SessionInfo } from '@klipt/shared';
+import { sanitizeLooks, type Looks, type ProfileVisibility, type SessionInfo } from '@klipt/shared';
 import { unseenCountExpr } from '../users/ref.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm';
@@ -20,6 +20,8 @@ export interface AuthUser {
   looks: Looks;
   /** Achievements not seen yet. */
   newAchievements: number;
+  /** Who sees the profile in full; the default for new uploads. */
+  profileVisibility: ProfileVisibility;
 }
 
 const WEB_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -61,6 +63,7 @@ export async function resolveToken(db: Db, token: string): Promise<AuthUser | nu
       avatarVersion: users.avatarVersion,
       looks: users.looks,
       newAchievements: unseenCountExpr(users.id),
+      profileVisibility: users.profileVisibility,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -89,6 +92,7 @@ export async function resolveToken(db: Db, token: string): Promise<AuthUser | nu
     avatarVersion: row.avatarVersion,
     looks: sanitizeLooks(row.looks),
     newAchievements: Number(row.newAchievements),
+    profileVisibility: row.profileVisibility,
   };
 }
 

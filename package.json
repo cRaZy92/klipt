@@ -5,7 +5,8 @@
   "scripts": {
     "test": "pnpm --filter @klipt/server test",
     "build": "pnpm --filter @klipt/server build",
-    "dev": "pnpm --filter @klipt/server dev"
+    "dev": "pnpm --filter @klipt/server dev",
+    "release": "node scripts/release.mjs"
   },
   "packageManager": "pnpm@12.17.0"
 }

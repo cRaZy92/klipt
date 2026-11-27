@@ -190,7 +190,7 @@ pub(crate) async fn newer_release(api: &str, commit: &str) -> std::result::Resul
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
-    /// `MAJOR.MINOR.<commits on main>` for releases and Linux packages.
+    /// `MAJOR.MINOR.PATCH` of the release; a Linux package built past it adds `+r<commits>.g<commit>`.
     version: String,
     /// The commit a Linux package was built from (short), if stamped.
     commit: Option<String>,

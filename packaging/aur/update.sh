@@ -13,8 +13,14 @@ trap 'kill "$keepalive" 2>/dev/null || true' EXIT
 # Not from inside the folder this removes (an earlier run may have left the shell there).
 cd "$HOME"
 rm -rf /tmp/klipt-update
-git clone --depth 1 https://github.com/cRaZy92/klipt /tmp/klipt-update
+# The newest release (vX.Y.Z tag), not whatever is on main right now.
+tag=$(git ls-remote --tags --refs --sort=-version:refname https://github.com/cRaZy92/klipt 'v*.*.*' |
+  sed -n '1s|.*refs/tags/||p')
+[ -n "$tag" ] || { echo "Klipt update: couldn't find the newest release" >&2; exit 1; }
+echo "Klipt update: building $tag"
+git clone --depth 1 --branch "$tag" https://github.com/cRaZy92/klipt /tmp/klipt-update
 cd /tmp/klipt-update/packaging/aur
+export KLIPT_REF="tag=$tag"
 # makepkg's own -s/-i run `sudo -k pacman`, which forgets the password and asks again. So this
 # installs the build dependencies and the finished package itself, with the password from above.
 deps=$(makepkg --printsrcinfo | sed -n 's/^[[:space:]]*\(make\)\{0,1\}depends = //p')

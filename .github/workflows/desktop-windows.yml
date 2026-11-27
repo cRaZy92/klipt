@@ -3,6 +3,8 @@ name: desktop-windows
 on:
   push:
     branches: [main, feat/desktop]
+    # A release tag (scripts/release.mjs) publishes that version. Path filters don't apply to tags.
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
     paths:
       - desktop/**
       - scripts/fetch-obs-windows.ps1
@@ -12,15 +14,16 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # publish a GitHub Release for every app change pushed to main
+  contents: write # publish a GitHub Release for every release tag
 
-# Releases are numbered by run, so two pushes must not publish out of order.
 concurrency:
   group: desktop-windows-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
+    # The release commit's push to main would only rebuild what its tag's run publishes.
+    if: "!(github.ref_type == 'branch' && startsWith(github.event.head_commit.message, 'release: v'))"
     runs-on: windows-latest
     env:
       OBS_VERSION: 33.0.1
@@ -28,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The version counts main's commits (see docs/RELEASING.md): needs the whole history.
+          # Release notes list the commits since the previous release tag.
           fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
@@ -98,16 +101,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build the installer
-        if: github.ref != 'refs/heads/main'
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         shell: pwsh
         working-directory: desktop
         run: pnpm tauri build
 
-      # main: every push is a release. Its version is 0.1.<run number> (always increasing, so the
-      # updater sees it as newer), and the installer is signed for the updater
-      # (TAURI_SIGNING_PRIVATE_KEY secret; see docs/RELEASING.md).
+      # A release tag vX.Y.Z: the installer is signed for the updater (TAURI_SIGNING_PRIVATE_KEY
+      # secret; see docs/RELEASING.md). The tag must match the version in tauri.conf.json, which
+      # scripts/release.mjs sets.
       - name: Build the signed release installer
-        if: github.ref == 'refs/heads/main'
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         working-directory: desktop
         env:
@@ -115,16 +118,21 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "the TAURI_SIGNING_PRIVATE_KEY secret is missing" }
-          $base = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version.Split('.')
-          # MAJOR.MINOR.<commits on main>: the same number the Linux package (PKGBUILD) computes.
-          $version = "$($base[0]).$($base[1]).$(git rev-list --count HEAD)"
+          $version = '${{ github.ref_name }}'.Substring(1)
+          $conf = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($conf -ne $version) { throw "tag v$version doesn't match tauri.conf.json's version $conf (use scripts/release.mjs)" }
           "KLIPT_VERSION=$version" >> $env:GITHUB_ENV
-          @{ version = $version; bundle = @{ createUpdaterArtifacts = $true } } |
+          # What changed since the previous release, for the release page and the update notes.
+          $previous = git describe --tags --abbrev=0 --match 'v[0-9]*' 'HEAD^' 2>$null
+          $range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
+          $notes = (git log --no-merges --pretty='- %s' $range | Where-Object { $_ -notmatch '^- release: v' }) -join "`n"
+          Set-Content -Encoding utf8NoBOM ../release-notes.md $notes
+          @{ bundle = @{ createUpdaterArtifacts = $true } } |
             ConvertTo-Json | Set-Content -Encoding utf8NoBOM src-tauri/tauri.release.conf.json
           pnpm tauri build --config "$PWD/src-tauri/tauri.release.conf.json"
 
       - name: Write latest.json for the updater
-        if: github.ref == 'refs/heads/main'
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           $exe = Get-ChildItem desktop/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
@@ -132,7 +140,7 @@ jobs:
           $version = $env:KLIPT_VERSION
           @{
             version = $version
-            notes = "Klipt $version"
+            notes = (Get-Content release-notes.md -Raw)
             pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             platforms = @{
               'windows-x86_64' = @{
@@ -150,14 +158,13 @@ jobs:
           if-no-files-found: error
 
       - name: Publish the GitHub Release
-        if: github.ref == 'refs/heads/main'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.KLIPT_VERSION }}
+          tag_name: ${{ github.ref_name }}
           name: Klipt ${{ env.KLIPT_VERSION }}
-          target_commitish: ${{ github.sha }}
           make_latest: true
-          body: Automatic build of ${{ github.sha }}.
+          body_path: release-notes.md
           files: |
             desktop/target/release/bundle/nsis/*-setup.exe
             desktop/target/release/bundle/nsis/latest.json

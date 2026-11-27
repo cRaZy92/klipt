@@ -1,7 +1,7 @@
 # Maintainer: Adam Šromovský
 # Builds Klipt's desktop app from the repo. Install: makepkg -si (in this folder).
 pkgname=klipt-desktop-git
-pkgver=0.1.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="Self-hosted Medal.tv alternative: save game clips with a hotkey and share them"
 arch=('x86_64')
@@ -12,16 +12,16 @@ makedepends=('git' 'rust' 'cargo' 'nodejs' 'pnpm')
 provides=('klipt-desktop')
 conflicts=('klipt-desktop')
 options=('!lto' '!debug')
-source=("klipt::git+${url}.git#branch=${KLIPT_BRANCH:-main}")
+# KLIPT_REF picks what to build: update.sh sets it to the newest release (tag=vX.Y.Z).
+source=("klipt::git+${url}.git#${KLIPT_REF:-branch=${KLIPT_BRANCH:-main}}")
 sha256sums=('SKIP')
 
-# MAJOR.MINOR.<commits on main>, the same version the Windows release of this commit has
-# (.github/workflows/desktop-windows.yml).
+# The newest release tag's X.Y.Z; a build of later commits adds .r<commits since>.g<commit>
+# (e.g. 1.2.0.r3.gabc1234), which pacman sorts after 1.2.0 and before 1.2.1.
 pkgver() {
   cd klipt
-  printf "%s.%s" \
-    "$(sed -n 's/^  "version": "\([0-9]*\.[0-9]*\)\..*",$/\1/p' desktop/src-tauri/tauri.conf.json)" \
-    "$(git rev-list --count HEAD)"
+  git describe --long --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --abbrev=7 |
+    sed 's/^v//; s/-0-g[0-9a-f]*$//; s/-\([0-9]*\)-g/.r\1.g/'
 }
 
 build() {
@@ -31,8 +31,11 @@ build() {
   export KLIPT_COMMIT="$(git rev-parse HEAD)"
   pnpm install --frozen-lockfile
   cd desktop
-  # The app shows (and reports) the package's version.
-  pnpm tauri build --no-bundle --config "{\"version\":\"$pkgver\"}"
+  # The app shows (and reports) the package's version. Tauri wants semver, so commits past the
+  # release go in build metadata: 1.2.0.r3.gabc1234 → 1.2.0+r3.gabc1234.
+  local version
+  version="$(printf %s "$pkgver" | sed 's/\.r/+r/')"
+  pnpm tauri build --no-bundle --config "{\"version\":\"$version\"}"
 }
 
 package() {

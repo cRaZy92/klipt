@@ -1,5 +1,5 @@
 /* Avatar frames and profile banners: what friends see on you. The same rules are in the
-   website's server/public/app.css: keep them in step. Global, because Avatar and Profile both use them. */
+   website's server/public/app.css: keep them in step. Global, because Avatar and Appearance both use them. */
 .avatar.frame::after {
   content: ""; position: absolute; inset: -3px; border-radius: 50%; padding: 2px;
   background: var(--ring);

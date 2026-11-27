@@ -55,7 +55,7 @@
     onsaved,
     onlogout,
     onaccount,
-    onprofile,
+    onappearance,
     dirty = $bindable(false),
   }: {
     /** This is the screen shown (it's kept alive, hidden, while another one is). */
@@ -71,8 +71,8 @@
     onlogout: () => void;
     /** The account changed (a new display name). */
     onaccount: (account: Account) => void;
-    /** Open the Profile screen (achievements and looks). */
-    onprofile: () => void;
+    /** Open the Appearance screen (colours, themes, frames and banners). */
+    onappearance: () => void;
     /** Whether there are unsaved changes, for the app's "Discard changes?" guard. */
     dirty?: boolean;
   } = $props();
@@ -1021,11 +1021,11 @@
 
     <section>
       <h2>Picture</h2>
-      <p class="intro muted">Friends see it on your clips. Colours, themes and frames are on your profile.</p>
+      <p class="intro muted">Friends see it on your clips. Colours, themes and frames are in Appearance.</p>
       <div class="picture-row">
         <Avatar name={account.displayName} url={account.avatarUrl} frame={account.looks?.frame} size={56} />
         <button class="btn btn-primary" onclick={choosePicture}>Change picture</button>
-        <button class="btn" onclick={onprofile}><Icon name="user" size={16} /> Profile and achievements</button>
+        <button class="btn" onclick={onappearance}><Icon name="palette" size={16} /> Appearance</button>
       </div>
     </section>
 

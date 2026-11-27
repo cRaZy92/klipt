@@ -173,7 +173,7 @@ pub async fn change_password(app: AppHandle, current_password: String, new_passw
     Ok(())
 }
 
-/// Your achievements (`MyAchievements`), for the Profile screen.
+/// Your achievements (`MyAchievements`), for the Achievements and Appearance screens.
 #[tauri::command]
 pub async fn my_achievements(app: AppHandle) -> Result<serde_json::Value> {
     let (auth, client) = saved(&app)?;

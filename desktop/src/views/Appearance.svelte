@@ -1,26 +1,17 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import {
-    ACCENTS,
-    ACHIEVEMENTS,
-    BANNERS,
-    FRAMES,
-    THEMES,
-    cosmeticName,
-    type AchievementDef,
-    type CosmeticId,
-    type EarnedAchievement,
-    type Looks,
-    type MyAchievements,
-  } from "@klipt/shared";
+  import { ACCENTS, ACHIEVEMENTS, BANNERS, FRAMES, THEMES, type CosmeticId, type Looks, type MyAchievements } from "@klipt/shared";
   import { api, errorCode, errorMessage, type Account } from "../lib/api";
   import { pickProfilePicture } from "../lib/thumbnailImage";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "../components/Avatar.svelte";
   import AvatarCropDialog from "../components/AvatarCropDialog.svelte";
+  import Icon from "../components/Icon.svelte";
+  import AchievementCard from "../components/AchievementCard.svelte";
+  import { AchievementTips } from "../lib/achievementTip.svelte";
 
-  // Your profile: picture and banner as friends see them, the badges you've collected, and the
-  // looks you can pick (locked ones say which achievement unlocks them).
+  // How you look: your picture, and the colours, themes, frames and banners you can pick (locked
+  // ones say which achievement unlocks them). The card at the top is how friends see you.
   let {
     active = true,
     account,
@@ -43,30 +34,29 @@
     }
   }
 
-  // Again each time the screen comes back: achievements are earned in the background.
+  // Again each time the screen comes back: the looks are unlocked by achievements earned in the background.
   $effect(() => {
     if (active) untrack(() => void load());
   });
 
-  const earned = $derived(new Map((mine?.earned ?? []).map((e) => [e.id, e] as [string, EarnedAchievement])));
   const unlocked = $derived(new Set<string>(mine?.unlocked ?? []));
   const looks = $derived<Looks>(mine?.looks ?? account.looks ?? { accent: "klipt", theme: "klipt", frame: null, banner: null });
-  const CATEGORIES: { id: AchievementDef["category"]; label: string }[] = [
-    { id: "milestones", label: "Milestones" },
-    { id: "social", label: "With friends" },
-    { id: "editor", label: "Editor" },
-    { id: "hidden", label: "Secret" },
-  ];
-  const hiddenLeft = $derived(ACHIEVEMENTS.filter((a) => a.hidden && !earned.has(a.id)).length);
+
+  const tips = new AchievementTips();
+  $effect(() => {
+    if (!active) tips.hide();
+  });
+
+  /** The achievement that unlocks a look, for its card. */
+  function unlocker(id: CosmeticId) {
+    const a = ACHIEVEMENTS.find((x) => x.reward === id);
+    return a ? { achievement: a } : null;
+  }
 
   function unlocksWith(id: CosmeticId): string {
     const a = ACHIEVEMENTS.find((x) => x.reward === id);
     if (!a) return "Locked";
-    return a.hidden ? "Unlocks with a secret achievement" : `Unlocks with ${a.name}`;
-  }
-
-  function dateOf(iso: string): string {
-    return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    return a.hidden ? "Unlocks with a secret achievement" : `Unlocks with ${a.name}: ${a.description}`;
   }
 
   async function equip(change: Partial<Looks>) {
@@ -102,57 +92,31 @@
   }
 </script>
 
-<section class="page profile">
-  <header class="hero banner-{looks.banner ?? 'none'}" class:has-banner={!!looks.banner}>
+{#snippet lock(id: CosmeticId)}
+  <span class="lock" aria-label={unlocksWith(id)}><Icon name="lock" size={12} /></span>
+{/snippet}
+
+<section class="page appearance">
+  <header>
+    <h1>Appearance</h1>
+    <p class="muted">Colours and themes change what you see. Your picture, frame and banner are what friends see on you.</p>
+  </header>
+
+  <div class="hero banner-{looks.banner ?? 'none'}" class:has-banner={!!looks.banner}>
     <Avatar name={account.displayName} url={account.avatarUrl} frame={looks.frame} size={88} />
     <div>
-      <h1>{account.displayName}</h1>
+      <strong class="name">{account.displayName}</strong>
       {#if account.displayName !== account.username}<p class="handle">@{account.username}</p>{/if}
-      <p class="count">
-        {mine ? `${mine.earned.length} of ${ACHIEVEMENTS.length} achievements` : "…"}
-      </p>
     </div>
-  </header>
+  </div>
 
   {#if loadError}
     <p class="error" role="alert">{loadError} <button class="btn btn-sm" onclick={load}>Try again</button></p>
   {/if}
 
-  {#each CATEGORIES as cat (cat.id)}
-    <section class="group">
-      <h2>{cat.label}</h2>
-      <ul class="badges">
-        {#each ACHIEVEMENTS.filter((a) => a.category === cat.id && (!a.hidden || earned.has(a.id))) as a (a.id)}
-          {@const got = earned.get(a.id)}
-          <li class="badge" class:earned={!!got} title={a.reward ? `Unlocks ${cosmeticName(a.reward) ?? a.reward}` : undefined}>
-            <span class="medal" aria-hidden="true">{a.icon}</span>
-            <span class="text">
-              <strong>{a.name}</strong>
-              <small>{a.description}</small>
-              {#if got}<small class="when">{dateOf(got.earnedAt)}</small>{/if}
-            </span>
-          </li>
-        {/each}
-        {#if cat.id === "hidden"}
-          {#each Array.from({ length: hiddenLeft }) as _, i (i)}
-            <li class="badge secret">
-              <span class="medal" aria-hidden="true">🔒</span>
-              <span class="text"><strong>???</strong><small>A secret. Keep clipping.</small></span>
-            </li>
-          {/each}
-        {/if}
-      </ul>
-      {#if cat.id === "hidden" && hiddenLeft > 0}<p class="muted">+{hiddenLeft} hidden</p>{/if}
-    </section>
-  {/each}
-
   <section class="group">
-    <h2>Looks</h2>
-    <p class="muted">Colours and themes change what you see. Frames and banners are what friends see on you.</p>
-
     <h3>Picture</h3>
     <div class="row">
-      <Avatar name={account.displayName} url={account.avatarUrl} frame={looks.frame} size={56} />
       <button class="btn btn-primary" onclick={choosePicture} disabled={busy}>Change picture</button>
       {#if account.avatarUrl}<button class="btn" onclick={removePicture} disabled={busy}>Remove</button>{/if}
     </div>
@@ -164,14 +128,17 @@
         <button
           class="choice"
           class:on={looks.accent === a.id}
-          disabled={busy || locked}
-          title={locked ? unlocksWith(`accent:${a.id}`) : a.name}
+          class:locked
+          disabled={busy && !locked}
+          aria-disabled={locked || undefined}
+          title={locked ? undefined : a.name}
           aria-pressed={looks.accent === a.id}
-          onclick={() => equip({ accent: a.id })}
+          use:tips.trigger={locked ? unlocker(`accent:${a.id}`) : null}
+          onclick={() => !locked && equip({ accent: a.id })}
         >
           <span class="swatch" style:--c={a.color}></span>
           {a.name}
-          {#if locked}<span class="lock" aria-label={unlocksWith(`accent:${a.id}`)}>🔒</span>{/if}
+          {#if locked}{@render lock(`accent:${a.id}`)}{/if}
         </button>
       {/each}
     </div>
@@ -183,14 +150,17 @@
         <button
           class="choice"
           class:on={looks.theme === t.id}
-          disabled={busy || locked}
-          title={locked ? unlocksWith(`theme:${t.id}`) : t.name}
+          class:locked
+          disabled={busy && !locked}
+          aria-disabled={locked || undefined}
+          title={locked ? undefined : t.name}
           aria-pressed={looks.theme === t.id}
-          onclick={() => equip({ theme: t.id })}
+          use:tips.trigger={locked ? unlocker(`theme:${t.id}`) : null}
+          onclick={() => !locked && equip({ theme: t.id })}
         >
           <span class="theme-chip" style:--b={t.tokens["--bg"]} style:--s={t.tokens["--surface-3"]}></span>
           {t.name}
-          {#if locked}<span class="lock" aria-label={unlocksWith(`theme:${t.id}`)}>🔒</span>{/if}
+          {#if locked}{@render lock(`theme:${t.id}`)}{/if}
         </button>
       {/each}
     </div>
@@ -203,14 +173,17 @@
         <button
           class="choice"
           class:on={looks.frame === f.id}
-          disabled={busy || locked}
-          title={locked ? unlocksWith(`frame:${f.id}`) : f.name}
+          class:locked
+          disabled={busy && !locked}
+          aria-disabled={locked || undefined}
+          title={locked ? undefined : f.name}
           aria-pressed={looks.frame === f.id}
-          onclick={() => equip({ frame: f.id })}
+          use:tips.trigger={locked ? unlocker(`frame:${f.id}`) : null}
+          onclick={() => !locked && equip({ frame: f.id })}
         >
           <Avatar name={account.displayName} url={account.avatarUrl} frame={f.id} size={32} />
           {f.name}
-          {#if locked}<span class="lock" aria-label={unlocksWith(`frame:${f.id}`)}>🔒</span>{/if}
+          {#if locked}{@render lock(`frame:${f.id}`)}{/if}
         </button>
       {/each}
     </div>
@@ -223,19 +196,24 @@
         <button
           class="choice"
           class:on={looks.banner === b.id}
-          disabled={busy || locked}
-          title={locked ? unlocksWith(`banner:${b.id}`) : b.name}
+          class:locked
+          disabled={busy && !locked}
+          aria-disabled={locked || undefined}
+          title={locked ? undefined : b.name}
           aria-pressed={looks.banner === b.id}
-          onclick={() => equip({ banner: b.id })}
+          use:tips.trigger={locked ? unlocker(`banner:${b.id}`) : null}
+          onclick={() => !locked && equip({ banner: b.id })}
         >
           <span class="banner-chip banner-{b.id}"></span>
           {b.name}
-          {#if locked}<span class="lock" aria-label={unlocksWith(`banner:${b.id}`)}>🔒</span>{/if}
+          {#if locked}{@render lock(`banner:${b.id}`)}{/if}
         </button>
       {/each}
     </div>
   </section>
 </section>
+
+<AchievementCard tip={tips.current} name={account.displayName} avatarUrl={account.avatarUrl} onclose={tips.hide} />
 
 {#if cropping}
   <AvatarCropDialog
@@ -250,86 +228,41 @@
 {/if}
 
 <style>
+  header h1 {
+    margin: 0 0 4px;
+  }
+  .muted {
+    color: var(--text-muted);
+    margin: 0;
+  }
+  /* How friends see you. */
   .hero {
     display: flex;
     align-items: center;
     gap: 1.25rem;
-    padding: 1rem 0;
-  }
-  .hero.has-banner {
-    padding: 4rem 1.5rem 1.25rem;
+    padding: 1.25rem 1.5rem;
     border-radius: var(--radius-lg);
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 70%), var(--banner);
+    background: var(--surface);
     box-shadow: inset 0 0 0 1px var(--border);
   }
-  h1 {
-    margin: 0;
+  .hero.has-banner {
+    padding-top: 4rem;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 70%), var(--banner);
   }
-  .handle,
-  .count {
+  .name {
+    font-size: 1.4rem;
+  }
+  .handle {
     margin: 0.2rem 0 0;
     color: var(--text-muted);
-  }
-  .group h2 {
-    margin: 0 0 0.75rem;
-    font-size: 1.05rem;
   }
   .group h3 {
     margin: 1.25rem 0 0.6rem;
     font-size: 0.9rem;
     color: var(--text-muted);
   }
-  .muted {
-    color: var(--text-muted);
-    margin: 0.5rem 0 0;
-  }
-  .badges {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-    gap: 0.6rem;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .badge {
-    display: flex;
-    gap: 0.75rem;
-    align-items: center;
-    padding: 0.7rem 0.85rem;
-    border-radius: var(--radius);
-    background: var(--surface);
-    box-shadow: inset 0 0 0 1px var(--border);
-    opacity: 0.55;
-  }
-  .badge.earned {
-    opacity: 1;
-    background: linear-gradient(135deg, var(--accent-softer), var(--surface) 60%);
-    box-shadow: inset 0 0 0 1px var(--accent-soft);
-  }
-  .badge:not(.earned) .medal {
-    filter: grayscale(1);
-  }
-  .medal {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 2.6rem;
-    height: 2.6rem;
-    border-radius: 50%;
-    background: var(--surface-2);
-    font-size: 1.35rem;
-  }
-  .text {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    min-width: 0;
-  }
-  .text small {
-    color: var(--text-muted);
-  }
-  .text .when {
-    color: var(--text-faint);
+  .group h3:first-child {
+    margin-top: 0;
   }
   .row {
     display: flex;
@@ -366,11 +299,20 @@
     cursor: not-allowed;
     opacity: 0.55;
   }
+  .choice.locked {
+    cursor: default;
+    opacity: 0.55;
+  }
+  .choice.locked:hover,
+  .choice.locked:focus-visible {
+    opacity: 0.85;
+  }
   .lock {
     position: absolute;
-    top: 0.25rem;
+    top: 0.3rem;
     right: 0.35rem;
-    font-size: 0.7rem;
+    display: grid;
+    color: var(--text-faint);
   }
   .swatch {
     width: 1.75rem;

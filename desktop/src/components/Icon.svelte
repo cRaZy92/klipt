@@ -61,6 +61,11 @@
     info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 8h.01",
     clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
     spinner: "M12 3a9 9 0 1 0 9 9",
+    lock: "M6.5 11h11a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.5v-7A1.5 1.5 0 0 1 6.5 11zM8 11V7.5a4 4 0 0 1 8 0V11M12 15v2",
+    trophy:
+      "M7 4h10v5a5 5 0 0 1-10 0zM7 6H4.5a2.5 2.5 0 0 0 2.6 4.5M17 6h2.5a2.5 2.5 0 0 1-2.6 4.5M12 14v3.5M8 21h8M9 21c0-2 1.3-3.5 3-3.5s3 1.5 3 3.5",
+    palette:
+      "M12 21a9 9 0 1 1 9-9c0 2-1.6 3.2-3.6 3.2h-1.9a1.8 1.8 0 0 0-1.3 3.1A1.7 1.7 0 0 1 12 21zM7.5 11.5h.01M9.5 7.5h.01M14.5 7.5h.01M16.5 11.5h.01",
     // The app icon's glyph (src-tauri/icons/source.svg scaled 1/32 about its centre): frame brackets
     // here, the play triangle in FILLS. Put it on an accent tile, sized ~5/6 of the tile, to match.
     logo: "M5.375 5.375H3.5v13.25h1.875M18.625 5.375H20.5v13.25h-1.875",

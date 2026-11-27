@@ -23,11 +23,12 @@
   import Login from "./views/Login.svelte";
   import Onboarding from "./views/Onboarding.svelte";
   import SettingsView from "./views/Settings.svelte";
-  import Profile from "./views/Profile.svelte";
+  import Achievements from "./views/Achievements.svelte";
+  import Appearance from "./views/Appearance.svelte";
   import { applyLooks } from "./lib/looks";
 
   // The screens. Library is home.
-  type Screen = "library" | "feed" | "albums" | "friends" | "settings" | "profile";
+  type Screen = "library" | "feed" | "albums" | "friends" | "settings" | "achievements" | "appearance";
   type View =
     | { name: "library" }
     | { name: "feed" }
@@ -35,7 +36,8 @@
     | { name: "friends" }
     | { name: "editor"; clip: ClipView }
     | { name: "settings" }
-    | { name: "profile" };
+    | { name: "achievements" }
+    | { name: "appearance" };
   /** Where the user asked to go while the current screen had unsaved changes. */
   type Leaving = { to: "view"; view: View } | { to: "logout" };
 
@@ -118,7 +120,7 @@
       ),
       // An achievement earned while the window is in front (in the background it's a notification).
       on("achievement", ({ title, body }) =>
-        toast(`${title}. ${body}`, "success", { label: "View", run: () => go({ name: "profile" }) }),
+        toast(`${title}. ${body}`, "success", { label: "View", run: () => go({ name: "achievements" }) }),
       ),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
       on("feed-new", ({ count }) => (feedNew = count)),
@@ -396,6 +398,24 @@
       <div class="nav bottom">
         <button
           class="item"
+          class:active={view.name === "achievements"}
+          aria-current={view.name === "achievements" ? "page" : undefined}
+          onclick={() => go({ name: "achievements" })}
+        >
+          <span class="item-icon"><Icon name="trophy" size={20} /></span>
+          Achievements
+        </button>
+        <button
+          class="item"
+          class:active={view.name === "appearance"}
+          aria-current={view.name === "appearance" ? "page" : undefined}
+          onclick={() => go({ name: "appearance" })}
+        >
+          <span class="item-icon"><Icon name="palette" size={20} /></span>
+          Appearance
+        </button>
+        <button
+          class="item"
           class:active={view.name === "settings"}
           aria-current={view.name === "settings" ? "page" : undefined}
           onclick={() => go({ name: "settings" })}
@@ -424,9 +444,6 @@
                 </div>
               </div>
               <hr />
-              <button role="menuitem" onclick={() => ((accountMenu = false), go({ name: "profile" }))}>
-                <Icon name="user" size={16} /> Profile and achievements
-              </button>
               <button role="menuitem" onclick={openWebsite}><Icon name="external" size={16} /> Open website</button>
               <button role="menuitem" onclick={() => ((accountMenu = false), (feedbackKind = "bug"))}>
                 <Icon name="alert" size={16} /> Report a problem
@@ -512,15 +529,28 @@
           {/key}
         </main>
       {/if}
-      {#if visited.has("profile")}
-        <main class="screen" class:here={view.name === "profile"} use:keepScroll={view.name === "profile"} inert={view.name !== "profile"}>
-          <Profile
-            active={view.name === "profile"}
+      {#if visited.has("achievements")}
+        <main class="screen" class:here={view.name === "achievements"} use:keepScroll={view.name === "achievements"} inert={view.name !== "achievements"}>
+          <Achievements
+            active={view.name === "achievements"}
+            name={account.displayName}
+            avatarUrl={account.avatarUrl}
+            onunauthorized={() => {
+              account = null;
+              loginNotice = "Your session has expired. Log in again to see your achievements.";
+            }}
+          />
+        </main>
+      {/if}
+      {#if visited.has("appearance")}
+        <main class="screen" class:here={view.name === "appearance"} use:keepScroll={view.name === "appearance"} inert={view.name !== "appearance"}>
+          <Appearance
+            active={view.name === "appearance"}
             {account}
             onaccount={(a) => (account = a)}
             onunauthorized={() => {
               account = null;
-              loginNotice = "Your session has expired. Log in again to see your profile.";
+              loginNotice = "Your session has expired. Log in again to change your appearance.";
             }}
           />
         </main>
@@ -537,7 +567,7 @@
               onsaved={settingsSaved}
               onlogout={requestLogout}
               onaccount={(a) => (account = a)}
-              onprofile={() => go({ name: "profile" })}
+              onappearance={() => go({ name: "appearance" })}
             />
           {/key}
         </main>
@@ -592,7 +622,8 @@
     flex: none;
     flex-direction: column;
     align-items: center;
-    width: 5rem;
+    /* Wide enough for the longest label, "Achievements". */
+    width: 5.75rem;
     padding: 0.9rem 0;
     border-right: 1px solid var(--border);
     background: var(--bg-2);
@@ -625,7 +656,7 @@
     gap: 0.3rem;
     width: 100%;
     margin-top: 1.4rem;
-    padding: 0 0.5rem;
+    padding: 0 0.3rem;
   }
 
   .nav.bottom {
@@ -647,6 +678,7 @@
     color: var(--text-faint);
     font-size: 0.72rem;
     font-weight: 650;
+    white-space: nowrap;
     cursor: pointer;
     transition: color 0.15s;
   }
@@ -733,6 +765,27 @@
   .account {
     position: relative;
     margin-top: 0.6rem;
+  }
+
+  /* A short window: tighter rail, so all seven sections and your picture still fit. */
+  @media (max-height: 720px) {
+    .rail {
+      padding: 0.6rem 0;
+    }
+    .nav {
+      gap: 0.1rem;
+      margin-top: 0.8rem;
+    }
+    .item {
+      gap: 0.1rem;
+      padding: 0.2rem 0 0.25rem;
+    }
+    .item-icon {
+      height: 1.9rem;
+    }
+    .account {
+      margin-top: 0.3rem;
+    }
   }
 
   .me {

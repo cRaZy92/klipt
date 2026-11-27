@@ -6,6 +6,7 @@
   import { formatDuration, hueOf, relativeDate } from "../lib/format";
   import { forgetUpload, fraction, isBusy, retryUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
   import { menu } from "../lib/a11y";
+  import { releaseVideo } from "../lib/releaseVideo";
   import Icon from "./Icon.svelte";
   import ProcessingPill from "./ProcessingPill.svelte";
   import "./clip-card.css";
@@ -106,9 +107,12 @@
     }, HOVER_DELAY_MS);
   }
 
+  let previewVideo = $state<HTMLVideoElement>();
+
   function stopHover() {
     clearTimeout(hoverTimer);
     hoverTimer = undefined;
+    releaseVideo(previewVideo);
     previewUrl = null;
     previewPlaying = false;
   }
@@ -135,6 +139,8 @@
       e.preventDefault();
       onselect(e);
     } else {
+      // The card's screen is hidden, not removed, so a preview left running would play on behind.
+      stopHover();
       action();
     }
   }
@@ -196,6 +202,7 @@
     {/if}
     {#if previewUrl}
       <video
+        bind:this={previewVideo}
         class="preview"
         class:shown={previewPlaying}
         src={previewUrl}

@@ -19,9 +19,15 @@ export interface StoredActivity {
 
 export type ServerStats = Record<ServerStat, number> & { distinctGames: number };
 
-/** "Active" for Seen by everyone: not disabled and used Klipt in the last 30 days. */
-const activeOther = sql`o.id <> ${users.id} and o.disabled_at is null
+/**
+ * Who counts for Seen by all your friends: an accepted friend, not disabled, who used Klipt in the
+ * last 30 days. At least this many are needed.
+ */
+const activeFriend = sql`o.id <> ${users.id} and o.disabled_at is null
+  and exists (select 1 from friendships f where f.status = 'accepted'
+    and ((f.user_a = ${users.id} and f.user_b = o.id) or (f.user_b = ${users.id} and f.user_a = o.id)))
   and exists (select 1 from sessions s where s.user_id = o.id and s.last_used_at > now() - interval '30 days')`;
+const MIN_FRIENDS_SEEN = 3;
 
 /** Everything the server counts for `userId` (over what it holds now; earned badges stay regardless). */
 export async function serverStats(db: Db, userId: string): Promise<ServerStats> {
@@ -34,9 +40,9 @@ export async function serverStats(db: Db, userId: string): Promise<ServerStats> 
       taggedIn: n(sql`select count(*) from clip_tags t join clips c on c.id = t.clip_id where t.user_id = ${users.id} and c.user_id <> ${users.id}`),
       tagsGiven: n(sql`select count(*) from clip_tags t join clips c on c.id = t.clip_id where c.user_id = ${users.id}`),
       maxAlbumClips: n(sql`select coalesce(max((select count(*) from album_clips ac where ac.album_id = a.id)), 0) from albums a where a.user_id = ${users.id}`),
-      seenByEveryone: n(sql`select case when not exists (select 1 from users o where ${activeOther}) then 0 else (
+      seenByEveryone: n(sql`select case when (select count(*) from users o where ${activeFriend}) < ${MIN_FRIENDS_SEEN} then 0 else (
         select count(*) from clips c where c.user_id = ${users.id} and not exists (
-          select 1 from users o where ${activeOther}
+          select 1 from users o where ${activeFriend}
             and not exists (select 1 from clip_views v where v.clip_id = c.id and v.user_id = o.id))) end`),
       blinkUploads: n(sql`select count(*) from clips c where c.user_id = ${users.id} and c.kind = 'clip' and c.duration_ms < 5000`),
       newYearUploads: n(sql`select count(*) from clips c where c.user_id = ${users.id} and extract(month from c.created_at) = 1 and extract(day from c.created_at) = 1`),

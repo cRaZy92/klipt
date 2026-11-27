@@ -114,22 +114,47 @@ describe('achievements', () => {
     expect((await report({}, { counters: {}, firsts: [] })).statusCode).toBe(401);
   });
 
-  it('counts views, anonymous ones too, and seen by everyone among active users', async () => {
-    const carol = await createUser(t.db, { username: 'carol' });
-    await t.db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, carol.id));
+  it('counts views, anonymous ones too', async () => {
     const id = await addClip(a.id);
     await t.db.update(clips).set({ anonViews: 9 }).where(eq(clips.id, id));
     await t.app.inject({ method: 'POST', url: `/api/clips/${id}/view`, headers: b.h });
-    const m = await mine(a.h);
-    expect(find(m, 'views-10')).toBeDefined();
-    expect(find(m, 'seen-by-everyone')).toMatchObject({ reward: 'frame:rainbow' });
+    expect(find(await mine(a.h), 'views-10')).toBeDefined();
   });
 
-  it('a long-idle user does not block seen by everyone', async () => {
-    const dave = await mk('dave');
-    await t.db.update(sessions).set({ lastUsedAt: new Date(Date.now() - 40 * 86_400_000) }).where(eq(sessions.userId, dave.id));
+  it('seen by all friends needs 3 friends', async () => {
     const id = await addClip(a.id);
-    await t.app.inject({ method: 'POST', url: `/api/clips/${id}/view`, headers: b.h });
+    const carol = await mk('carol');
+    for (const v of [b, carol]) await t.app.inject({ method: 'POST', url: `/api/clips/${id}/view`, headers: v.h });
+    // Two friends watched: not enough friends yet.
+    expect(find(await mine(a.h), 'seen-by-everyone')).toBeUndefined();
+    const dave = await mk('dave');
+    await t.app.inject({ method: 'POST', url: `/api/clips/${id}/view`, headers: dave.h });
+    const m = await mine(a.h);
+    expect(find(m, 'seen-by-everyone')).toMatchObject({ reward: 'frame:rainbow', name: 'Seen by all your friends' });
+  });
+
+  it("strangers don't count; a friend who hasn't watched blocks it", async () => {
+    const id = await addClip(a.id);
+    const carol = await mk('carol');
+    const dave = await mk('dave');
+    // Someone who isn't a friend and never watched: doesn't matter.
+    const stranger = await createUser(t.db, { username: 'stranger' });
+    await sessionFor(t.db, stranger.id);
+    for (const v of [b, carol]) await t.app.inject({ method: 'POST', url: `/api/clips/${id}/view`, headers: v.h });
+    expect(find(await mine(a.h), 'seen-by-everyone')).toBeUndefined();
+    await t.app.inject({ method: 'POST', url: `/api/clips/${id}/view`, headers: dave.h });
+    expect(find(await mine(a.h), 'seen-by-everyone')).toBeDefined();
+  });
+
+  it('a long-idle or disabled friend does not block it', async () => {
+    const id = await addClip(a.id);
+    const carol = await mk('carol');
+    const dave = await mk('dave');
+    const erin = await mk('erin');
+    const fred = await mk('fred');
+    await t.db.update(sessions).set({ lastUsedAt: new Date(Date.now() - 40 * 86_400_000) }).where(eq(sessions.userId, erin.id));
+    await t.db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, fred.id));
+    for (const v of [b, carol, dave]) await t.app.inject({ method: 'POST', url: `/api/clips/${id}/view`, headers: v.h });
     expect(find(await mine(a.h), 'seen-by-everyone')).toBeDefined();
   });
 

@@ -80,7 +80,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'views-10', name: 'Noticed', description: 'Your clips have 10 views', icon: '👀', category: 'social', rule: { stat: 'totalViews', min: 10 } },
   { id: 'views-100', name: 'Crowd pleaser', description: 'Your clips have 100 views', icon: '🍿', category: 'social', reward: 'theme:sand', rule: { stat: 'totalViews', min: 100 } },
   { id: 'views-1000', name: 'Famous', description: 'Your clips have 1,000 views', icon: '🌟', category: 'social', reward: 'frame:pulse', rule: { stat: 'totalViews', min: 1000 } },
-  { id: 'seen-by-everyone', name: 'Seen by everyone', description: 'Everyone on the server watched one of your clips', icon: '🌈', category: 'social', reward: 'frame:rainbow', rule: { stat: 'seenByEveryone', min: 1 } },
+  { id: 'seen-by-everyone', name: 'Seen by all your friends', description: 'All your friends (at least 3) watched one of your clips', icon: '🌈', category: 'social', reward: 'frame:rainbow', rule: { stat: 'seenByEveryone', min: 1 } },
   { id: 'tagged-10', name: 'Squad member', description: 'Friends tagged you in 10 clips', icon: '🤝', category: 'social', reward: 'banner:squad', rule: { stat: 'taggedIn', min: 10 } },
   { id: 'first-tag', name: 'Shout-out', description: 'Tagged a friend in a clip', icon: '🏷️', category: 'social', reward: 'theme:rose', rule: { stat: 'tagsGiven', min: 1 } },
   { id: 'curator', name: 'Curator', description: 'Made an album with 10 or more clips', icon: '🗂️', category: 'social', reward: 'banner:curator', rule: { stat: 'maxAlbumClips', min: 10 } },

@@ -1,27 +1,23 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq, gt, isNull, ne, TransactionRollbackError } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import type { DesktopLoginResponse, Me, SessionInfo } from '@klipt/shared';
-import { shareInviter } from '../clips/repo.js';
-import { invites, passwordResets, sessions, users } from '../db/schema.js';
+import { passwordResets, sessions, users } from '../db/schema.js';
 import { authRateLimit, requireUser, SESSION_COOKIE, setSessionCookie } from './plugin.js';
 import { hashPassword, verifyPassword } from './passwords.js';
-import { activeInvite } from '../admin/queries.js';
+import { claimReferral, clearRefCookie, REF_COOKIE } from '../referrals/routes.js';
 import { createSession, listSessions, revokeSession } from './sessions.js';
 import { meOf } from '../users/ref.js';
 
-const registerBody = z
-  .object({
-    /** An invite link an admin made. */
-    inviteCode: z.string().min(1).max(100).optional(),
-    /** Or a clip's share link: its owner is the inviter. */
-    clipId: z.string().regex(/^[A-Za-z0-9_-]{12}$/).optional(),
-    username: z.string(),
-    password: z.string().max(1024),
-  })
-  .refine((b) => (b.inviteCode === undefined) !== (b.clipId === undefined));
+const registerBody = z.object({
+  /** A referral link's code (or the `klipt_ref` cookie): signing up makes you its sender's friend. */
+  inviteCode: z.string().min(1).max(100).optional(),
+  /** Sent by the share page of older versions; ignored (anyone can sign up now). */
+  clipId: z.string().max(100).optional(),
+  username: z.string(),
+  password: z.string().max(1024),
+});
 const USERNAME_RE = /^[A-Za-z0-9_]{3,24}$/;
 
 const loginBody = z.object({
@@ -87,59 +83,42 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return me;
   });
 
+  // Anyone can sign up. A referral code (from the body or the cookie `/r/:code` set) makes the
+  // sender a friend; one that doesn't work anymore doesn't stop the sign-up.
   app.post('/api/register', { config: { rateLimit: authRateLimit } }, async (req, reply) => {
     const parsed = registerBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
-    const { inviteCode, clipId, username, password } = parsed.data;
+    const { username, password } = parsed.data;
+    const code = parsed.data.inviteCode ?? req.cookies[REF_COOKIE];
     if (!USERNAME_RE.test(username)) return reply.code(400).send({ error: 'invalid_username' });
     if (password.length < MIN_PASSWORD) return reply.code(400).send({ error: 'weak_password' });
     const passwordHash = await hashPassword(password);
 
-    // Rolling back the transaction (via throw) keeps a failed registration from consuming the invite.
-    class Fail extends Error {
-      constructor(readonly status: number, readonly code: string) {
-        super(code);
-      }
-    }
-    let user: typeof users.$inferSelect;
+    // A taken name rolls back the transaction, so it doesn't use up the code.
+    class Taken extends Error {}
+    let result: { user: typeof users.$inferSelect; referred: boolean };
     try {
-      user = await db.transaction(async (tx) => {
-        const now = new Date();
-        let inviter: string | null = null;
-        if (inviteCode !== undefined) {
-          const claimed = await tx
-            .update(invites)
-            .set({ usedAt: now })
-            .where(and(eq(invites.code, inviteCode), activeInvite(now)))
-            .returning({ code: invites.code });
-          if (claimed.length === 0) throw new Fail(400, 'invalid_invite');
-        } else {
-          inviter = config.shareSignup ? await shareInviter(tx, clipId!) : null;
-          if (!inviter) throw new Fail(400, 'invalid_share');
-        }
+      result = await db.transaction(async (tx) => {
         const inserted = await tx
           .insert(users)
           .values({ username, usernameKey: username.toLowerCase(), passwordHash })
           .onConflictDoNothing({ target: users.usernameKey })
           .returning();
-        if (inserted.length === 0) throw new Fail(409, 'username_taken');
-        const created = inserted[0]!;
-        if (inviteCode !== undefined) {
-          await tx.update(invites).set({ usedBy: created.id }).where(eq(invites.code, inviteCode));
-        } else {
-          // Kept like an invite from the clip's owner, used on the spot: every account has an inviter.
-          await tx.insert(invites).values({ code: nanoid(16), createdBy: inviter!, expiresAt: now, usedAt: now, usedBy: created.id });
-        }
-        return created;
+        if (inserted.length === 0) throw new Taken();
+        const user = inserted[0]!;
+        const referred = code ? (await claimReferral(tx, code, user.id)) !== null : false;
+        return { user, referred };
       });
     } catch (e) {
-      if (e instanceof Fail) return reply.code(e.status).send({ error: e.code });
+      if (e instanceof Taken) return reply.code(409).send({ error: 'username_taken' });
       throw e;
     }
 
-    const { token } = await createSession(db, user.id, 'web', 'Web');
+    if (code) clearRefCookie(reply, config.secureCookies);
+    const { token } = await createSession(db, result.user.id, 'web', 'Web');
     setSessionCookie(reply, token, config);
-    return (await meOf(db, user.id, config.baseUrl))!;
+    const me = (await meOf(db, result.user.id, config.baseUrl))!;
+    return code && !result.referred ? { ...me, referral: 'invalid' as const } : me;
   });
 
   app.post('/api/auth/logout', async (req, reply) => {

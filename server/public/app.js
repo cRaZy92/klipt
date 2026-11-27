@@ -35,8 +35,6 @@
     username_taken: 'That username is taken.',
     invalid_username: 'Usernames are 3-24 letters, numbers or underscores.',
     weak_password: 'Passwords need at least 8 characters.',
-    invalid_invite: 'This invite link is no longer valid.',
-    invalid_share: "This clip can't be used to sign up anymore. Ask a friend for an invite link.",
     rate_limited: 'Too many attempts. Try again in a minute.',
     unauthorized: 'You are logged out. Log in again and retry.',
     forbidden: "You don't have permission to do that.",
@@ -90,6 +88,7 @@
     btn.disabled = true;
     try {
       var kind = form.dataset.form;
+      if (kind === 'signup' && data.password !== data.confirmPassword) throw new Error('password_mismatch');
       if ((kind === 'password' || kind === 'reset') && data.newPassword !== data.confirmPassword) {
         throw new Error('password_mismatch');
       }
@@ -139,10 +138,12 @@
       } else if (kind === 'login') {
         await api('POST', '/api/auth/login', { username: data.username, password: data.password, client: 'web' });
       } else {
-        // From an admin's invite link, or from a clip's share page (its owner invites).
-        var reg = { username: data.username, password: data.password };
-        if (data.clipId) reg.clipId = data.clipId; else reg.inviteCode = data.inviteCode;
-        await api('POST', '/api/register', reg);
+        // The sign-up page or the form beside a shared clip. A referral link's code rides in a cookie.
+        var account = await api('POST', '/api/register', { username: data.username, password: data.password });
+        if (account && account.referral === 'invalid') {
+          toast('That invite link was already used or expired. Your account is ready anyway.');
+          await new Promise(function (r) { setTimeout(r, 2500); });
+        }
       }
       location.assign(safeNext(form.dataset.next));
     } catch (e) {
@@ -204,15 +205,6 @@
         if (!confirm('Sign out this session?')) return;
         await api('DELETE', '/api/auth/sessions/' + s.dataset.sessionId);
         s.remove();
-      } else if (action === 'create-invite') {
-        var inv = await api('POST', '/api/admin/invites');
-        await copy(inv.url);
-        location.reload();
-      } else if (action === 'revoke-invite') {
-        var row = btn.closest('[data-code]');
-        if (!confirm('Revoke this invite?')) return;
-        await api('DELETE', '/api/admin/invites/' + encodeURIComponent(row.dataset.code));
-        row.remove();
       } else if (action === 'favorite') {
         var on = btn.getAttribute('aria-pressed') !== 'true';
         await api(on ? 'PUT' : 'DELETE', '/api/clips/' + clipRow.dataset.clipId + '/favorite');

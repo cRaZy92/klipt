@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { getActivity, getAdminStats, getGameShares, getTranscodes, isInviteActive, listActiveInvites, listAdminUsers, listFeedback } from '../admin/queries.js';
+import { getActivity, getAdminStats, getGameShares, getTranscodes, listAdminUsers, listFeedback } from '../admin/queries.js';
 import { toClip, versionQuery } from '../clips/routes.js';
 import { listSessions } from '../auth/sessions.js';
 import { passwordResets, sessions, users } from '../db/schema.js';
@@ -14,12 +14,13 @@ import { BANNERS } from '@klipt/shared';
 import { markSeen, myAchievements } from '../achievements/engine.js';
 import { userRefColumns } from '../users/ref.js';
 import { friendState } from '../friends/repo.js';
+import { referrerOf, REF_COOKIE } from '../referrals/routes.js';
 import { ResetPage } from './pages/reset.js';
-import { displayNameOf, getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, shareInviter, InvalidCursorError, type Scope } from '../clips/repo.js';
+import { displayNameOf, getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage, TranscodeSection } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
 import { GetAppPage } from './pages/getApp.js';
-import { InvitePage } from './pages/invite.js';
+import { SignupPage } from './pages/signup.js';
 import { LoginPage } from './pages/login.js';
 import { SharePage } from './pages/share.js';
 import { embedPlan, FULL_VIDEO_EMBED_MAX_BYTES, hasEmbed } from '../clips/embed.js';
@@ -113,10 +114,12 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     return html(reply, LoginPage({ next }) as string);
   });
 
-  app.get('/invite/:code', async (req, reply) => {
-    const { code } = req.params as { code: string };
-    const valid = await isInviteActive(db, code.slice(0, 100));
-    return html(reply, InvitePage({ code, valid }) as string);
+  // Anyone can make an account. Coming from a referral link, the page says who invited you.
+  app.get('/signup', async (req, reply) => {
+    const next = safeNext((req.query as { next?: unknown }).next);
+    if (req.user) return reply.redirect(next);
+    const referrer = await referrerOf(db, req.cookies[REF_COOKIE]);
+    return html(reply, SignupPage({ next, referrer: referrer?.displayName ?? null }) as string);
   });
 
   // How to install the desktop app. Public, so the link can be sent to a friend; new accounts land
@@ -181,7 +184,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const canDelete = !!req.user && (req.user.id === found.clip.userId || req.user.isAdmin);
     const clip = toClip(found, config.baseUrl);
     const viewers = req.user?.id === found.clip.userId ? (await listViewers(db, clip.id)).map((v) => v.displayName) : undefined;
-    const signup = !req.user && config.shareSignup && (await shareInviter(db, clip.id)) !== null;
+    const signup = !req.user;
     const plan = clip.kind === 'clip' ? embedPlan(clip) : null;
     // Without a small copy the full video goes in the embed only when Discord can fetch it in time:
     // it gives up on a huge one (an upload still being compressed) and then shows no embed at all.
@@ -248,9 +251,8 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   app.get('/admin', async (req, reply) => {
     if (!guard(req, reply)) return reply;
     if (!req.user!.isAdmin) return notFound(req, reply);
-    const [stats, inviteList, userList, transcodes, activity, games, reports] = await Promise.all([
+    const [stats, userList, transcodes, activity, games, reports] = await Promise.all([
       getAdminStats(db, app.disk),
-      listActiveInvites(db, config.baseUrl),
       listAdminUsers(db, config.baseUrl),
       getTranscodes(db, app.transcoder),
       getActivity(db),
@@ -259,7 +261,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     ]);
     return html(
       reply,
-      AdminPage({ user: req.user!, stats, invites: inviteList, users: userList, transcodes, activity, games, feedback: reports }) as string,
+      AdminPage({ user: req.user!, stats, users: userList, transcodes, activity, games, feedback: reports }) as string,
     );
   });
 

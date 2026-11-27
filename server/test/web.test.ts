@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { clips, invites } from '../src/db/schema.js';
+import { clips, invites, users } from '../src/db/schema.js';
 import { createUser, makeTestApp, sessionFor, type TestApp, befriendAll } from './helpers.js';
 import { safeNext } from '../src/web/routes.js';
 import { getActivity, getGameShares, lastMondays } from '../src/admin/queries.js';
@@ -83,8 +83,9 @@ describe('web pages', () => {
     expect(body).toContain('title="A&amp;amp;B"');
     expect(body).toContain('<span class="chip-name">A&amp;amp;B</span>');
     const adm = await mk('boss', true);
-    await t.db.insert(invites).values({ code: 'x&amp;y', createdBy: adm.u.id, expiresAt: new Date(Date.now() + 1e6) });
-    expect((await get(`/invite/${encodeURIComponent('x&amp;y')}`)).body).toContain('value="x&amp;amp;y"');
+    await t.db.update(users).set({ displayName: 'R&amp;D' }).where(eq(users.id, adm.u.id));
+    await t.db.insert(invites).values({ code: 'refcode', createdBy: adm.u.id, expiresAt: new Date(Date.now() + 1e6) });
+    expect((await t.app.inject({ url: '/signup', headers: { cookie: 'klipt_ref=refcode' } })).body).toContain('<strong>R&amp;amp;D</strong> invited you');
   });
 
   it('shows feed clips but not link-only clips', async () => {
@@ -220,9 +221,8 @@ describe('web pages', () => {
     expect((await get('/admin', a.cookie)).statusCode).toBe(404);
     const res = await get('/admin', adm.cookie);
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('Create invite');
+    expect(res.body).not.toContain('Create invite');
     expect(res.body).toContain('GB');
-    expect(res.body).toContain('No open invites');
     expect(res.body).toContain('Uploads per week');
   });
 
@@ -250,21 +250,6 @@ describe('web pages', () => {
   it('lastMondays counts back from the Monday of this week in Slovak time', () => {
     expect(lastMondays(3, new Date('2026-11-15T23:30:00Z'))).toEqual(['2026-11-02', '2026-11-09', '2026-11-16']);
     expect(lastMondays(1, new Date('2026-11-15T22:30:00Z'))).toEqual(['2026-11-09']);
-  });
-
-  it('invite page validates code', async () => {
-    const adm = await mk('boss', true);
-    const a = await mk('alice');
-    await t.db.insert(invites).values({ code: 'usedcode', createdBy: adm.u.id, expiresAt: new Date(Date.now() + 1e6), usedBy: a.u.id });
-    await t.db.insert(invites).values({ code: 'goodcode', createdBy: adm.u.id, expiresAt: new Date(Date.now() + 1e6) });
-    expect((await get('/invite/usedcode')).body).toContain('no longer valid');
-    expect((await get('/invite/nope')).body).toContain('no longer valid');
-    const ok = await get('/invite/goodcode');
-    expect(ok.body).not.toContain('no longer valid');
-    expect(ok.body).toContain('goodcode');
-    expect(ok.body).toContain('data-next="/get-app?welcome=1"');
-    await t.db.update(invites).set({ revokedAt: new Date() }).where(eq(invites.code, 'goodcode'));
-    expect((await get('/invite/goodcode')).body).toContain('no longer valid');
   });
 
   it('serves the install guide publicly and links it from the top bar', async () => {

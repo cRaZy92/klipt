@@ -13,7 +13,9 @@ export function LoginPage(props: { next: string }): JSX.Element {
           <p class="error" role="alert" hidden></p>
           <button class="btn primary" type="submit">Log in</button>
         </form>
-        <p class="muted">Klipt is invite-only. Ask a friend for an invite link.</p>
+        <p class="muted">
+          No account? <a href="/signup">Sign up</a>
+        </p>
       </div>
     </Layout>
   );

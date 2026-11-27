@@ -1,5 +1,5 @@
 import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
-import type { AdminStats, AdminTranscodes, AdminUser, FeedbackItem, Invite, TranscodeJob } from '@klipt/shared';
+import type { AdminStats, AdminTranscodes, AdminUser, FeedbackItem, TranscodeJob } from '@klipt/shared';
 import { transcodeCounts, type Transcoder } from '../clips/transcoder.js';
 import type { Db } from '../db/client.js';
 import type { DiskGuard } from '../disk.js';
@@ -10,25 +10,6 @@ import { avatarUrl } from '../users/ref.js';
 /** An invite that is unused, not revoked and not expired. Single source of truth for invite validity. */
 export const activeInvite = (now: Date = new Date()) =>
   and(isNull(invites.usedBy), isNull(invites.revokedAt), gt(invites.expiresAt, now))!;
-
-export const inviteUrl = (baseUrl: string, code: string) => `${baseUrl}/invite/${code}`;
-
-export function toInvite(i: { code: string; expiresAt: Date }, baseUrl: string): Invite {
-  return { code: i.code, url: inviteUrl(baseUrl, i.code), expiresAt: i.expiresAt.toISOString() };
-}
-
-export async function listActiveInvites(db: Db, baseUrl: string): Promise<Invite[]> {
-  const rows = await db.select().from(invites).where(activeInvite()).orderBy(invites.createdAt);
-  return rows.map((i) => toInvite(i, baseUrl));
-}
-
-export async function isInviteActive(db: Db, code: string): Promise<boolean> {
-  const [row] = await db
-    .select({ code: invites.code })
-    .from(invites)
-    .where(and(eq(invites.code, code), activeInvite()));
-  return !!row;
-}
 
 export async function listAdminUsers(db: Db, baseUrl: string): Promise<AdminUser[]> {
   const rows = await db

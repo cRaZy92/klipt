@@ -1,6 +1,6 @@
 # Klipt
 
-Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, upload game clips from the desktop app, browse a shared feed, and paste share links into Discord, where they show up as playable embeds. Everything runs as one Docker Compose stack (Postgres plus the Klipt server) that you host yourself.
+Klipt is a small, self-hosted alternative to Medal.tv. People sign up, upload game clips from the desktop app, follow their friends' clips in a feed, and paste share links into Discord, where they show up as playable embeds. Everything runs as one Docker Compose stack (Postgres plus the Klipt server) that you host yourself.
 
 ## Deploy on Dokploy
 
@@ -20,7 +20,6 @@ Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, up
    | `TRANSCODE_CRF` | Optional. Compression quality, default `23`. Lower is better quality and bigger files (`20` ≈ near the original, `26` ≈ noticeably smaller). |
    | `TRANSCODE_PRESET` | Optional. x264 speed, default `medium`. `fast` uses less CPU for slightly bigger files; `slow` saves ~2% more for ~40% more CPU time. |
    | `TRANSCODE_THREADS` | Optional. CPU threads compression may use, default `2`, so it leaves the rest of the server alone (it also runs at low priority). On an i5-10600KF expect roughly 1.5 minutes of work per minute of 1080p60 clip with 2 threads. |
-   | `SHARE_SIGNUP` | Optional. `on` (default) lets someone who opens a share link without an account make one right there, invited by the clip's owner; `off` keeps sign-up to admin invite links only. |
    | `TRUST_PROXY_HOPS` | Optional. How many reverse proxies sit in front of Klipt, default `1`. Use `1` behind Dokploy/Traefik, `0` if Klipt is exposed directly with no proxy, `2` if Cloudflare is in front of Traefik. |
 
 3. **Without Dokploy's Traefik** (e.g. a Pangolin tunnel): skip the Domains tab and point the tunnel at `<Dokploy host IP>:<KLIPT_PORT>` with HTTPS terminated by the tunnel; keep `TRUST_PROXY_HOPS=1` (Pangolin's proxy is one hop). **With Dokploy's Traefik:** open the **Domains** tab, add your domain, and set service name `server`, port `3000`, and enable **HTTPS** (Let's Encrypt). Point the domain's DNS at your Dokploy server first.
@@ -30,11 +29,11 @@ Klipt is a small, self-hosted alternative to Medal.tv. Friends get an invite, up
 
 Open your `BASE_URL`, sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`. The admin account is only created the first time, when there are no users yet. Changing these variables later does not change the password.
 
-## Inviting friends
+## Accounts and friends
 
-Klipt is invite-only. As admin, open the admin page, create an invite, and send the invite link to your friend. They pick a username and password and are in. Invites can be revoked from the same page.
+Anyone can sign up at `/signup`. Clips are listed to friends (or to everyone when set to Public); every clip's share link works for whoever has it.
 
-Share links count as invites too: someone who opens a clip's link without an account sees a "Create an account" form beside the clip, and the clip's owner is recorded as their inviter. Anyone who has a clip's link can therefore make an account. Set `SHARE_SIGNUP=off` to turn this off. Disabling a user (admin page → Users) stops their links from signing anyone up.
+To bring a friend in, open Friends and make a referral link. It works once, for 14 days: whoever signs up through it (or opens it while logged in) becomes your friend. Disabling a user (admin page → Users) stops their links from working.
 
 ## Where your data lives
 

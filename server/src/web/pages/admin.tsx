@@ -1,4 +1,4 @@
-import type { AdminStats, AdminTranscodes, AdminUser, FeedbackItem, Invite, TranscodeJob } from '@klipt/shared';
+import type { AdminStats, AdminTranscodes, AdminUser, FeedbackItem, TranscodeJob } from '@klipt/shared';
 import type { GameShare, WeekActivity } from '../../admin/queries.js';
 import type { AuthUser } from '../../auth/sessions.js';
 import { formatDuration, formatGB, formatSize, relativeDate, skDate } from '../components.js';
@@ -217,7 +217,6 @@ function QueueBar(props: { counts: AdminTranscodes['counts']; saved: number }): 
 export function AdminPage(props: {
   user: AuthUser;
   stats: AdminStats;
-  invites: Invite[];
   users: AdminUser[];
   transcodes: AdminTranscodes;
   activity: WeekActivity[];
@@ -255,22 +254,6 @@ export function AdminPage(props: {
 
       <h2>Video compression</h2>
       <TranscodeSection data={props.transcodes} />
-
-      <h2>Invites</h2>
-      <button type="button" class="btn primary" data-action="create-invite">Create invite</button>
-      {props.invites.length === 0 ? <p class="empty">No open invites. Create one and send the link to a friend.</p> : ''}
-      <ul class="rows plain" id="invites">
-        {props.invites.map((i) => (
-          <li class="row" data-code={e(i.code)}>
-            <div class="row-main">
-              <code class="url">{e(i.url)}</code>
-              <div class="meta"><span>Expires {skDate(i.expiresAt)}</span></div>
-            </div>
-            <button type="button" class="btn small" data-action="copy" data-url={e(i.url)}>Copy</button>
-            <button type="button" class="btn small danger" data-action="revoke-invite">Revoke</button>
-          </li>
-        ))}
-      </ul>
 
       <h2 id="feedback">
         Reports and ideas {openReports > 0 ? <span class="badge accent">{openReports} open</span> : ''}

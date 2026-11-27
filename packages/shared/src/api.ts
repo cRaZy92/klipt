@@ -151,17 +151,22 @@ export interface SessionInfo {
   current: boolean;
 }
 
-export interface Invite {
+/** A referral link (`POST /api/referrals`): works once, for 14 days; signing up with it makes you friends. */
+export interface Referral {
   code: string;
   url: string;
   expiresAt: string;
 }
 
 export interface RegisterRequest {
-  inviteCode: string;
+  /** A referral code; the `klipt_ref` cookie works too. */
+  inviteCode?: string;
   username: string;
   password: string;
 }
+
+/** `POST /api/register`: the new account; `referral: 'invalid'` when the referral link no longer worked. */
+export type RegisterResponse = Me & { referral?: 'invalid' };
 
 export interface AdminUser {
   id: string;

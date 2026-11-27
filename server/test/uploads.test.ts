@@ -8,7 +8,7 @@ import { count, eq } from 'drizzle-orm';
 import { MAX_ALBUM_CLIPS } from '@klipt/shared';
 import { albumClips, clips, uploads } from '../src/db/schema.js';
 import { cleanupStaleUploads } from '../src/uploads/tus.js';
-import { createUser, makeCorruptVideo, makeFixtureVideo, listenOrigin, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
+import { createUser, makeCorruptVideo, makeFixtureVideo, listenOrigin, makeTestApp, sessionFor, tusUpload, type TestApp, befriendAll } from './helpers.js';
 
 let t: TestApp;
 let token: string;
@@ -48,6 +48,7 @@ describe('uploads and finalize', () => {
 
   it('finalize tags friends; an unknown name is refused before the upload is used', async () => {
     await createUser(t.db, { username: 'bob' });
+    await befriendAll(t.db);
     const { uploadId } = await tusUpload(t.app, token, fixture);
     const bad = await finalize(uploadId, { tagged: ['ghost'] });
     expect(bad.statusCode).toBe(400);
@@ -326,6 +327,7 @@ describe('replacing a clip with a new upload', () => {
 
   it('keeps the link, views, stars and tags; serves the new video under a new name', async () => {
     const bob = await createUser(t.db, { username: 'bob' });
+    await befriendAll(t.db);
     const b = await sessionFor(t.db, bob.id, 'web');
     const first = await tusUpload(t.app, token, fixture);
     const original = (await finalize(first.uploadId, { tagged: ['bob'], visibility: 'link' })).json();

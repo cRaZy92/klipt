@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { ACCENTS } from '@klipt/shared';
 import { clips, userAchievements, users } from '../src/db/schema.js';
-import { createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
+import { befriendAll, createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
 
 let t: TestApp;
 
@@ -10,6 +10,7 @@ const get = (url: string, cookie?: string) => t.app.inject({ method: 'GET', url,
 
 async function mk(name: string) {
   const u = await createUser(t.db, { username: name });
+  await befriendAll(t.db);
   return { u, cookie: (await sessionFor(t.db, u.id)).cookie };
 }
 

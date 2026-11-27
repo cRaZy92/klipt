@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { clips, invites } from '../src/db/schema.js';
-import { createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
+import { createUser, makeTestApp, sessionFor, type TestApp, befriendAll } from './helpers.js';
 import { safeNext } from '../src/web/routes.js';
 import { getActivity, getGameShares, lastMondays } from '../src/admin/queries.js';
 
@@ -37,6 +37,7 @@ afterEach(async () => {
 
 async function mk(name: string, isAdmin = false) {
   const u = await createUser(t.db, { username: name, isAdmin });
+  await befriendAll(t.db);
   return { u, cookie: (await sessionFor(t.db, u.id)).cookie };
 }
 

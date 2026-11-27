@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clips } from '../src/db/schema.js';
-import { createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
+import { createUser, makeTestApp, sessionFor, type TestApp, befriendAll } from './helpers.js';
 
 let t: TestApp;
 let a: { id: string; h: Record<string, string> };
@@ -13,6 +13,7 @@ let b: { id: string; h: Record<string, string> };
 
 async function mk(name: string) {
   const u = await createUser(t.db, { username: name });
+  await befriendAll(t.db);
   return { id: u.id, h: (await sessionFor(t.db, u.id)).headers };
 }
 
@@ -94,7 +95,8 @@ describe('profile pictures', () => {
     expect(list.items[0].owner).toEqual({ username: 'alice', displayName: 'alice', avatarUrl: `http://localhost/avatars/${a.id}.jpg?v=1`, frame: null });
     const users = (await t.app.inject({ method: 'GET', url: '/api/users', headers: b.h })).json();
     expect(users.find((u: { username: string }) => u.username === 'alice').avatarUrl).toMatch(/\?v=1$/);
-    expect(users.find((u: { username: string }) => u.username === 'bob').avatarUrl).toBeNull();
+    // The list is your friends: not you.
+    expect(users.find((u: { username: string }) => u.username === 'bob')).toBeUndefined();
     await t.app.inject({ method: 'POST', url: '/api/clips/clipAAAAAAAA/view', headers: b.h });
     await put(b.h, (await picture('png')).buf);
     const viewers = (await t.app.inject({ method: 'GET', url: '/api/clips/clipAAAAAAAA/viewers', headers: a.h })).json();

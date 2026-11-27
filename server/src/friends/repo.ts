@@ -11,9 +11,10 @@ export function pairOf(a: string, b: string): [string, string] {
 }
 
 /** Whether `viewerId` and the user in `ownerCol` are friends (an accepted row between them). */
-export function friendsExpr(viewerId: string, ownerCol: AnyPgColumn | SQL): SQL<boolean> {
+export function friendsExpr(viewer: string | SQL, owner: AnyPgColumn | SQL): SQL<boolean> {
+  const a = typeof viewer === 'string' ? sql`${viewer}::uuid` : viewer;
   return sql<boolean>`exists (select 1 from ${friendships} f where f.status = 'accepted' and (
-    (f.user_a = ${viewerId}::uuid and f.user_b = ${ownerCol}) or (f.user_b = ${viewerId}::uuid and f.user_a = ${ownerCol})))`;
+    (f.user_a = ${a} and f.user_b = ${owner}) or (f.user_b = ${a} and f.user_a = ${owner})))`;
 }
 
 async function rowOf(db: Pick<Db, 'select'>, a: string, b: string) {

@@ -4,6 +4,7 @@ import type { AuthUser } from '../auth/sessions.js';
 import type { Db } from '../db/client.js';
 import { clipFavorites, clipTags, clipViews, clips, users } from '../db/schema.js';
 import { displayNameOf, userRefColumns, type UserRefRow } from '../users/ref.js';
+import { friendsExpr, listFriendRows } from '../friends/repo.js';
 
 export type ClipRow = typeof clips.$inferSelect;
 export type Scope = 'feed' | 'mine' | 'user';
@@ -64,17 +65,44 @@ export function decodeCursor(cursor: string): { createdAt: Date; id: string } {
 }
 
 /**
- * Which clips a list shows. A profile (`user`) has the user's own clips (link-only ones only to
- * themselves) and, unless `ownOnly`, feed clips they're tagged in.
+ * Clips `viewerId` may find in lists: their own, Public ones, and Friends ones of their friends.
+ * Logged out (null): Public ones. Link-only clips of others never (their link still opens them).
  */
-function scopeCondition(viewer: AuthUser, scope: Scope, username?: string, ownOnly = false): SQL {
-  if (scope === 'mine') return eq(clips.userId, viewer.id);
-  if (scope === 'feed') return eq(clips.visibility, 'friends');
+export function canSee(viewerId: string | null): SQL {
+  if (!viewerId) return eq(clips.visibility, 'public');
+  return or(
+    eq(clips.userId, viewerId),
+    eq(clips.visibility, 'public'),
+    and(eq(clips.visibility, 'friends'), friendsExpr(viewerId, clips.userId)),
+  )!;
+}
+
+/**
+ * Which clips a list shows.
+ * - `feed`: your own clips and your friends' Friends and Public ones (no strangers' Public clips).
+ * - `user` (a profile): the user's own clips you may see (all of them on your own profile) and,
+ *   unless `ownOnly`, clips they're tagged in. A tagged-in clip counts only when the profile is
+ *   yours, Public or a friend's, you may see the clip, and its uploader is the profile's friend.
+ */
+function scopeCondition(viewer: AuthUser | null, scope: Scope, username?: string, ownOnly = false): SQL {
+  if (scope === 'mine') return viewer ? eq(clips.userId, viewer.id) : sql`false`;
+  if (scope === 'feed') {
+    if (!viewer) return sql`false`;
+    return or(eq(clips.userId, viewer.id), and(sql`${clips.visibility} <> 'link'`, friendsExpr(viewer.id, clips.userId)))!;
+  }
   const key = (username ?? '').toLowerCase();
-  const isSelf = key === viewer.username.toLowerCase();
+  const isSelf = !!viewer && key === viewer.username.toLowerCase();
   const owner = eq(users.usernameKey, key);
-  const own = isSelf ? owner : and(owner, eq(clips.visibility, 'friends'))!;
-  return ownOnly ? own : or(own, and(eq(clips.visibility, 'friends'), taggedIn(key)))!;
+  const own = isSelf ? owner : and(owner, canSee(viewer?.id ?? null))!;
+  if (ownOnly) return own;
+  const profileId = sql`(select pu.id from ${users} pu where pu.username_key = ${key})`;
+  const fullProfile = isSelf
+    ? sql`true`
+    : viewer
+      ? or(sql`exists (select 1 from ${users} pu where pu.username_key = ${key} and pu.profile_visibility = 'public')`, friendsExpr(viewer.id, profileId))!
+      : sql`exists (select 1 from ${users} pu where pu.username_key = ${key} and pu.profile_visibility = 'public')`;
+  const tagged = and(fullProfile, taggedIn(key), canSee(viewer?.id ?? null), friendsExpr(sql`${clips.userId}`, profileId))!;
+  return or(own, tagged)!;
 }
 
 /**
@@ -94,7 +122,7 @@ export function searchCondition(text: string | undefined): SQL | undefined {
 
 export async function listClips(
   db: Db,
-  viewer: AuthUser,
+  viewer: AuthUser | null,
   q: {
     scope: Scope;
     username?: string;
@@ -102,24 +130,26 @@ export async function listClips(
     search?: string;
     withMe?: boolean;
     kind?: 'clip' | 'screenshot';
-    /** Only clips the viewer starred, wherever they are (link-only ones included: starring needed the link). */
+    /** Only clips the viewer starred that they may still see (link-only ones included: starring needed the link). */
     favorites?: boolean;
     cursor?: string;
     limit?: number;
   },
 ): Promise<{ items: ClipWithOwner[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(Math.trunc(q.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
-  const conds: (SQL | undefined)[] = [q.favorites ? favoriteExpr(viewer.id) : scopeCondition(viewer, q.scope, q.username)];
+  const conds: (SQL | undefined)[] = [
+    q.favorites ? and(favoriteExpr(viewer?.id), or(canSee(viewer?.id ?? null), eq(clips.visibility, 'link'))) : scopeCondition(viewer, q.scope, q.username),
+  ];
   if (q.game) conds.push(eq(clips.gameName, q.game));
   conds.push(searchCondition(q.search));
-  if (q.withMe) conds.push(taggedIn(viewer.username.toLowerCase()));
+  if (q.withMe) conds.push(viewer ? taggedIn(viewer.username.toLowerCase()) : sql`false`);
   if (q.kind) conds.push(eq(clips.kind, q.kind));
   if (q.cursor) {
     const c = decodeCursor(q.cursor);
     conds.push(or(lt(clips.createdAt, c.createdAt), and(eq(clips.createdAt, c.createdAt), lt(clips.id, c.id))));
   }
   const rows = await db
-    .select({ clip: clips, owner: ownerExpr, views: viewsExpr, tagged: taggedExpr, taggedNames: taggedNamesExpr, favorite: favoriteExpr(viewer.id) })
+    .select({ clip: clips, owner: ownerExpr, views: viewsExpr, tagged: taggedExpr, taggedNames: taggedNamesExpr, favorite: favoriteExpr(viewer?.id) })
     .from(clips)
     .innerJoin(users, eq(users.id, clips.userId))
     .where(and(...conds))
@@ -139,7 +169,7 @@ export interface ProfileStats {
 }
 
 /** A profile's totals over the clips `viewer` may see there (feed clips, or all for your own). */
-export async function getProfileStats(db: Db, viewer: AuthUser, username: string): Promise<ProfileStats> {
+export async function getProfileStats(db: Db, viewer: AuthUser | null, username: string): Promise<ProfileStats> {
   const where = scopeCondition(viewer, 'user', username, true);
   const [totals] = await db
     .select({ clips: sql<number>`count(*)::int`, views: sql<number>`coalesce(sum(${viewsExpr}), 0)::int` })
@@ -162,7 +192,7 @@ export async function getProfileStats(db: Db, viewer: AuthUser, username: string
 
 export async function listGames(
   db: Db,
-  viewer: AuthUser,
+  viewer: AuthUser | null,
   scope: Scope,
   username?: string,
 ): Promise<GameCount[]> {
@@ -222,7 +252,8 @@ export class UnknownUserError extends Error {
 
 /**
  * The user ids for tagging `names` in a clip of `ownerId`: case-insensitive, duplicates and the
- * owner dropped. Throws UnknownUserError for a name that isn't an active user.
+ * owner dropped. Throws UnknownUserError for a name that isn't an active friend of the owner (the
+ * same error as for no such user, so tagging can't tell who exists).
  */
 export async function resolveTags(db: Db, ownerId: string, names: string[]): Promise<string[]> {
   const keys = [...new Set(names.map((n) => n.trim().toLowerCase()).filter(Boolean))];
@@ -230,7 +261,7 @@ export async function resolveTags(db: Db, ownerId: string, names: string[]): Pro
   const rows = await db
     .select({ id: users.id, key: users.usernameKey })
     .from(users)
-    .where(and(inArray(users.usernameKey, keys), isNull(users.disabledAt)));
+    .where(and(inArray(users.usernameKey, keys), isNull(users.disabledAt), or(eq(users.id, ownerId), friendsExpr(ownerId, users.id))));
   const missing = keys.find((k) => !rows.some((r) => r.key === k));
   if (missing) throw new UnknownUserError(names.find((n) => n.trim().toLowerCase() === missing)!.trim());
   return rows.filter((r) => r.id !== ownerId).map((r) => r.id);
@@ -242,9 +273,9 @@ export async function setTags(db: Pick<Db, 'delete' | 'insert'>, clipId: string,
   if (userIds.length > 0) await db.insert(clipTags).values(userIds.map((userId) => ({ clipId, userId })));
 }
 
-/** Active users, for picking friends to tag. */
-export async function listUsernames(db: Db): Promise<UserRefRow[]> {
-  return db.select(userRefColumns).from(users).where(isNull(users.disabledAt)).orderBy(asc(users.usernameKey));
+/** Your friends, for picking who to tag. */
+export async function listFriendRefs(db: Db, userId: string): Promise<UserRefRow[]> {
+  return (await listFriendRows(db, userId)).friends;
 }
 
 /** A clip; `favorite` says whether `viewerId` starred it. */

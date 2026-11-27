@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clips } from '../src/db/schema.js';
-import { createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
+import { createUser, makeTestApp, sessionFor, type TestApp, befriendAll } from './helpers.js';
 
 let t: TestApp;
 let alice: Record<string, string>;
@@ -14,6 +14,7 @@ beforeEach(async () => {
   t = await makeTestApp();
   const a = await createUser(t.db, { username: 'alice' });
   const b = await createUser(t.db, { username: 'bob' });
+  await befriendAll(t.db);
   alice = (await sessionFor(t.db, a.id)).headers;
   bob = (await sessionFor(t.db, b.id, 'desktop')).headers;
   await insertClip('aliceFeed001', a.id);

@@ -168,3 +168,10 @@ export async function tusUpload(
   }
   return { uploadId, location };
 }
+
+/** Makes every user so far friends with every other (how the group started: everyone sees everyone). */
+export async function befriendAll(db: Db): Promise<void> {
+  const { makeFriends } = await import('../src/friends/repo.js');
+  const all = await db.select({ id: users.id }).from(users);
+  for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) await makeFriends(db, all[i]!.id, all[j]!.id);
+}

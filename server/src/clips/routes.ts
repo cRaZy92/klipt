@@ -22,7 +22,7 @@ import {
   InvalidCursorError,
   listClips,
   listGames,
-  listUsernames,
+  listFriendRefs,
   listViewers,
   recordView,
   resolveTags,
@@ -188,7 +188,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
   const unknownUser = (reply: FastifyReply, err: UnknownUserError) =>
     reply.code(400).send({ error: 'unknown_user', message: err.message });
 
-  app.get('/api/users', { preHandler: requireUser }, async () => (await listUsernames(db)).map((u) => toUserRef(u, config.baseUrl)));
+  app.get('/api/users', { preHandler: requireUser }, async (req) => (await listFriendRefs(db, req.user!.id)).map((u) => toUserRef(u, config.baseUrl)));
 
   app.get('/api/clips', { preHandler: requireUser }, async (req, reply) => {
     const q = listQuery.safeParse(req.query);

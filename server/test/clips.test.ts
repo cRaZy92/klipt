@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clips } from '../src/db/schema.js';
-import { createUser, makeFixtureVideo, makeTestApp, sessionFor, type TestApp } from './helpers.js';
+import { createUser, makeFixtureVideo, makeTestApp, sessionFor, type TestApp, befriendAll } from './helpers.js';
 import { execFileSync } from 'node:child_process';
 
 let t: TestApp;
@@ -16,6 +16,7 @@ let seq = 0;
 
 async function mk(name: string, opts: { isAdmin?: boolean } = {}) {
   const u = await createUser(t.db, { username: name, ...opts });
+  await befriendAll(t.db);
   return { id: u.id, h: (await sessionFor(t.db, u.id)).headers };
 }
 
@@ -230,10 +231,10 @@ describe('tagging friends', () => {
     expect(await list('/api/clips?scope=user&username=alice', admin.h)).toEqual([other, tagged]);
   });
 
-  it('lists active users to tag', async () => {
+  it('lists your friends to tag', async () => {
     const res = await t.app.inject({ url: '/api/users', headers: a.h });
     expect(res.statusCode).toBe(200);
-    expect((res.json() as { username: string }[]).map((u) => u.username)).toEqual(['alice', 'bob', 'root']);
+    expect((res.json() as { username: string }[]).map((u) => u.username)).toEqual(['bob', 'root']);
     expect((await t.app.inject({ url: '/api/users' })).statusCode).toBe(401);
   });
 });

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EarnedAchievement, MyAchievements } from '@klipt/shared';
 import { clips, sessions, userAchievements, users } from '../src/db/schema.js';
 import { evaluateAll } from '../src/achievements/engine.js';
-import { createUser, makeFixtureVideo, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
+import { createUser, makeFixtureVideo, makeTestApp, sessionFor, tusUpload, type TestApp, befriendAll } from './helpers.js';
 
 let t: TestApp;
 let a: { id: string; h: Record<string, string>; token: string };
@@ -15,6 +15,7 @@ let seq = 0;
 
 async function mk(name: string) {
   const u = await createUser(t.db, { username: name });
+  await befriendAll(t.db);
   const s = await sessionFor(t.db, u.id, 'desktop');
   return { id: u.id, h: s.headers, token: s.token };
 }

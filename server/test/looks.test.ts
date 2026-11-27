@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_LOOKS } from '@klipt/shared';
 import { clips, userAchievements } from '../src/db/schema.js';
-import { createUser, makeTestApp, sessionFor, type TestApp } from './helpers.js';
+import { createUser, makeTestApp, sessionFor, type TestApp, befriendAll } from './helpers.js';
 
 let t: TestApp;
 let a: { id: string; h: Record<string, string> };
@@ -10,6 +10,7 @@ let b: { id: string; h: Record<string, string> };
 
 async function mk(name: string) {
   const u = await createUser(t.db, { username: name });
+  await befriendAll(t.db);
   return { id: u.id, h: (await sessionFor(t.db, u.id)).headers };
 }
 

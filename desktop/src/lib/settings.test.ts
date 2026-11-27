@@ -27,6 +27,7 @@ const defaults: Settings = {
   friendNotifications: true,
   copyLinkOnUpload: false,
   voiceApps: ["discord", "vesktop"],
+  onboarded: true,
 };
 
 const fields = (patch: Partial<Settings>) => validateSettings({ ...defaults, ...patch }).map((e) => e.field);

@@ -192,6 +192,8 @@ export interface Settings {
   copyLinkOnUpload: boolean;
   /** Voice chat apps recorded on their own track (Linux); empty = recorded with the game. */
   voiceApps: string[];
+  /** The first-start setup was finished or skipped. */
+  onboarded: boolean;
 }
 
 export interface FieldError {

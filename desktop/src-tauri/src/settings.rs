@@ -88,6 +88,14 @@ pub struct Settings {
     /// Voice chat apps (as PipeWire names them) recorded on their own track, so a clip can be
     /// shared without friends' voices. Linux only; empty = no separate track.
     pub voice_apps: Vec<String>,
+    /// The first-start setup (shortcut, clip length, folder) was finished or skipped. A settings
+    /// file from before the setup existed counts as done: those users already set Klipt up.
+    #[serde(default = "onboarded_when_missing")]
+    pub onboarded: bool,
+}
+
+fn onboarded_when_missing() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -145,6 +153,7 @@ impl Default for Settings {
             friend_notifications: true,
             copy_link_on_upload: false,
             voice_apps: vec!["discord".into(), "vesktop".into()],
+            onboarded: false,
         }
     }
 }
@@ -429,6 +438,15 @@ mod tests {
         let s = Settings::load(dir.path());
         assert_eq!(s.fps, 30);
         assert_eq!(s.buffer_seconds, 30);
+        // A file from before the first-start setup existed: that user is set up already.
+        assert!(s.onboarded);
+    }
+
+    #[test]
+    fn a_fresh_install_starts_with_the_setup() {
+        assert!(!Settings::default().onboarded);
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!Settings::load(dir.path()).onboarded);
     }
 
     #[test]

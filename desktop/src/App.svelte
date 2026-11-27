@@ -21,6 +21,7 @@
   import Friends from "./views/Friends.svelte";
   import Library from "./views/Library.svelte";
   import Login from "./views/Login.svelte";
+  import Onboarding from "./views/Onboarding.svelte";
   import SettingsView from "./views/Settings.svelte";
   import Profile from "./views/Profile.svelte";
   import { applyLooks } from "./lib/looks";
@@ -321,6 +322,8 @@
       <span class="spinner"></span>
     {/if}
   </div>
+{:else if settings && !settings.onboarded}
+  <Onboarding {settings} {hotkeyStatus} ondone={settingsSaved} />
 {:else if !account}
   <Login initialServer={settings?.serverUrl ?? null} notice={loginNotice} onlogin={loggedIn} />
 {:else}

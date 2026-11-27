@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, errorMessage, nameOf, type ClipView, type Visibility } from "../lib/api";
+  import { toVisibility, VISIBILITY } from "../lib/visibility";
   import { uploadTitle } from "../lib/format";
   import { toast } from "../lib/toasts.svelte";
   import { fraction, isBusy, retryUpload, startUpload, statusLabel, transferLabel, uploads } from "../lib/uploads.svelte";
@@ -13,11 +14,14 @@
   // svelte-ignore state_referenced_locally
   let title = $state(uploadTitle(clip));
   // svelte-ignore state_referenced_locally
-  let visibility = $state<Visibility>(clip.visibility ?? "feed");
+  let visibility = $state<Visibility>(toVisibility(clip.visibility) ?? "friends");
+  /** A clip uploaded before keeps its level; a new upload starts at your profile's setting. */
+  // svelte-ignore state_referenced_locally
+  const hadVisibility = toVisibility(clip.visibility) !== null;
   /** Already online: the new upload can replace the video at its link (a screenshot can't). */
   const replaceable = $derived(!!clip.serverClipId && clip.kind === "clip");
   let replace = $state(true);
-  /** Friends you can tag (everyone on the server but you); null until loaded or if it failed. */
+  /** Friends you can tag; null until loaded or if it failed. */
   let friends = $state<string[] | null>(null);
   /** Display names by username, for the friend chips. */
   let names = $state<Record<string, string>>({});
@@ -34,6 +38,7 @@
     Promise.all([api.listUsers(), api.getAccount()])
       .then(([users, account]) => {
         isAdmin = !!account?.isAdmin;
+        if (!hadVisibility && account) visibility = account.profileVisibility;
         const me = account?.username.toLowerCase();
         names = Object.fromEntries(users.map((u) => [u.username, nameOf(u)]));
         pictures = Object.fromEntries(users.map((u) => [u.username, u.avatarUrl ?? null]));
@@ -118,24 +123,17 @@
       </label>
       <fieldset>
         <legend>Who can see it</legend>
-        <label class="option" class:selected={visibility === "feed"}>
-          <input type="radio" name="visibility" value="feed" bind:group={visibility} />
-          <span class="opt-icon"><Icon name="users" size={18} /></span>
-          <span class="opt-text">
-            <strong>Feed</strong>
-            <small>Your friends see it in the feed.</small>
-          </span>
-          <span class="ring" aria-hidden="true"></span>
-        </label>
-        <label class="option" class:selected={visibility === "link"}>
-          <input type="radio" name="visibility" value="link" bind:group={visibility} />
-          <span class="opt-icon"><Icon name="link" size={18} /></span>
-          <span class="opt-text">
-            <strong>Link only</strong>
-            <small>Only people you send the link to can watch it.</small>
-          </span>
-          <span class="ring" aria-hidden="true"></span>
-        </label>
+        {#each VISIBILITY as v (v.value)}
+          <label class="option" class:selected={visibility === v.value}>
+            <input type="radio" name="visibility" value={v.value} bind:group={visibility} />
+            <span class="opt-icon"><Icon name={v.icon} size={18} /></span>
+            <span class="opt-text">
+              <strong>{v.label}</strong>
+              <small>{v.hint}</small>
+            </span>
+            <span class="ring" aria-hidden="true"></span>
+          </label>
+        {/each}
       </fieldset>
       {#if isAdmin && clip.kind === "clip"}
         <fieldset>

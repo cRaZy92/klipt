@@ -218,6 +218,20 @@
     }
   }
 
+  let savingProfileVisibility = $state(false);
+  async function setProfileVisibility(v: "friends" | "public") {
+    if (v === account.profileVisibility) return;
+    savingProfileVisibility = true;
+    try {
+      onaccount(await api.setProfileVisibility(v));
+      toast(v === "public" ? "Your profile is public" : "Only friends see your profile now", "success");
+    } catch (err) {
+      toast(errorMessage(err), "error");
+    } finally {
+      savingProfileVisibility = false;
+    }
+  }
+
   let pw = $state({ current: "", next: "", again: "" });
   let changingPassword = $state(false);
   let passwordError = $state<string | null>(null);
@@ -987,6 +1001,21 @@
       </dl>
       <div>
         <button class="btn" onclick={onlogout}><Icon name="logout" size={16} /> Log out</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Who sees your profile</h2>
+      <p class="intro muted">Also the default for new uploads. You can still pick per clip; older clips stay as they are.</p>
+      <div class="pick-list" role="radiogroup" aria-label="Who sees your profile">
+        <label class="pick">
+          <input type="radio" name="profile-visibility" checked={account.profileVisibility !== "public"} disabled={savingProfileVisibility} onchange={() => setProfileVisibility("friends")} />
+          <span><strong>Friends</strong><small>Others see only your name, picture and public clips.</small></span>
+        </label>
+        <label class="pick">
+          <input type="radio" name="profile-visibility" checked={account.profileVisibility === "public"} disabled={savingProfileVisibility} onchange={() => setProfileVisibility("public")} />
+          <span><strong>Public</strong><small>Anyone with the link sees your profile and public clips.</small></span>
+        </label>
       </div>
     </section>
 

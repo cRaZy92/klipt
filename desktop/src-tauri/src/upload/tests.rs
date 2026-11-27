@@ -59,7 +59,7 @@ fn req() -> FinalizeRequest {
         title: "Nice".into(),
         game_name: Some("".into()),
         steam_app_id: None,
-        visibility: Visibility::Feed,
+        visibility: Visibility::Friends,
         thumbnail_ms: None,
         tagged: Vec::new(),
         replaces: None,
@@ -109,7 +109,7 @@ async fn happy_path_uploads_in_chunks_then_finalizes() {
         .and(path("/api/clips"))
         .and(header("authorization", "Bearer tok"))
         .and(body_json(serde_json::json!({
-            "uploadId": "up1", "title": "Nice", "gameName": null, "steamAppId": null, "visibility": "feed"
+            "uploadId": "up1", "title": "Nice", "gameName": null, "steamAppId": null, "visibility": "friends"
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(clip_json()))
         .expect(1)
@@ -386,6 +386,7 @@ fn auth_round_trips_and_clears() {
         is_admin: false,
         avatar_url: None,
         looks: None,
+        profile_visibility: None,
     };
     auth::save(dir.path(), &a).unwrap();
     auth::save(dir.path(), &a).unwrap(); // overwrite works
@@ -402,7 +403,7 @@ fn auth_round_trips_and_clears() {
 fn auth_file_is_private() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    let a = Auth { server_url: "u".into(), token: "t".into(), username: "n".into(), display_name: None, is_admin: false, avatar_url: None, looks: None };
+    let a = Auth { server_url: "u".into(), token: "t".into(), username: "n".into(), display_name: None, is_admin: false, avatar_url: None, looks: None, profile_visibility: None };
     auth::save(dir.path(), &a).unwrap();
     let mode = std::fs::metadata(dir.path().join("auth.json")).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
@@ -502,4 +503,13 @@ fn a_clip_from_an_older_server_is_ready_to_share() {
     clip["shareReady"] = serde_json::json!(false);
     let waiting: crate::upload::api::ServerClip = serde_json::from_value(clip).unwrap();
     assert!(!waiting.share_ready);
+}
+
+#[test]
+fn visibility_reads_old_feed_as_friends() {
+    let old: Visibility = serde_json::from_str("\"feed\"").unwrap();
+    assert_eq!(old, Visibility::Friends);
+    assert_eq!(serde_json::to_string(&Visibility::Friends).unwrap(), "\"friends\"");
+    assert_eq!(serde_json::from_str::<Visibility>("\"public\"").unwrap(), Visibility::Public);
+    assert_eq!(Visibility::Friends.as_str(), "friends");
 }

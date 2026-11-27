@@ -30,6 +30,9 @@ pub struct Auth {
     /// Equipped looks (accent, theme, frame, banner) as the server last sent them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub looks: Option<serde_json::Value>,
+    /// "friends" or "public" as the server last sent it; None from older servers (= friends).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_visibility: Option<String>,
 }
 
 /// Never prints the token, so a stray `{:?}` can't leak it into logs.
@@ -89,6 +92,7 @@ mod tests {
             is_admin: false,
             avatar_url: None,
             looks: None,
+            profile_visibility: None,
         };
         let shown = format!("{a:?}");
         assert!(!shown.contains("secret-token") && shown.contains("<redacted>"), "{shown}");

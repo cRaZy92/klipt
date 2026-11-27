@@ -358,6 +358,13 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
     const body = parsed.data;
     const user = req.user!;
+    // Apps from before Friends/Public send 'feed' or 'link' and can only read those two back.
+    const sent = (req.body as { visibility?: unknown }).visibility;
+    const legacy = sent === 'feed' || sent === 'link';
+    const answer = (item: ClipWithOwner): Clip => {
+      const clip = toClip(item, config.baseUrl);
+      return legacy && clip.visibility !== 'link' ? { ...clip, visibility: 'feed' as Visibility } : clip;
+    };
     const highQuality = body.quality === 'high';
     if (highQuality && !user.isAdmin) {
       return reply.code(403).send({ error: 'forbidden', message: 'Only admins can upload in high quality.' });
@@ -386,7 +393,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       if (!found) return reply.code(404).send({ error: 'not_found' });
       // The request that made it may have stopped before its albums (adding twice changes nothing).
       await addToAlbums(clipId);
-      return reply.code(200).send(toClip(found, config.baseUrl));
+      return reply.code(200).send(answer(found));
     };
 
     const owned = await ownedUpload();
@@ -570,7 +577,7 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     await touch(app, [user.id, ...(tagIds ?? [])]);
     const created = await getClip(db, row.id, user.id);
     if (target && created) {
-      return reply.code(200).send(toClip(created, config.baseUrl));
+      return reply.code(200).send(answer(created));
     }
     const item = created ?? {
       clip: row,
@@ -580,6 +587,6 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
       taggedNames: [],
       favorite: false,
     };
-    return reply.code(201).send(toClip(item, config.baseUrl));
+    return reply.code(201).send(answer(item));
   });
 }

@@ -410,6 +410,8 @@ pub struct Account {
     pub avatar_url: Option<String>,
     /// Equipped looks (`{accent, theme, frame, banner}`); None before the server sent any.
     pub looks: Option<serde_json::Value>,
+    /// Who sees the profile in full ("friends" or "public"); the default for new uploads.
+    pub profile_visibility: String,
 }
 
 impl Account {
@@ -422,6 +424,7 @@ impl Account {
             is_admin: a.is_admin,
             avatar_url: a.avatar_url.clone(),
             looks: a.looks.clone(),
+            profile_visibility: a.profile_visibility.clone().unwrap_or_else(|| "friends".into()),
         }
     }
 }
@@ -461,9 +464,9 @@ pub async fn login(app: AppHandle, server_url: String, username: String, passwor
     let base = normalize_server_url(&server_url)?;
     let client = ApiClient::new(&base).map_err(|_| AppError::InvalidServerAddress)?;
     let session = client.login(username.trim(), &password, &device_name()).await.map_err(login_error)?;
-    let Me { username, custom_name, is_admin, avatar_url, looks, .. } = session.me;
+    let Me { username, custom_name, is_admin, avatar_url, looks, profile_visibility, .. } = session.me;
     let state = app.state::<AppState>();
-    let saved = Auth { server_url: base.clone(), token: session.token, username, display_name: custom_name, is_admin, avatar_url, looks };
+    let saved = Auth { server_url: base.clone(), token: session.token, username, display_name: custom_name, is_admin, avatar_url, looks, profile_visibility };
     auth::save(&state.data_dir, &saved)?;
     crate::account::report_device(&app, &saved);
     // Activity saved while logged out, or the first report from this account.
@@ -1036,10 +1039,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
         server_clip.share_url = wait_for_share_link(&client, token, &server_clip).await;
     }
     let replaced = job.replaces.as_deref() == Some(server_clip.id.as_str());
-    let visibility = match server_clip.visibility {
-        Visibility::Feed => "feed",
-        Visibility::Link => "link",
-    };
+    let visibility = server_clip.visibility.as_str();
     {
         let state = app.state::<AppState>();
         let library = lock(&state.library);
@@ -1792,6 +1792,14 @@ mod tests {
     }
 
     #[test]
+    fn account_profile_visibility_defaults_to_friends() {
+        let saved: Auth = serde_json::from_str(r#"{"serverUrl":"https://a.com","token":"t","username":"adam"}"#).unwrap();
+        assert_eq!(Account::from_auth(&saved).profile_visibility, "friends");
+        let public = Auth { profile_visibility: Some("public".into()), ..saved };
+        assert_eq!(Account::from_auth(&public).profile_visibility, "public");
+    }
+
+    #[test]
     fn device_name_is_never_empty() {
         assert!(!device_name().trim().is_empty());
     }
@@ -1799,7 +1807,7 @@ mod tests {
     #[test]
     fn a_dead_token_clears_only_its_own_login() {
         let dir = tempfile::tempdir().unwrap();
-        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into(), display_name: None, is_admin: false, avatar_url: None, looks: None };
+        let login = |token: &str| Auth { server_url: "https://a.com".into(), token: token.into(), username: "adam".into(), display_name: None, is_admin: false, avatar_url: None, looks: None, profile_visibility: None };
         assert!(!clear_auth_if_current(dir.path(), "old").unwrap(), "nothing saved: nothing to clear");
 
         // The user already logged in again: an old upload's 401 leaves the new login alone.

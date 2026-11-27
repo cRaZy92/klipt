@@ -4,7 +4,8 @@
   import { pickThumbnailImage } from "../lib/thumbnailImage";
   import { checkFolder, importing } from "../lib/imports.svelte";
   import ImportPanel from "../components/ImportPanel.svelte";
-  import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort } from "../lib/api";
+  import { api, errorMessage, fileUrl, on, type ClipView, type MyUpload, type Sort, type Visibility } from "../lib/api";
+  import { nextVisibilityToast, toVisibility, VISIBILITY } from "../lib/visibility";
   import { bufferLabel, groupByDay, uploadTitle } from "../lib/format";
   import { recordingLabel } from "../lib/elapsed";
   import type { RemoveWhere } from "../lib/removal";
@@ -71,7 +72,7 @@
     online: MyUpload[];
   } | null>(null);
   let deleting = $state(false);
-  let bulkUpload = $state<{ clips: ClipView[]; visibility: "feed" | "link"; albums: string[] } | null>(null);
+  let bulkUpload = $state<{ clips: ClipView[]; visibility: Visibility; albums: string[] } | null>(null);
   /** Joining the selected clips into one new clip. */
   let combining = $state<ClipView[] | null>(null);
   /** "Add to album": the server clips going in, and how many picked ones aren't uploaded. */
@@ -484,12 +485,9 @@
 
 
 
-  async function toggleVisibility(upload: MyUpload) {
-    const visibility = upload.visibility === "feed" ? "link" : "feed";
-    await act(
-      async () => replaceUpload(await api.updateUpload(upload.id, { visibility })),
-      visibility === "feed" ? "Now in the feed." : "Now link-only.",
-    );
+  async function setVisibility(upload: MyUpload, visibility: Visibility) {
+    if (upload.visibility === visibility) return;
+    await act(async () => replaceUpload(await api.updateUpload(upload.id, { visibility })), nextVisibilityToast(visibility));
   }
 
   /** "Change thumbnail…" on an online clip: a picture you pick becomes its thumbnail. */
@@ -498,16 +496,15 @@
     if (path) await act(async () => replaceUpload(await api.setUploadThumbnail(upload, path)), "Thumbnail changed.");
   }
 
-  /** An uploaded clip on this PC: into the feed or link-only, same upload and link. */
-  async function toggleLocalVisibility(clip: ClipView) {
+  /** An uploaded clip on this PC: Link only, Friends or Public, same upload and link. */
+  async function setLocalVisibility(clip: ClipView, visibility: Visibility) {
     const id = clip.serverClipId;
-    if (!id) return;
-    const visibility = clip.visibility === "link" ? "feed" : "link";
+    if (!id || toVisibility(clip.visibility) === visibility) return;
     await act(async () => {
       replaceUpload(await api.updateUpload(id, { visibility }));
       // The server's answer is copied into the clip on this PC: show it.
       await loadLocal();
-    }, visibility === "feed" ? "Now in the feed." : "Now link-only.");
+    }, nextVisibilityToast(visibility));
   }
 
   async function download(upload: MyUpload) {
@@ -714,7 +711,7 @@
                   thumbVersion={thumbVersion[clip.id] ?? clip.thumbnailMs ?? 0}
                   onshowfolder={() => act(() => api.showInFolder(clip.id))}
                   oncopy={() => copyLink(clip)}
-                  onvisibility={clip.serverClipId ? () => toggleLocalVisibility(clip) : undefined}
+                  onvisibility={clip.serverClipId ? (v) => setLocalVisibility(clip, v) : undefined}
                   onalbum={clip.serverClipId ? () => (albuming = { ids: [clip.serverClipId!], skipped: 0 }) : undefined}
                 />
               {:else}
@@ -728,7 +725,7 @@
                   oncopy={() => act(() => api.copyText(upload.shareUrl), "Link copied!")}
                   onopenweb={() => act(() => api.openWebsite(upload.shareUrl))}
                   onrename={() => (renaming = { kind: "online", id: upload.id, value: upload.title })}
-                  onvisibility={() => toggleVisibility(upload)}
+                  onvisibility={(v) => setVisibility(upload, v)}
                   ondownload={() => download(upload)}
                   ondelete={() => (deletingOnline = upload)}
                   onfavorite={upload.favorite === undefined ? undefined : () => toggleOnlineFavorite(upload)}
@@ -778,7 +775,11 @@
         class="btn btn-sm btn-ghost"
         disabled={uploadable.length === 0}
         title={uploadable.length === 0 ? "Nothing here left to upload" : undefined}
-        onclick={() => (bulkUpload = { clips: uploadable, visibility: "feed", albums: [] })}
+        onclick={async () => {
+          // Your profile setting is the default, as in the single upload.
+          const account = await api.getAccount().catch(() => null);
+          bulkUpload = { clips: uploadable, visibility: account?.profileVisibility ?? "friends", albums: [] };
+        }}
       >
         <Icon name="upload" size={15} /> Upload{uploadable.length > 0 && uploadable.length < selected.size
           ? ` ${uploadable.length}`
@@ -824,14 +825,12 @@
       “Copy link” on a card when it's done.
     </p>
     <div class="pick-list" role="radiogroup" aria-label="Who can see them">
-      <label class="pick">
-        <input type="radio" bind:group={bulkUpload.visibility} value="feed" />
-        <span><strong>Feed</strong><small>Your friends see them in the feed.</small></span>
-      </label>
-      <label class="pick">
-        <input type="radio" bind:group={bulkUpload.visibility} value="link" />
-        <span><strong>Link only</strong><small>Only people you send a link to can watch them.</small></span>
-      </label>
+      {#each VISIBILITY as v (v.value)}
+        <label class="pick">
+          <input type="radio" bind:group={bulkUpload.visibility} value={v.value} />
+          <span><strong>{v.label}</strong><small>{v.hint}</small></span>
+        </label>
+      {/each}
     </div>
     <div class="bulk-albums">
       <AlbumPicker bind:selected={bulkUpload.albums} count={b.clips.length} />

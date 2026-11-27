@@ -442,7 +442,7 @@ impl ServerClipInfo {
             share_url: s("shareUrl")?,
             screenshot: s("kind").as_deref() == Some("screenshot"),
             video_url: s("videoUrl")?,
-            visibility: s("visibility").unwrap_or_else(|| "feed".into()),
+            visibility: s("visibility").unwrap_or_else(|| "friends".into()),
         })
     }
 }

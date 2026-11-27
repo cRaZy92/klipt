@@ -73,6 +73,9 @@ fn save_name(app: &AppHandle, auth: &Auth, me: &serde_json::Value) -> Result<Acc
     if let Some(looks) = me.get("looks").filter(|l| l.is_object()) {
         next.looks = Some(looks.clone());
     }
+    if let Some(v) = me.get("profileVisibility").and_then(|v| v.as_str()) {
+        next.profile_visibility = Some(v.to_string());
+    }
     if next != current {
         auth::save(&data_dir, &next)?;
         current = next;
@@ -137,6 +140,21 @@ pub async fn refresh_account(app: AppHandle) -> Result<Option<Account>> {
 pub async fn update_profile(app: AppHandle, display_name: String) -> Result<Account> {
     let (auth, client) = saved(&app)?;
     let body = serde_json::json!({ "displayName": display_name.trim() });
+    let me = client.patch_json(&auth.token, "/api/me", &body).await.map_err(api_error).inspect_err(|e| {
+        forget_if_unauthorized(&app, &auth, e);
+    })?;
+    let app2 = app.clone();
+    off_main(move || save_name(&app2, &auth, &me)).await?
+}
+
+/// Who sees the profile in full: "friends" or "public" (also the default for new uploads).
+#[tauri::command]
+pub async fn set_profile_visibility(app: AppHandle, visibility: String) -> Result<Account> {
+    if visibility != "friends" && visibility != "public" {
+        return Err(AppError::Io(std::io::Error::other("visibility must be friends or public")));
+    }
+    let (auth, client) = saved(&app)?;
+    let body = serde_json::json!({ "profileVisibility": visibility });
     let me = client.patch_json(&auth.token, "/api/me", &body).await.map_err(api_error).inspect_err(|e| {
         forget_if_unauthorized(&app, &auth, e);
     })?;

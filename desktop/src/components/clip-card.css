@@ -506,3 +506,6 @@
 .clip-card.selected .thumb img {
   opacity: 0.8;
 }
+
+/* A Public clip's label: just a label, nothing to click. */
+.clip-card .link-only.public { display: inline-flex; align-items: center; gap: 4px; cursor: default; }

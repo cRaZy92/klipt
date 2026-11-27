@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount } from "../lib/api";
+  import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount, type Visibility } from "../lib/api";
+  import { nextVisibilityToast, toVisibility, VISIBILITY } from "../lib/visibility";
   import type { RemoveWhere } from "../lib/removal";
   import { AudioEngine, FINE_PEAK_BUCKETS } from "../lib/audioEngine";
   import { followView, fullView, inView, peakWindow, viewScale, zoomView, type TimeView } from "../lib/timelineView";
@@ -1319,16 +1320,15 @@
     }
   }
 
-  /** The clip is uploaded: into the feed or link-only, in place (same upload and link). */
-  async function toggleVisibility() {
+  /** The clip is uploaded: Link only, Friends or Public, in place (same upload and link). */
+  async function setVisibility(visibility: Visibility) {
     moreOpen = false;
     const id = data?.clip.serverClipId;
-    if (!id || !data) return;
-    const visibility = data.clip.visibility === "link" ? "feed" : "link";
+    if (!id || !data || toVisibility(data.clip.visibility) === visibility) return;
     try {
       await api.updateUpload(id, { visibility });
       if (data) data.clip = { ...data.clip, visibility };
-      toast(visibility === "feed" ? "Now in the feed." : "Now link-only.", "success");
+      toast(nextVisibilityToast(visibility), "success");
     } catch (e) {
       toast(errorMessage(e), "error");
     }
@@ -1503,10 +1503,13 @@
         {#if moreOpen}
           <div class="menu" role="menu" use:menu={{ close: () => (moreOpen = false) }}>
             {#if data?.clip.serverClipId}
-              <button role="menuitem" onclick={toggleVisibility} disabled={uploading}>
-                <Icon name="eye" size={16} />
-                {data.clip.visibility === "link" ? "Show in feed" : "Hide from feed"}
-              </button>
+              {#each VISIBILITY as v (v.value)}
+                <button role="menuitemradio" aria-checked={toVisibility(data.clip.visibility) === v.value} onclick={() => setVisibility(v.value)} disabled={uploading}>
+                  <Icon name={v.icon} size={16} />
+                  {v.label}{#if toVisibility(data.clip.visibility) === v.value} <Icon name="check" size={14} />{/if}
+                </button>
+              {/each}
+              <hr />
             {/if}
             {#if data && data.clip.kind !== "screenshot"}
               <button role="menuitem" onclick={pickThumbImage} disabled={uploading}>

@@ -127,7 +127,12 @@ describe('upload visibility', () => {
       return res.json().visibility as string;
     };
     expect(await finalize({})).toBe('public');
-    expect(await finalize({ visibility: 'feed' })).toBe('friends');
     expect(await finalize({ visibility: 'link' })).toBe('link');
+    expect(await finalize({ visibility: 'friends' })).toBe('friends');
+    // Older apps only understand feed/link in this answer: they get 'feed' back, the clip is Friends.
+    expect(await finalize({ visibility: 'feed' })).toBe('feed');
+    const rows = await t.db.select({ v: clips.visibility }).from(clips).where(eq(clips.userId, id.pub!));
+    expect(rows.map((r) => r.v)).not.toContain('feed');
+    expect(rows.filter((r) => r.v === 'friends')).toHaveLength(3);
   });
 });

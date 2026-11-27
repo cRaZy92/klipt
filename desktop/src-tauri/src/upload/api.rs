@@ -32,6 +32,9 @@ pub struct Me {
     /// Equipped accent, theme, frame and banner, as the server sent them.
     #[serde(default)]
     pub looks: Option<serde_json::Value>,
+    /// "friends" or "public"; missing from older servers.
+    #[serde(default)]
+    pub profile_visibility: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Deserialize)]
@@ -46,11 +49,34 @@ impl std::fmt::Debug for Session {
     }
 }
 
+/// Where a clip is listed (its link works for anyone in all three). Older servers, and uploads
+/// queued by older versions of this app, say "feed" for what is now Friends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Visibility {
-    Feed,
     Link,
+    #[serde(alias = "feed")]
+    Friends,
+    Public,
+}
+
+impl Visibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Visibility::Link => "link",
+            Visibility::Friends => "friends",
+            Visibility::Public => "public",
+        }
+    }
+
+    /// A value as stored in the library ("feed" from older versions is Friends); unknown is Link.
+    pub fn parse(s: &str) -> Visibility {
+        match s {
+            "feed" | "friends" => Visibility::Friends,
+            "public" => Visibility::Public,
+            _ => Visibility::Link,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

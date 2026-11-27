@@ -6,7 +6,8 @@ import type { EditorProgress } from "./progress";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-export type Visibility = "feed" | "link";
+/** Where a clip is listed; its link works for anyone in all three. */
+export type Visibility = "link" | "friends" | "public";
 
 /** An upload started but not finished; it carries on after a restart. */
 export interface PendingUpload {
@@ -245,6 +246,8 @@ export interface Account {
   avatarUrl: string | null;
   /** Equipped accent, theme, frame and banner; null before the server sent any. */
   looks: Looks | null;
+  /** Who sees your profile in full; the default for new uploads. */
+  profileVisibility: "friends" | "public";
 }
 
 /** A line of what a problem report says about this PC. */
@@ -578,6 +581,7 @@ export const api = {
   refreshAccount: () => invoke<Account | null>("refresh_account"),
   /** Sets the name friends see; empty clears it. */
   updateProfile: (displayName: string) => invoke<Account>("update_profile", { displayName }),
+  setProfileVisibility: (visibility: "friends" | "public") => invoke<Account>("set_profile_visibility", { visibility }),
   /** Signs out your other devices. */
   changePassword: (currentPassword: string, newPassword: string) =>
     invoke<void>("change_password", { currentPassword, newPassword }),

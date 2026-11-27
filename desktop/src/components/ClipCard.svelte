@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { api, fileUrl, type ClipView } from "../lib/api";
+  import { api, fileUrl, type ClipView, type Visibility } from "../lib/api";
+  import { toVisibility, VISIBILITY } from "../lib/visibility";
   import { editedLength } from "../lib/cuts";
   import { WHERE } from "../lib/myClips";
   import { formatDuration, hueOf, relativeDate } from "../lib/format";
@@ -44,8 +45,8 @@
     onremove: () => void;
     onshowfolder: () => void;
     oncopy: () => void;
-    /** Uploaded: shows the upload in the feed or makes it link-only, in place (same link). */
-    onvisibility?: () => void;
+    /** Uploaded: changes who finds the upload (Link only / Friends / Public), in place (same link). */
+    onvisibility?: (v: Visibility) => void;
     /** Stars or unstars the clip; without it there's no star. */
     onfavorite?: () => void;
     /** Uploaded: "Add to album". */
@@ -149,6 +150,7 @@
     menuOpen = false;
     action();
   }
+  const pickVisibility = (v: Visibility) => pick(() => onvisibility?.(v));
 </script>
 
 <svelte:window onclick={closeMenuOutside} oncontextmenu={closeMenuOutside} />
@@ -158,10 +160,10 @@
     class="link-only"
     onclick={(e) => {
       e.stopPropagation();
-      onvisibility?.();
+      onvisibility?.("friends");
     }}
     disabled={busy || !onvisibility}
-    title="Only people with the link can see it. Click to show it in the feed"
+    title="Only people with the link can see it. Click to show it to your friends"
   >
     Link only
   </button>
@@ -231,6 +233,8 @@
     {/if}
     {#if uploaded && clip.visibility === "link" && !clip.fileMissing}
       {@render linkOnly()}
+    {:else if uploaded && clip.visibility === "public" && !clip.fileMissing}
+      <span class="link-only public" title="Public: anyone can find it on your profile"><Icon name="globe" size={12} /> Public</span>
     {/if}
     <ProcessingPill state={processing} />
     {#if clip.kind === "screenshot"}
@@ -340,10 +344,14 @@
               <Icon name="folder" size={16} /> Show in folder
             </button>
             {#if uploaded && onvisibility}
-              <button role="menuitem" onclick={() => pick(onvisibility)} disabled={busy}>
-                <Icon name="eye" size={16} />
-                {clip.visibility === "link" ? "Show in feed" : "Hide from feed"}
+              <hr />
+              {#each VISIBILITY as v (v.value)}
+              <button role="menuitemradio" aria-checked={toVisibility(clip.visibility) === v.value} onclick={() => pickVisibility(v.value)} disabled={busy}>
+                <Icon name={v.icon} size={16} />
+                {v.label}{#if toVisibility(clip.visibility) === v.value} <Icon name="check" size={14} />{/if}
               </button>
+            {/each}
+              <hr />
             {/if}
             {#if uploaded && onalbum}
               <button role="menuitem" onclick={() => pick(onalbum)}><Icon name="album" size={16} /> Add to album</button>

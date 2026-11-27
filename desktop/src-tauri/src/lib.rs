@@ -203,6 +203,7 @@ pub fn run() {
             update::pending_update,
             account::refresh_account,
             account::update_profile,
+            account::set_profile_visibility,
             account::change_password,
             account::system_info,
             account::send_feedback,

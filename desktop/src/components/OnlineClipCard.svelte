@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { MyUpload } from "../lib/api";
+  import type { MyUpload, Visibility } from "../lib/api";
+  import { VISIBILITY } from "../lib/visibility";
   import { menu } from "../lib/a11y";
   import { formatDuration, hueOf, relativeDate, viewsLabel } from "../lib/format";
   import Icon from "./Icon.svelte";
@@ -36,7 +37,8 @@
     oncopy: () => void;
     onopenweb: () => void;
     onrename: () => void;
-    onvisibility: () => void;
+    /** Changes who finds it (Link only / Friends / Public), in place (same link). */
+    onvisibility: (v: Visibility) => void;
     ondownload: () => void;
     ondelete: () => void;
     /** Stars it on the server; missing for servers without favorites. */
@@ -79,6 +81,7 @@
     menuOpen = false;
     action();
   }
+  const pickVisibility = (v: Visibility) => pick(() => onvisibility(v));
 </script>
 
 <svelte:window onclick={closeMenuOutside} oncontextmenu={closeMenuOutside} />
@@ -115,12 +118,14 @@
         class="link-only"
         onclick={(e) => {
           e.stopPropagation();
-          onvisibility();
+          onvisibility("friends");
         }}
-        title="Only people with the link can see it. Click to show it in the feed"
+        title="Only people with the link can see it. Click to show it to your friends"
       >
         Link only
       </button>
+    {:else if upload.visibility === "public"}
+      <span class="link-only public" title="Public: anyone can find it on your profile"><Icon name="globe" size={12} /> Public</span>
     {/if}
     <ProcessingPill state={upload.processing} />
     {#if onfavorite}
@@ -195,10 +200,14 @@
           {#if onthumbnail}
             <button role="menuitem" onclick={() => pick(onthumbnail)}><Icon name="image" size={16} /> Change thumbnail…</button>
           {/if}
-          <button role="menuitem" onclick={() => pick(onvisibility)}>
-            <Icon name="eye" size={16} />
-            {upload.visibility === "feed" ? "Hide from feed" : "Show in feed"}
-          </button>
+          <hr />
+          {#each VISIBILITY as v (v.value)}
+            <button role="menuitemradio" aria-checked={upload.visibility === v.value} onclick={() => pickVisibility(v.value)}>
+              <Icon name={v.icon} size={16} />
+              {v.label}{#if upload.visibility === v.value} <Icon name="check" size={14} />{/if}
+            </button>
+          {/each}
+          <hr />
           <button role="menuitem" onclick={() => pick(ondownload)} disabled={downloading}>
             <Icon name="download" size={16} /> Download to this PC
           </button>

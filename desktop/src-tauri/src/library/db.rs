@@ -110,6 +110,10 @@ const MIGRATIONS: &[&str] = &["
     -- 'combine', 'part' or 'download': made from other clips or fetched from the server, not
     -- recorded here. NULL for recorded and imported clips. Counts for achievements.
     ALTER TABLE clips ADD COLUMN origin TEXT NULL;
+", "
+    -- The server's 'feed' is called 'friends' now (beside 'link' and 'public').
+    UPDATE clips SET visibility = 'friends' WHERE visibility = 'feed';
+    UPDATE pending_uploads SET visibility = 'friends' WHERE visibility = 'feed';
 "];
 
 /// Queries that select more after these read them from index 34 on.
@@ -574,10 +578,7 @@ impl Library {
 
     /// Remembers an upload until it finishes. A retry updates its settings but keeps its place.
     pub fn add_pending_upload(&self, p: &PendingUpload) -> Result<()> {
-        let visibility = match p.visibility {
-            crate::upload::Visibility::Feed => "feed",
-            crate::upload::Visibility::Link => "link",
-        };
+        let visibility = p.visibility.as_str();
         self.conn.execute(
             "INSERT INTO pending_uploads (clip_id, title, visibility, tagged, replace, queued_at, high_quality, albums)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -623,7 +624,7 @@ impl Library {
         let mut out = Vec::new();
         for row in rows {
             let ((clip_id, title, visibility, tagged), (replace, queued_at_ms, high_quality, albums)) = row?;
-            let visibility = if visibility == "feed" { crate::upload::Visibility::Feed } else { crate::upload::Visibility::Link };
+            let visibility = crate::upload::Visibility::parse(&visibility);
             let tagged = serde_json::from_str(&tagged).unwrap_or_default();
             let albums = serde_json::from_str(&albums).unwrap_or_default();
             out.push(PendingUpload { clip_id, title, visibility, tagged, replace, queued_at_ms, high_quality, albums });
@@ -974,14 +975,14 @@ mod tests {
             title: Some("Website".into()),
             game: Some((Some("Deadlock".into()), Some(1_422_450))),
             favorite: Some(true),
-            visibility: Some("feed".into()),
+            visibility: Some("friends".into()),
         };
         assert!(f.lib.apply_server("srv-1", &server).unwrap());
         let got = f.lib.get(&c.id).unwrap();
         assert_eq!(got.title, "Mine");
         assert_eq!(got.game_name.as_deref(), Some("Deadlock"));
         assert!(got.favorite);
-        assert_eq!(got.visibility.as_deref(), Some("feed"));
+        assert_eq!(got.visibility.as_deref(), Some("friends"));
         assert!(!f.lib.apply_server("srv-1", &server).unwrap());
 
         let pending = f.lib.pending_syncs().unwrap();
@@ -1075,7 +1076,7 @@ mod tests {
         let got = f.lib.get(&c.id).unwrap();
         assert_eq!(got.upload_id.as_deref(), Some("https://s/api/uploads/u1"));
         assert_eq!(got.upload_offset, Some(8_388_608));
-        f.lib.mark_uploaded(&c.id, "srv-1", "https://clips.example.com/c/abc", "feed").unwrap();
+        f.lib.mark_uploaded(&c.id, "srv-1", "https://clips.example.com/c/abc", "friends").unwrap();
 
         let got = f.lib.get(&c.id).unwrap();
         assert_eq!((got.trim_start_ms, got.trim_end_ms), (Some(1_500), Some(20_000)));
@@ -1084,7 +1085,7 @@ mod tests {
         assert_eq!(got.title, "Nice shot");
         assert_eq!(got.server_clip_id.as_deref(), Some("srv-1"));
         assert_eq!(got.share_url.as_deref(), Some("https://clips.example.com/c/abc"));
-        assert_eq!(got.visibility.as_deref(), Some("feed"));
+        assert_eq!(got.visibility.as_deref(), Some("friends"));
         assert_eq!((got.upload_id, got.upload_offset), (None, None));
 
         f.lib.set_game(&c.id, None, None).unwrap();
@@ -1097,7 +1098,7 @@ mod tests {
         let a = f.add("a.mp4", 1, None);
         let b = f.add("b.mp4", 2, None);
         f.add("c.mp4", 3, None);
-        f.lib.mark_uploaded(&a.id, "srv-a", "https://s/c/a", "feed").unwrap();
+        f.lib.mark_uploaded(&a.id, "srv-a", "https://s/c/a", "friends").unwrap();
         f.lib.mark_uploaded(&b.id, "srv-b", "https://s/c/b", "link").unwrap();
         let mut ids = f.lib.server_clip_ids().unwrap();
         ids.sort();
@@ -1293,7 +1294,7 @@ mod tests {
             f.lib.update_edit("nope", Trim::default(), &Volumes::default()),
             Err(AppError::ClipNotFound(_))
         ));
-        assert!(matches!(f.lib.mark_uploaded("nope", "a", "b", "feed"), Err(AppError::ClipNotFound(_))));
+        assert!(matches!(f.lib.mark_uploaded("nope", "a", "b", "friends"), Err(AppError::ClipNotFound(_))));
     }
 
     #[test]
@@ -1328,6 +1329,34 @@ mod tests {
     }
 
     #[test]
+    fn old_feed_clips_and_queued_uploads_become_friends() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let before = MIGRATIONS.len() - 1;
+        {
+            let conn = Connection::open(&path).unwrap();
+            for m in &MIGRATIONS[..before] {
+                conn.execute_batch(m).unwrap();
+            }
+            conn.pragma_update(None, "user_version", before).unwrap();
+            conn.execute(
+                "INSERT INTO clips (id, path, created_at, duration_ms, width, height, has_mic, title, visibility)
+                 VALUES ('old', '/x.mp4', 1, 1000, 1920, 1080, 0, 'Old', 'feed')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO pending_uploads (clip_id, title, visibility, tagged, replace, queued_at) VALUES ('old', 'Old', 'feed', '[]', 0, 1)",
+                [],
+            )
+            .unwrap();
+        }
+        let lib = Library::open(&path).unwrap();
+        assert_eq!(lib.get("old").unwrap().visibility.as_deref(), Some("friends"));
+        assert_eq!(lib.pending_uploads().unwrap()[0].visibility, crate::upload::Visibility::Friends);
+    }
+
+    #[test]
     fn an_old_library_gains_the_favorite_column() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("library.db");
@@ -1355,7 +1384,7 @@ mod tests {
         let fav = f.add("fav.mp4", 100, None);
         f.lib.set_favorite(&fav.id, true).unwrap();
         let up = f.add("up.mp4", 100, None);
-        f.lib.mark_uploaded(&up.id, "srv", "https://k/c/srv", "feed").unwrap();
+        f.lib.mark_uploaded(&up.id, "srv", "https://k/c/srv", "friends").unwrap();
         let paused = f.add("paused.mp4", 100, None);
         f.lib.set_upload_progress(&paused.id, Some(("tus-1", 10))).unwrap();
         let imported = f.add("imported.mp4", 100, None);

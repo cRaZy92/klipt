@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openProfile, userHover } from "../lib/profiles.svelte";
   import { api, errorCode, errorMessage, nameOf, type FriendList, type Person, type Referral } from "../lib/api";
   import { toast } from "../lib/toasts.svelte";
   import Avatar from "../components/Avatar.svelte";
@@ -114,11 +115,13 @@
 
 {#snippet person(p: Person, actions: import("svelte").Snippet)}
   <li class="person">
-    <Avatar name={nameOf(p)} url={p.avatarUrl ?? null} frame={p.frame ?? null} size={36} />
-    <span class="who">
-      <strong>{nameOf(p)}</strong>
-      {#if nameOf(p) !== p.username}<small class="muted">@{p.username}</small>{/if}
-    </span>
+    <button class="who" use:userHover={p.username} onclick={() => openProfile(p.username)} title="Open profile">
+      <Avatar name={nameOf(p)} url={p.avatarUrl ?? null} frame={p.frame ?? null} size={36} />
+      <span class="names">
+        <strong>{nameOf(p)}</strong>
+        {#if nameOf(p) !== p.username}<small class="muted">@{p.username}</small>{/if}
+      </span>
+    </button>
     <span class="actions">{@render actions()}</span>
   </li>
 {/snippet}
@@ -238,9 +241,32 @@
   }
   .who {
     display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    padding: 4px 8px 4px 4px;
+    margin: -4px 0 -4px -4px;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .who:hover {
+    background: var(--surface-2);
+  }
+  .who:hover strong {
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-underline-offset: 3px;
+  }
+  .names {
+    display: flex;
     flex-direction: column;
     min-width: 0;
-    flex: 1;
   }
   .actions {
     display: flex;

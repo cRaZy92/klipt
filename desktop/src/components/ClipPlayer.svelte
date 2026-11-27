@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openProfile, userHover } from "../lib/profiles.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { api, errorMessage, nameOf, type FeedClip } from "../lib/api";
   import { navKey } from "../lib/clipNav";
@@ -239,11 +240,13 @@
   <div class="player" class:fullscreen role="dialog" aria-modal="true" aria-label={clip.title}>
     {#if !fullscreen}
       <div class="player-head">
-        <Avatar name={nameOf(clip.owner)} url={clip.owner.avatarUrl} frame={clip.owner.frame} size={38} />
+        <button class="avatar-link" tabindex="-1" aria-hidden="true" use:userHover={clip.owner.username} onclick={() => openProfile(clip.owner.username)}>
+          <Avatar name={nameOf(clip.owner)} url={clip.owner.avatarUrl} frame={clip.owner.frame} size={38} />
+        </button>
         <div class="text">
           <div class="title">{clip.title}</div>
           <div class="meta">
-            <span class="who">{nameOf(clip.owner)}</span>
+            <button class="who who-link" use:userHover={clip.owner.username} onclick={() => openProfile(clip.owner.username)}>{nameOf(clip.owner)}</button>
             {#if clip.gameName}
               <span aria-hidden="true">·</span>
               <span class="game"><span class="game-dot" style:--hue={hueOf(clip.gameName)}></span>{clip.gameName}</span>
@@ -256,7 +259,11 @@
             {/if}
           </div>
           {#if clip.tagged?.length}
-            <div class="seen-by">With {clip.tagged.map((u, i) => clip.taggedNames?.[i] ?? u).join(", ")}</div>
+            <div class="seen-by">
+              With
+              {#each clip.tagged as u, i (u)}{#if i > 0},{/if}
+                <button class="who-link tagged" use:userHover={u} onclick={() => openProfile(u)}>{clip.taggedNames?.[i] ?? u}</button>{/each}
+            </div>
           {/if}
           {#if viewers}
             <div class="seen-by">{viewers.length > 0 ? `Seen by ${viewers.join(", ")}` : "No friends have watched it yet."}</div>
@@ -656,5 +663,32 @@
   .menu button:hover {
     background: var(--surface-3);
     color: var(--text);
+  }
+  .avatar-link {
+    display: grid;
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    cursor: pointer;
+  }
+  .who-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .who-link.who {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .who-link:hover,
+  .who-link:focus-visible {
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-underline-offset: 3px;
   }
 </style>

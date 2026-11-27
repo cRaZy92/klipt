@@ -1952,8 +1952,9 @@ pub async fn feed_clips(
     with_me: Option<bool>,
     kind: Option<String>,
     favorites: Option<bool>,
+    username: Option<String>,
 ) -> Result<serde_json::Value> {
-    let mut query = vec![("scope", "feed".to_string())];
+    let mut query = scope_query(username)?;
     if favorites == Some(true) {
         query.push(("favorites", "1".to_string()));
     }
@@ -1969,10 +1970,21 @@ pub async fn feed_clips(
     Ok(page)
 }
 
-/// The feed's games with clip counts: the server's `GameCount[]`.
+/// The feed, or (with `username`) one person's profile.
+fn scope_query(username: Option<String>) -> Result<Vec<(&'static str, String)>> {
+    match username.filter(|u| !u.is_empty()) {
+        None => Ok(vec![("scope", "feed".to_string())]),
+        Some(name) => {
+            let name = crate::friends::checked_username(&name)?.to_string();
+            Ok(vec![("scope", "user".to_string()), ("username", name)])
+        }
+    }
+}
+
+/// The feed's (or, with `username`, that person's) games with clip counts: the server's `GameCount[]`.
 #[tauri::command]
-pub async fn feed_games(app: AppHandle) -> Result<serde_json::Value> {
-    Ok(server_get(&app, "/api/games", vec![("scope", "feed".to_string())]).await?.0)
+pub async fn feed_games(app: AppHandle, username: Option<String>) -> Result<serde_json::Value> {
+    Ok(server_get(&app, "/api/games", scope_query(username)?).await?.0)
 }
 
 /// How much server storage your own clips use: the server's `MyStorage` (`{ clips, bytes }`).

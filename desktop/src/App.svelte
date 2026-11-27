@@ -25,6 +25,9 @@
   import SettingsView from "./views/Settings.svelte";
   import Achievements from "./views/Achievements.svelte";
   import Appearance from "./views/Appearance.svelte";
+  import Profile from "./views/Profile.svelte";
+  import UserHoverCard from "./components/UserHoverCard.svelte";
+  import { forgetProfiles, hideCard, setProfileOpener } from "./lib/profiles.svelte";
   import { applyLooks } from "./lib/looks";
 
   // The screens. Library is home.
@@ -37,7 +40,9 @@
     | { name: "editor"; clip: ClipView }
     | { name: "settings" }
     | { name: "achievements" }
-    | { name: "appearance" };
+    | { name: "appearance" }
+    /** Someone's profile, built per person; Back returns to `from`. */
+    | { name: "profile"; username: string; from: View };
   /** Where the user asked to go while the current screen had unsaved changes. */
   type Leaving = { to: "view"; view: View } | { to: "logout" };
 
@@ -230,14 +235,22 @@
     account = null;
   }
 
-  /** The screens kept alive (hidden while another is shown); the editor is never kept. */
+  /** Opens someone's profile over the current screen (a name or picture was clicked). */
+  function openProfile(username: string) {
+    accountMenu = false;
+    if (view.name === "profile" && view.username.toLowerCase() === username.toLowerCase()) return;
+    go({ name: "profile", username, from: view });
+  }
+  setProfileOpener(openProfile);
+
+  /** The screens kept alive (hidden while another is shown); the editor and profiles are never kept. */
   let visited = $state<Set<Screen>>(new Set(["library"]));
   /** Bumped to rebuild Settings from the saved settings (after "Discard"). */
   let settingsEpoch = $state(0);
 
   $effect(() => {
     const name = view.name;
-    if (name !== "editor" && !untrack(() => visited.has(name))) visited = new Set([...untrack(() => visited), name]);
+    if (name !== "editor" && name !== "profile" && !untrack(() => visited.has(name))) visited = new Set([...untrack(() => visited), name]);
   });
 
   // Logged out, or the login expired: the kept screens are dropped (they're unmounted with the
@@ -246,13 +259,16 @@
   $effect(() => {
     if (account) return;
     const name = untrack(() => view.name);
-    visited = new Set(name === "editor" ? [] : [name]);
+    visited = new Set(name === "editor" || name === "profile" ? [] : [name]);
     forgetCache();
+    forgetProfiles();
+    hideCard();
   });
 
   /** Switches screens, asking first when that would throw away unsaved changes. */
   function go(next: View) {
-    if (next.name === view.name && next.name !== "editor") return;
+    if (next.name === view.name && next.name !== "editor" && next.name !== "profile") return;
+    hideCard();
     if (viewDirty && next !== view) {
       leaving = { to: "view", view: next };
       return;
@@ -444,6 +460,7 @@
                 </div>
               </div>
               <hr />
+              <button role="menuitem" onclick={() => openProfile(account!.username)}><Icon name="user" size={16} /> Your profile</button>
               <button role="menuitem" onclick={openWebsite}><Icon name="external" size={16} /> Open website</button>
               <button role="menuitem" onclick={() => ((accountMenu = false), (feedbackKind = "bug"))}>
                 <Icon name="alert" size={16} /> Report a problem
@@ -529,6 +546,20 @@
           {/key}
         </main>
       {/if}
+      {#if view.name === "profile"}
+        <main class="screen here">
+          {#key view.username}
+            <Profile
+              username={view.username}
+              onback={() => view.name === "profile" && go(view.from)}
+              onunauthorized={() => {
+                account = null;
+                loginNotice = "Your session has expired. Log in again to see this profile.";
+              }}
+            />
+          {/key}
+        </main>
+      {/if}
       {#if visited.has("achievements")}
         <main class="screen" class:here={view.name === "achievements"} use:keepScroll={view.name === "achievements"} inert={view.name !== "achievements"}>
           <Achievements
@@ -597,6 +628,7 @@
 {/if}
 
 <Toast />
+<UserHoverCard />
 
 <style>
   .center {

@@ -49,6 +49,25 @@ pub async fn remove_friend(app: AppHandle, username: String) -> Result<()> {
     client.delete(&saved.token, &format!("/api/friends/{name}")).await.map_err(|e| failed(&data_dir, &saved, e))
 }
 
+/// What someone's profile head and hover card show (the server's `UserProfile`).
+#[tauri::command]
+pub async fn user_profile(app: AppHandle, username: String) -> Result<Value> {
+    let name = checked_username(&username)?.to_string();
+    let (saved, client, data_dir) = login(&app, TIMEOUT)?;
+    let mut profile = client
+        .get_json(&saved.token, &format!("/api/users/{name}/profile"), &[])
+        .await
+        .map_err(|e| failed(&data_dir, &saved, e))?;
+    // The page may load images from anywhere (CSP): only the server's own pictures are kept.
+    if let Some(user) = profile.get_mut("user") {
+        let foreign = user.get("avatarUrl").and_then(|v| v.as_str()).is_some_and(|url| !client.same_origin(url));
+        if foreign {
+            user["avatarUrl"] = Value::Null;
+        }
+    }
+    Ok(profile)
+}
+
 /// A new referral link (`{ code, url, expiresAt }`).
 #[tauri::command]
 pub async fn make_referral(app: AppHandle) -> Result<Value> {

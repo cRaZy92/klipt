@@ -228,6 +228,7 @@ pub fn run() {
             friends::list_friends,
             friends::add_friend,
             friends::remove_friend,
+            friends::user_profile,
             friends::make_referral,
             friends::list_referrals,
             friends::revoke_referral,

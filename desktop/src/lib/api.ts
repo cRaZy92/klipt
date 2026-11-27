@@ -235,6 +235,22 @@ export interface Person {
   frame?: string | null;
 }
 
+/** Where you stand with someone. */
+export type FriendState = "none" | "outgoing" | "incoming" | "friends" | "self";
+
+/** Someone's profile head (the server's `UserProfile`). A Friends profile seen by someone who
+ * isn't a friend is `full: false`: no banner, stats or badges. */
+export interface UserProfile {
+  user: Person & { displayName: string };
+  full: boolean;
+  banner: string | null;
+  stats: { clips: number; views: number; top: { id: string; title: string; views: number } | null } | null;
+  badges: { id: string; name: string; description: string; icon: string }[];
+  friendState: FriendState | null;
+  /** Their profile page on the website. */
+  profileUrl: string;
+}
+
 /** `listFriends`: your friends and the requests either way. */
 export interface FriendList {
   friends: Person[];
@@ -687,7 +703,11 @@ export const api = {
     withMe = false,
     kind: "clip" | "screenshot" | null = null,
     favorites = false,
-  ) => invoke<FeedPage>("feed_clips", { game, cursor, search, withMe, kind, favorites }),
+    /** Only this person's clips (their profile), as far as you may see them. */
+    username: string | null = null,
+  ) => invoke<FeedPage>("feed_clips", { game, cursor, search, withMe, kind, favorites, username }),
+  /** What someone's profile head and hover card show. */
+  userProfile: (username: string) => invoke<UserProfile>("user_profile", { username }),
   /** Looks at every file under `folder` (`import-check-progress`) and says what importing it
    * would do; null when stopped or an import is already running. */
   checkImport: (folder: string) => invoke<ImportPreview | null>("check_import", { folder }),
@@ -705,7 +725,8 @@ export const api = {
   /** A local URL that plays a server clip through the app's read-ahead cache (starts much faster). */
   playerVideoUrl: (url: string) => invoke<string>("player_video_url", { url }),
   setServerFavorite: (id: string, favorite: boolean) => invoke<void>("set_server_favorite", { id, favorite }),
-  feedGames: () => invoke<FeedGame[]>("feed_games"),
+  /** The feed's games, or (with `username`) that person's. */
+  feedGames: (username: string | null = null) => invoke<FeedGame[]>("feed_games", { username }),
   /** Your albums, most recently changed first; with `clip` (a server clip id), which hold it. */
   listAlbums: (clip?: string) => invoke<AlbumSummary[]>("list_albums", { clip: clip ?? null }),
   /** A new album holding server clips `clipIds`, in that order. */

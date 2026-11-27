@@ -635,4 +635,175 @@
       errEl.hidden = false;
     }
   });
+
+  // ── Hover card: point at anyone's /u/ link to see a mini profile ──────────────
+  (function () {
+    if (!window.matchMedia || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+    var cache = {};
+    var card = null;
+    var anchor = null;
+    var showTimer = 0;
+    var hideTimer = 0;
+    var LINK = 'a[href^="/u/"]:not(.who)';
+
+    function usernameOf(a) {
+      var m = /^\/u\/([^/?#]+)/.exec(a.getAttribute('href') || '');
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+    function load(name) {
+      var key = name.toLowerCase();
+      if (!cache[key]) {
+        cache[key] = api('GET', '/api/users/' + encodeURIComponent(name) + '/profile').catch(function (e) {
+          delete cache[key];
+          throw e;
+        });
+      }
+      return cache[key];
+    }
+    function el(tag, cls, text) {
+      var n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    // Same as Avatar in layout.tsx: the initial on a colour picked from the name, the picture over it.
+    function avatar(user) {
+      var hash = 0;
+      for (var ch of user.displayName.toLowerCase()) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+      var a = el('span', 'avatar md' + (user.frame ? ' frame frame-' + user.frame : ''), ([...user.displayName][0] || '?').toUpperCase());
+      a.style.setProperty('--h', String(hash % 360));
+      if (user.avatarUrl) {
+        var img = el('img', 'avatar-img');
+        img.src = user.avatarUrl;
+        img.alt = '';
+        img.onerror = function () { img.remove(); };
+        a.appendChild(img);
+      }
+      return a;
+    }
+    function plural(n, one) { return n + ' ' + one + (n === 1 ? '' : 's'); }
+    var compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+
+    function friendButtons(p) {
+      var row = el('div', 'hc-actions');
+      var name = p.user.username;
+      var btn = function (action, label, cls) {
+        var b = el('button', 'btn small' + (cls ? ' ' + cls : ''), label);
+        b.type = 'button';
+        b.dataset.hcAction = action;
+        b.dataset.username = name;
+        row.appendChild(b);
+      };
+      if (p.friendState === 'none') btn('add', 'Add friend', 'primary');
+      else if (p.friendState === 'outgoing') btn('remove', 'Requested · Cancel');
+      else if (p.friendState === 'incoming') { btn('add', 'Accept', 'primary'); btn('remove', 'Decline'); }
+      else if (p.friendState === 'friends') row.appendChild(el('span', 'badge', 'Friends'));
+      else if (p.friendState === null) {
+        var login = el('a', 'btn small primary', 'Log in to add');
+        login.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
+        row.appendChild(login);
+      }
+      var view = el('a', 'hc-view', 'View profile');
+      view.href = '/u/' + encodeURIComponent(name);
+      row.appendChild(view);
+      return row;
+    }
+
+    function render(p) {
+      var c = el('div', 'hovercard' + (p.banner ? ' banner-' + p.banner + ' has-banner' : ''));
+      c.setAttribute('role', 'dialog');
+      c.setAttribute('aria-label', p.user.displayName);
+      c.appendChild(el('div', 'hc-banner'));
+      var head = el('a', 'hc-head');
+      head.href = '/u/' + encodeURIComponent(p.user.username);
+      head.appendChild(avatar(p.user));
+      var names = el('div', 'hc-names');
+      names.appendChild(el('strong', 'hc-name', p.user.displayName));
+      names.appendChild(el('span', 'hc-handle', '@' + p.user.username));
+      head.appendChild(names);
+      c.appendChild(head);
+      if (p.stats) {
+        c.appendChild(el('p', 'hc-stats', plural(p.stats.clips, 'clip') + ' · ' + (p.stats.views === 1 ? '1 view' : compact.format(p.stats.views) + ' views')));
+      } else if (!p.full) {
+        c.appendChild(el('p', 'hc-private', 'Only friends see everything ' + p.user.displayName + ' posts.'));
+      }
+      if (p.badges.length) {
+        var list = el('ul', 'hc-badges');
+        p.badges.slice(0, 4).forEach(function (b) {
+          var li = el('li', 'badge-medal', null);
+          li.title = b.name + ': ' + b.description;
+          li.appendChild(el('span', null, b.icon)).setAttribute('aria-hidden', 'true');
+          li.appendChild(el('span', 'badge-name', b.name));
+          list.appendChild(li);
+        });
+        if (p.badges.length > 4) list.appendChild(el('li', 'hc-more', '+' + (p.badges.length - 4)));
+        c.appendChild(list);
+      }
+      if (p.friendState !== 'self') c.appendChild(friendButtons(p));
+      return c;
+    }
+
+    function place(c, a) {
+      var r = a.getBoundingClientRect();
+      var w = c.offsetWidth;
+      var h = c.offsetHeight;
+      var left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+      var below = r.bottom + 8;
+      var top = below + h > window.innerHeight - 8 && r.top - h - 8 > 8 ? r.top - h - 8 : below;
+      c.style.left = left + window.scrollX + 'px';
+      c.style.top = top + window.scrollY + 'px';
+    }
+
+    function hide() {
+      clearTimeout(showTimer);
+      if (card) card.remove();
+      card = null;
+      anchor = null;
+    }
+    function show(a, p) {
+      if (card) card.remove();
+      card = render(p);
+      document.body.appendChild(card);
+      place(card, a);
+      card.addEventListener('mouseenter', function () { clearTimeout(hideTimer); });
+      card.addEventListener('mouseleave', function () { hideTimer = setTimeout(hide, 200); });
+      card.addEventListener('click', async function (ev) {
+        var b = ev.target.closest('[data-hc-action]');
+        if (!b) return;
+        var shown = card;
+        b.disabled = true;
+        try {
+          await api(b.dataset.hcAction === 'add' ? 'POST' : 'DELETE', '/api/friends/' + encodeURIComponent(b.dataset.username));
+          delete cache[b.dataset.username.toLowerCase()];
+          var fresh = await load(b.dataset.username);
+          if (card === shown && anchor) show(anchor, fresh);
+        } catch (e) {
+          toast(friendly(e));
+          b.disabled = false;
+        }
+      });
+    }
+
+    document.addEventListener('mouseover', function (ev) {
+      var a = ev.target.closest && ev.target.closest(LINK);
+      if (!a || (card && card.contains(a))) return;
+      if (a === anchor) { clearTimeout(hideTimer); return; }
+      var name = usernameOf(a);
+      if (!name) return;
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+      anchor = a;
+      showTimer = setTimeout(function () {
+        load(name).then(function (p) { if (anchor === a) show(a, p); }, function () { /* unknown user: no card */ });
+      }, 350);
+    });
+    document.addEventListener('mouseout', function (ev) {
+      var a = ev.target.closest && ev.target.closest(LINK);
+      if (!a || a !== anchor || a.contains(ev.relatedTarget)) return;
+      clearTimeout(showTimer);
+      hideTimer = setTimeout(hide, 200);
+    });
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') hide(); });
+    window.addEventListener('scroll', function () { if (card) hide(); }, { passive: true });
+  })();
 })();

@@ -147,7 +147,7 @@ export function AlbumPage(props: { user: AuthUser | null; album: AlbumSummary; c
                   <p class="album-now-title"><a href={`/c/${e(current.id)}`}>{e(current.title)}</a></p>
                   <p class="meta">
                     <span>{at + 1} of {clips.length}</span>
-                    <span>{e(current.owner.displayName)}</span>
+                    <a class="person-link" href={`/u/${encodeURIComponent(current.owner.username)}`}>{e(current.owner.displayName)}</a>
                     {current.gameName ? <span>{e(current.gameName)}</span> : ''}
                   </p>
                 </div>

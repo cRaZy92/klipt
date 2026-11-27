@@ -10,15 +10,15 @@ import { listSessions } from '../auth/sessions.js';
 import { passwordResets, sessions, users } from '../db/schema.js';
 import { activeReset } from '../auth/routes.js';
 import { AccountPage } from './pages/account.js';
-import { BANNERS } from '@klipt/shared';
 import { markSeen, myAchievements } from '../achievements/engine.js';
 import { toUserRef, userRefColumns } from '../users/ref.js';
-import { friendState, listFriendRows } from '../friends/repo.js';
+import { loadProfile } from '../users/profile.js';
+import { listFriendRows } from '../friends/repo.js';
 import { FriendsPage } from './pages/friends.js';
 import { HomePage } from './pages/home.js';
 import { listReferrals, referrerOf, REF_COOKIE } from '../referrals/routes.js';
 import { ResetPage } from './pages/reset.js';
-import { displayNameOf, getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
+import { displayNameOf, getClip, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage, TranscodeSection } from './pages/admin.js';
 import { FeedPage } from './pages/feed.js';
 import { GetAppPage } from './pages/getApp.js';
@@ -152,20 +152,11 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
   // owner's Public clips and a way to add them.
   app.get('/u/:username', async (req, reply) => {
     const { username } = req.params as { username: string };
-    const [owner] = await db
-      .select({ ...userRefColumns, banner: sql<string | null>`${users.looks}->>'banner'`, profileVisibility: users.profileVisibility })
-      .from(users)
-      .where(and(eq(users.usernameKey, username.toLowerCase()), isNull(users.disabledAt)));
-    if (!owner) return notFound(req, reply);
     const viewer = req.user ?? null;
-    const state = viewer ? await friendState(db, viewer.id, owner.id) : null;
-    const full = owner.profileVisibility === 'public' || state === 'self' || state === 'friends';
-    const [data, stats, achievements] = await Promise.all([
-      load(req, 'user', owner.username),
-      full ? getProfileStats(db, viewer, owner.username) : null,
-      full ? myAchievements(db, owner.id) : null,
-    ]);
-    const banner = full && BANNERS.some((b) => b.id === owner.banner) ? owner.banner : null;
+    const profile = await loadProfile(db, viewer, username);
+    if (!profile) return notFound(req, reply);
+    const { owner, stats, banner, friendState: state } = profile;
+    const data = await load(req, 'user', owner.username);
     const page = UserPage({
       user: viewer,
       username: owner.username,
@@ -174,7 +165,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
       stats,
       owner,
       banner,
-      badges: achievements?.earned ?? [],
+      badges: profile.badges,
       friendState: state,
       loginNext: req.url,
     }) as string;

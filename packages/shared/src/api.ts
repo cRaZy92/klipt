@@ -52,6 +52,26 @@ export interface UserRef {
   frame: string | null;
 }
 
+/**
+ * `GET /api/users/:username/profile`: what a profile's head and the hover card show. Anyone may
+ * ask (logged out too). A Friends profile seen by a stranger is `full: false`: no banner, stats or
+ * badges, only the name, picture and a way to add them.
+ */
+export interface UserProfile {
+  user: UserRef;
+  full: boolean;
+  /** Their equipped banner (an id from BANNERS), or null. */
+  banner: string | null;
+  /** Totals over the clips you may see there; null when not `full`. */
+  stats: { clips: number; views: number; top: { id: string; title: string; views: number } | null } | null;
+  /** Earned badges, newest first (empty when not `full`). */
+  badges: { id: string; name: string; description: string; icon: string }[];
+  /** Where you stand with them; null when logged out. */
+  friendState: FriendState | null;
+  /** Their profile page on the website. */
+  profileUrl: string;
+}
+
 /** `PUT /api/me/looks`: only the fields sent change; a locked one is refused (403 `not_unlocked`). */
 export type UpdateLooksRequest = Partial<Looks>;
 

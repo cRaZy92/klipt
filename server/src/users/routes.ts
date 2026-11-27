@@ -9,6 +9,7 @@ import { userAchievements, users } from '../db/schema.js';
 import { makeAvatar, probeImage } from '../clips/media.js';
 import { MAX_THUMB_BYTES, THUMB_TYPES } from '../clips/routes.js';
 import { meOf } from './ref.js';
+import { loadProfile, toUserProfile } from './profile.js';
 
 const AVATAR_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/;
 
@@ -28,6 +29,14 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   const { db, config } = app;
   const avatarsDir = join(config.dataDir, 'avatars');
   await mkdir(avatarsDir, { recursive: true });
+
+  // Open: the hover card shows on public pages too. What it holds follows the profile's visibility.
+  app.get('/api/users/:username/profile', async (req, reply) => {
+    const { username } = req.params as { username: string };
+    const profile = await loadProfile(db, req.user ?? null, username);
+    if (!profile) return reply.code(404).send({ error: 'unknown_user' });
+    return toUserProfile(profile, config.baseUrl);
+  });
 
   app.put('/api/me/avatar', { preHandler: requireUser, bodyLimit: MAX_THUMB_BYTES }, async (req, reply) => {
     const type = (req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();

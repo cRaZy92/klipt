@@ -92,10 +92,20 @@ export function ProcessingPill(props: { state: string | null }): JSX.Element {
   );
 }
 
+/** A link to someone's profile; app.js shows their hover card on it. */
+export function profileHref(username: string): string {
+  return `/u/${encodeURIComponent(username)}`;
+}
+
+/**
+ * The whole card opens the clip (the title link stretches over it); the owner's picture and name
+ * sit above that and open their profile.
+ */
 export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
   const { clip, owner, views } = props.item;
+  const profile = profileHref(owner.username);
   return (
-    <a class="card" href={`/c/${clip.id}`}>
+    <div class="card">
       <div class="thumb">
         <img src={thumbnailUrl(clip, '')} alt="" loading="lazy" width="320" height="180" />
         <ProcessingPill state={clip.transcodeState} />
@@ -103,11 +113,13 @@ export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
         <span class="dur">{clip.kind === 'screenshot' ? 'Screenshot' : formatDuration(clip.durationMs)}</span>
       </div>
       <div class="card-body">
-        <AvatarOf who={owner} />
+        <a class="person-link card-avatar" href={profile} tabindex="-1" aria-hidden="true">
+          <AvatarOf who={owner} />
+        </a>
         <div class="card-text">
-          <div class="card-title">{e(clip.title)}</div>
+          <a class="card-title card-link" href={`/c/${clip.id}`}>{e(clip.title)}</a>
           <div class="meta">
-            <span class="owner">{e(owner.displayName)}</span>
+            <a class="owner person-link" href={profile}>{e(owner.displayName)}</a>
             {clip.gameName ? <span>{e(clip.gameName)}</span> : ''}
           </div>
           <div class="meta">
@@ -116,7 +128,7 @@ export function ClipCard(props: { item: ClipWithOwner }): JSX.Element {
           </div>
         </div>
       </div>
-    </a>
+    </div>
   );
 }
 

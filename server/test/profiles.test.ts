@@ -119,3 +119,44 @@ describe('install guide', () => {
     expect(res.body).toContain('Open Klipt and log in');
   });
 });
+
+describe('GET /api/users/:username/profile (hover card)', () => {
+  it('a Friends profile, logged out: name and picture only', async () => {
+    const res = await get('/api/users/me/profile');
+    expect(res.statusCode).toBe(200);
+    const p = res.json();
+    expect(p.user.username).toBe('me');
+    expect(p.full).toBe(false);
+    expect(p.stats).toBeNull();
+    expect(p.badges).toEqual([]);
+    expect(p.friendState).toBeNull();
+    expect(p.profileUrl).toBe('http://localhost/u/me');
+  });
+
+  it('a friend sees stats over the clips they may see, and Friends', async () => {
+    const p = (await get('/api/users/ME/profile', friend.cookie)).json();
+    expect(p.full).toBe(true);
+    expect(p.friendState).toBe('friends');
+    expect(p.stats.clips).toBe(2); // friends + public, not the link-only one
+  });
+
+  it('a stranger on a Friends profile: Add friend, nothing else', async () => {
+    const p = (await get('/api/users/me/profile', stranger.cookie)).json();
+    expect(p.full).toBe(false);
+    expect(p.friendState).toBe('none');
+  });
+
+  it('unknown or disabled users are 404', async () => {
+    expect((await get('/api/users/nobody/profile')).statusCode).toBe(404);
+    await t.db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, stranger.id));
+    expect((await get('/api/users/stranger/profile')).statusCode).toBe(404);
+  });
+});
+
+describe('clip cards link the owner', () => {
+  it("the owner's picture and name open their profile", async () => {
+    const res = await get('/u/me', friend.cookie);
+    expect(res.body).toContain('class="owner person-link" href="/u/me"');
+    expect(res.body).toContain('class="card-title card-link" href="/c/mepublic0000"');
+  });
+});

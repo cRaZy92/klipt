@@ -367,6 +367,10 @@ pub fn reset_video(fps: u32, width: u32, height: u32) -> Result<()> {
     if code != OBS_VIDEO_SUCCESS as c_int {
         bail!("obs_reset_video({width}x{height}@{fps}) returned {code}");
     }
+    // libobs leaves the SDR white level at 0 until the app sets it (OBS Studio's frontend always
+    // does). Display capture of an HDR monitor scales by 80 / white level when it tone-maps to
+    // our SDR canvas, so without this every frame is black. 300/1000 are OBS Studio's defaults.
+    unsafe { api().obs_set_video_levels(300.0, 1000.0) };
     Ok(())
 }
 

@@ -340,13 +340,14 @@
     display: flex;
     align-items: center;
     gap: 1.25rem;
-    padding: 1.25rem 1.5rem;
+    /* The same height with or without a banner, so picking one doesn't make the header jump. */
+    padding: 4.5rem 1.5rem 1.25rem;
     border-radius: var(--radius-lg);
-    background: var(--surface);
+    background: linear-gradient(to top, var(--surface), transparent 70%),
+      linear-gradient(120deg, var(--accent-soft), var(--surface-3));
     box-shadow: inset 0 0 0 1px var(--border);
   }
   .hero.has-banner {
-    padding-top: 4.5rem;
     background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 70%), var(--banner);
   }
   .names {

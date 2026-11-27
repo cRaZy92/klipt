@@ -663,10 +663,14 @@ kbd { font-family: var(--font); font-weight: 650; font-size: .82em; padding: 2px
     radial-gradient(circle at 82% 65%, rgba(77, 171, 255, 0.5), transparent 50%),
     linear-gradient(120deg, #122a2a, #151d3b);
 }
-.profile-head.has-banner {
+/* The same height with or without a banner, so picking one doesn't make the header jump. */
+.profile-head {
   padding: 64px 24px 20px; border-radius: var(--radius-lg);
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 70%), var(--banner);
+  background: linear-gradient(to top, var(--surface), transparent 70%), linear-gradient(120deg, var(--accent-soft), var(--surface-3));
   box-shadow: inset 0 0 0 1px var(--border);
+}
+.profile-head.has-banner {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 70%), var(--banner);
 }
 .profile-head.has-banner .handle { color: var(--text-muted); }
 

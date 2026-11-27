@@ -822,3 +822,10 @@ kbd { font-family: var(--font); font-weight: 650; font-size: .82em; padding: 2px
   .home-hero-video { padding: 0 14px; }
   .home-hero-video .bracket { width: 10px; border-width: 3px; top: -8px; bottom: -8px; }
 }
+.friends-page h1 { margin-bottom: 4px; }
+.friends-page .panel h2 { margin-top: 0; }
+.center-card .home-cta { margin-top: 16px; }
+.center-card .home-cta .btn { flex: 1 1 auto; }
+.form.choice-list { gap: 10px; }
+.form.choice-list label { display: flex; flex-direction: row; align-items: center; gap: 10px; margin: 0; }
+.form.choice-list input[type=radio] { margin: 0; flex: none; width: auto; }

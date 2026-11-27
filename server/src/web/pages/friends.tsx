@@ -61,7 +61,7 @@ export function FriendsPage(props: {
         <section class="panel">
           <h2>Bring a friend</h2>
           <p class="muted">
-            Make a link and send it. Whoever signs up with it (or opens it while logged in) becomes your friend. Each link
+            Make a link and send it. Whoever signs up with it becomes your friend (someone already on Klipt gets asked first). Each link
             works once, for 14 days.
           </p>
           <button type="button" class="btn primary" data-action="make-referral">Make a link</button>

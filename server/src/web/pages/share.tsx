@@ -58,6 +58,8 @@ export function shareHead(clip: Clip, embed: ShareEmbed | null = null): string {
   return [
     ...common,
     meta('property', 'og:type', 'video.other'),
+    // Discord shows no og:description under a playing video, only an oEmbed author line.
+    `<link rel="alternate" type="application/json+oembed" href="${e(`${clip.shareUrl}/oembed`)}" title="${e(clip.title)}" />`,
     meta('property', 'og:video', embed.url),
     meta('property', 'og:video:secure_url', embed.url),
     meta('property', 'og:video:type', 'video/mp4'),
@@ -87,6 +89,22 @@ function JoinCard(props: { clip: Clip }): JSX.Element {
       </p>
     </section>
   );
+}
+
+/**
+ * The oEmbed document a share page links to. Discord puts its author_name above the title of a
+ * video embed, which is where who took the clip (and the game) goes.
+ */
+export function shareOembed(clip: Clip, baseUrl: string): Record<string, string> {
+  return {
+    version: '1.0',
+    type: 'link',
+    title: clip.title,
+    author_name: clip.gameName ? `${clip.gameName} · clipped by ${clip.owner.displayName}` : `Clipped by ${clip.owner.displayName}`,
+    author_url: `${baseUrl}/u/${encodeURIComponent(clip.owner.username)}`,
+    provider_name: 'Klipt',
+    provider_url: baseUrl,
+  };
 }
 
 /** A small line icon for a button (24×24 stroke paths). */

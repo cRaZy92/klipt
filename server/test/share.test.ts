@@ -30,6 +30,23 @@ describe('share page', () => {
     expect(res.body).toMatch(/<video controls[^>]*playsinline[^>]*preload="metadata"/);
   });
 
+  it('a video embed says who clipped it through oEmbed, since Discord hides og:description there', async () => {
+    const u = await createUser(t.db, { username: 'alice' });
+    await addClip(u.id, 'shareclip020', { gameName: 'CS2' });
+    const page = await get('/c/shareclip020');
+    expect(page.body).toContain('<link rel="alternate" type="application/json+oembed" href="http://localhost/c/shareclip020/oembed"');
+    const res = await get('/c/shareclip020/oembed');
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      type: 'link',
+      title: 'Ace',
+      author_name: 'CS2 · clipped by alice',
+      author_url: 'http://localhost/u/alice',
+      provider_name: 'Klipt',
+    });
+    expect((await get('/c/nosuchclip0/oembed')).statusCode).toBe(404);
+  });
+
   it('a long clip without an embed copy still embeds its full video when Discord can fetch it in time', async () => {
     const u = await createUser(t.db, { username: 'frank' });
     await addClip(u.id, 'shareclip011', { durationMs: 20 * 60_000, width: 1920, height: 1080, sizeBytes: 95 * 1024 * 1024 });

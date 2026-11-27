@@ -24,7 +24,7 @@ import { FeedPage } from './pages/feed.js';
 import { GetAppPage } from './pages/getApp.js';
 import { SignupPage } from './pages/signup.js';
 import { LoginPage } from './pages/login.js';
-import { SharePage } from './pages/share.js';
+import { SharePage, shareOembed } from './pages/share.js';
 import { embedPlan, FULL_VIDEO_EMBED_MAX_BYTES, hasEmbed } from '../clips/embed.js';
 import { embedFileName } from '../clips/files.js';
 import { MePage } from './pages/me.js';
@@ -194,6 +194,14 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
           ? { url: clip.videoUrl, width: clip.width, height: clip.height }
           : null;
     return html(reply, SharePage({ user: req.user, clip, embed, canDelete, viewers, signup }) as string);
+  });
+
+  // What Discord reads for the author line of a video embed (see shareOembed).
+  app.get('/c/:id/oembed', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const found = /^[A-Za-z0-9_-]{12}$/.test(id) ? await getClip(db, id, req.user?.id) : null;
+    if (!found) return reply.code(404).send({ error: 'not_found' });
+    return reply.send(shareOembed(toClip(found, config.baseUrl), config.baseUrl));
   });
 
   app.get('/friends', async (req, reply) => {

@@ -233,6 +233,22 @@ export interface Person {
   frame?: string | null;
 }
 
+/** `listFriends`: your friends and the requests either way. */
+export interface FriendList {
+  friends: Person[];
+  /** People asking to be your friend. */
+  incoming: Person[];
+  /** People you asked. */
+  outgoing: Person[];
+}
+
+/** A referral link: works once, for 14 days. */
+export interface Referral {
+  code: string;
+  url: string;
+  expiresAt: string;
+}
+
 export interface Account {
   serverUrl: string;
   username: string;
@@ -651,6 +667,12 @@ export const api = {
   ) => invoke<void>("upload_clip", { id, title, visibility, tagged, replace, more, highQuality, albums }),
   /** The server's users, for tagging friends in a clip. */
   listUsers: () => invoke<Person[]>("list_users"),
+  listFriends: () => invoke<FriendList>("list_friends"),
+  addFriend: (username: string) => invoke<{ state: "outgoing" | "friends" | "incoming" | "none" }>("add_friend", { username }),
+  removeFriend: (username: string) => invoke<void>("remove_friend", { username }),
+  makeReferral: () => invoke<Referral>("make_referral"),
+  listReferrals: () => invoke<Referral[]>("list_referrals"),
+  revokeReferral: (code: string) => invoke<void>("revoke_referral", { code }),
   /** One page of the feed; `search` matches title, game and uploader on the server. */
   feedClips: (
     game: string | null,

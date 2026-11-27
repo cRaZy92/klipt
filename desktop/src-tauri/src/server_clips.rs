@@ -24,7 +24,7 @@ const PAGE_SIZE: &str = "60";
 const MAX_PAGES: usize = 50;
 
 /// The saved login and a client for its server, or `Unauthorized`.
-fn login(app: &AppHandle, timeout: Duration) -> Result<(Auth, ApiClient, PathBuf)> {
+pub(crate) fn login(app: &AppHandle, timeout: Duration) -> Result<(Auth, ApiClient, PathBuf)> {
     let data_dir = app.state::<AppState>().data_dir.clone();
     let saved = auth::load(&data_dir).ok_or(AppError::Unauthorized)?;
     let client = ApiClient::with_timeout(&saved.server_url, timeout)?;

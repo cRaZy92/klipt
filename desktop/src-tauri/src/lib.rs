@@ -13,6 +13,7 @@ pub mod export;
 pub mod feed_watch;
 pub mod feedback;
 pub mod filmstrip;
+pub mod friends;
 pub mod ffmpeg;
 pub mod games;
 pub mod hotkey;
@@ -204,6 +205,12 @@ pub fn run() {
             account::refresh_account,
             account::update_profile,
             account::set_profile_visibility,
+            friends::list_friends,
+            friends::add_friend,
+            friends::remove_friend,
+            friends::make_referral,
+            friends::list_referrals,
+            friends::revoke_referral,
             account::change_password,
             account::system_info,
             account::send_feedback,

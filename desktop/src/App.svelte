@@ -18,6 +18,7 @@
   import Editor from "./views/Editor.svelte";
   import Feed from "./views/Feed.svelte";
   import Albums from "./views/Albums.svelte";
+  import Friends from "./views/Friends.svelte";
   import Library from "./views/Library.svelte";
   import Login from "./views/Login.svelte";
   import SettingsView from "./views/Settings.svelte";
@@ -25,11 +26,12 @@
   import { applyLooks } from "./lib/looks";
 
   // The screens. Library is home.
-  type Screen = "library" | "feed" | "albums" | "settings" | "profile";
+  type Screen = "library" | "feed" | "albums" | "friends" | "settings" | "profile";
   type View =
     | { name: "library" }
     | { name: "feed" }
     | { name: "albums" }
+    | { name: "friends" }
     | { name: "editor"; clip: ClipView }
     | { name: "settings" }
     | { name: "profile" };
@@ -53,6 +55,11 @@
   let viewDirty = $state(false);
   /** Friends' clips you haven't seen (the Feed tab's badge). */
   let feedNew = $state(0);
+  /** Friend requests waiting for an answer (the rail's Friends badge). */
+  let friendRequests = $state(0);
+  function countRequests() {
+    api.listFriends().then((l) => (friendRequests = l.incoming.length)).catch(() => {});
+  }
   let leaving = $state<Leaving | null>(null);
 
   // Your accent and theme, everywhere (the defaults while logged out).
@@ -175,6 +182,7 @@
 
   /** A name changed on the website shows up here; the server also learns which version runs here. */
   function syncAccount() {
+    countRequests();
     api
       .refreshAccount()
       .then((fresh) => {
@@ -297,6 +305,7 @@
 </script>
 
 <svelte:window
+  onfocus={() => account && countRequests()}
   onclick={closeAccountMenu}
   onkeydown={(e) => {
     if (e.key === "Escape") accountMenu = false;
@@ -362,6 +371,18 @@
         >
           <span class="item-icon"><Icon name="album" size={20} /></span>
           Albums
+        </button>
+        <button
+          class="item"
+          class:active={view.name === "friends"}
+          aria-current={view.name === "friends" ? "page" : undefined}
+          onclick={() => go({ name: "friends" })}
+        >
+          <span class="item-icon">
+            <Icon name="user" size={20} />
+            {#if friendRequests > 0}<span class="new-count" aria-hidden="true">{friendRequests > 9 ? "9+" : friendRequests}</span>{/if}
+          </span>
+          Friends
         </button>
       </div>
 
@@ -461,6 +482,18 @@
             onunauthorized={() => {
               account = null;
               loginNotice = "Your session has expired. Log in again to see your albums.";
+            }}
+          />
+        </main>
+      {/if}
+      {#if visited.has("friends")}
+        <main class="screen" class:here={view.name === "friends"} use:keepScroll={view.name === "friends"} inert={view.name !== "friends"}>
+          <Friends
+            active={view.name === "friends"}
+            onrequests={(n) => (friendRequests = n)}
+            onunauthorized={() => {
+              account = null;
+              loginNotice = "Your session has expired. Log in again to see your friends.";
             }}
           />
         </main>

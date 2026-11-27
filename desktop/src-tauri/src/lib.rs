@@ -4,6 +4,7 @@ pub mod account;
 pub mod activity;
 pub mod cleanup;
 pub mod combine;
+pub mod copy_link;
 pub mod commands;
 pub mod diagnostics;
 pub mod disk;
@@ -51,8 +52,13 @@ pub const AUTOSTART_ARG: &str = "--autostart";
 
 pub fn run() {
     let builder = tauri::Builder::default()
-        // First, as its docs require: a second launch just shows this instance's window.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| tray::show_main_window(app)))
+        // First, as its docs require: a second launch just shows this instance's window, unless
+        // it came from a notification's Copy link button (copy_link).
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if !copy_link::handle_args(app, &argv) {
+                tray::show_main_window(app);
+            }
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -110,7 +116,11 @@ pub fn run() {
             apply_autostart(app.handle(), settings.start_with_os);
             // The window starts hidden (tauri.conf.json); an autostart launch stays in the tray.
             app.manage(tray::WindowRelease::default());
-            if !dev_start_hidden && !std::env::args().any(|arg| arg == AUTOSTART_ARG) {
+            // Started by a notification's Copy link button: copy it and stay in the tray.
+            copy_link::register_scheme();
+            let args: Vec<String> = std::env::args().collect();
+            let copy_request = copy_link::handle_args(app.handle(), &args);
+            if !dev_start_hidden && !copy_request && !args.iter().any(|arg| arg == AUTOSTART_ARG) {
                 tray::show_main_window(app.handle());
             } else {
                 tray::hide_main_window(app.handle());

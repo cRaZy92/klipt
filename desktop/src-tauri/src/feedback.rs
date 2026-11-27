@@ -94,6 +94,10 @@ pub fn notify_with_copy(app: &AppHandle, title: &str, body: &str, link: Option<S
         notify(app, title, Some(body));
         return;
     };
+    // Windows: a button that still works once the toast is in the notification centre.
+    if crate::copy_link::show_windows_toast(app, title, body, &link) {
+        return;
+    }
     #[cfg(target_os = "linux")]
     let notification = {
         let icon = app.path().app_data_dir().map_err(|e| e.to_string()).and_then(|dir| notification_icon(&dir).map_err(|e| e.to_string()));

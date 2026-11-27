@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { api, errorMessage, on, type ClipView, type EditInput, type EditorData, type GameCount, type Visibility } from "../lib/api";
+  import { api, errorMessage, on, onWindowHidden, type ClipView, type EditInput, type EditorData, type GameCount, type Visibility } from "../lib/api";
   import { nextVisibilityToast, toVisibility, VISIBILITY } from "../lib/visibility";
   import type { RemoveWhere } from "../lib/removal";
   import { AudioEngine, FINE_PEAK_BUCKETS } from "../lib/audioEngine";
@@ -599,6 +599,10 @@
     const stopFilmstrip = on("filmstrip-progress", ({ id, frames }) => {
       if (id === clip.id) stripFrames = frames;
     });
+    // Closed to the tray or minimized: the sound (played by the audio engine) stops too.
+    const stopHidden = onWindowHidden(() => {
+      if (playing || starting) pause();
+    });
 
     return () => {
       closed = true;
@@ -610,6 +614,7 @@
       cancelAnimationFrame(frame);
       stopProgress();
       stopFilmstrip();
+      stopHidden();
       stopPreparing();
       clearTimeout(settleTimer);
       clearTimeout(startTimer);

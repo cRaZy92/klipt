@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { api, errorMessage, on, type Account, type ClipView, type FeedbackKind, type HotkeyStatus, type Settings, type SettingsSaved } from "./lib/api";
+  import { api, errorMessage, on, onWindowHidden, type Account, type ClipView, type FeedbackKind, type HotkeyStatus, type Settings, type SettingsSaved } from "./lib/api";
   import { menu } from "./lib/a11y";
   import { hotkeyLabel } from "./lib/format";
   import { toast } from "./lib/toasts.svelte";
@@ -122,6 +122,10 @@
       ),
       on("update-available", ({ version, command }) => (update = { version, command, installing: false })),
       on("feed-new", ({ count }) => (feedNew = count)),
+      // Closed to the tray or minimized: nothing keeps playing unseen (the editor pauses itself).
+      onWindowHidden(() => {
+        for (const media of document.querySelectorAll<HTMLMediaElement>("video, audio")) media.pause();
+      }),
       // Hidden in the tray for a while: let the core close the window to free its memory, unless
       // that would lose something. Uploads and imports run on in the core, but their progress
       // lives here.

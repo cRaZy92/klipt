@@ -816,6 +816,8 @@ export interface Events {
    * nothing; it's asked again every minute while hidden.
    */
   "release-window-check": null;
+  /** The window went to the tray or was minimized: stop anything playing. */
+  "window-hidden": null;
   /** An achievement to show as a toast (the window is in front). */
   achievement: { title: string; body: string };
 }
@@ -836,5 +838,21 @@ export function on<K extends keyof Events>(event: K, handler: (payload: Events[K
   return () => {
     stopped = true;
     unlisten?.();
+  };
+}
+
+/**
+ * Runs `handler` when the window goes to the tray or is minimized (the core's `window-hidden`,
+ * plus the page becoming hidden where the web view reports it). Returns a stop function.
+ */
+export function onWindowHidden(handler: () => void): () => void {
+  const stopCore = on("window-hidden", handler);
+  const onVisibility = () => {
+    if (document.hidden) handler();
+  };
+  document.addEventListener("visibilitychange", onVisibility);
+  return () => {
+    stopCore();
+    document.removeEventListener("visibilitychange", onVisibility);
   };
 }

@@ -42,7 +42,7 @@ pub mod upload;
 pub mod upload_notice;
 pub mod upload_resume;
 
-use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 #[cfg(not(target_os = "linux"))]
 use tauri_plugin_autostart::ManagerExt;
@@ -135,11 +135,19 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // Closing the window hides it to the tray; "Quit" in the tray exits.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == tray::MAIN_WINDOW {
+            if window.label() != tray::MAIN_WINDOW {
+                return;
+            }
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     tray::hide_main_window(window.app_handle());
                 }
+                // Minimizing arrives as a resize (to 0×0 on Windows).
+                WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
+                    let _ = window.emit(tray::WINDOW_HIDDEN, ());
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![

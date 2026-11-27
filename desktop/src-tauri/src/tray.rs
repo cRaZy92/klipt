@@ -285,6 +285,9 @@ const RELEASE_RETRY: Duration = Duration::from_secs(60);
 /// nothing would be lost.
 pub const RELEASE_CHECK: &str = "release-window-check";
 
+/// Sent when the window goes to the tray or is minimized: the UI stops anything playing.
+pub const WINDOW_HIDDEN: &str = "window-hidden";
+
 /// Counts hides and shows, so a release waiting for an earlier hide stops when the window is shown.
 #[derive(Default)]
 pub struct WindowRelease(AtomicU64);
@@ -293,6 +296,7 @@ pub struct WindowRelease(AtomicU64);
 /// hidden. Also called at a start in the tray, where the window was made hidden.
 pub fn hide_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        let _ = app.emit(WINDOW_HIDDEN, ());
         if let Err(e) = window.hide() {
             crate::elog!("klipt: can't hide the window: {e}");
         }

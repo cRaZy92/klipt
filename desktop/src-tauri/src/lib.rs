@@ -26,6 +26,7 @@ pub mod logging;
 pub mod media_server;
 pub mod player_cache;
 pub mod mp4_mute;
+pub mod network_files;
 pub mod parts;
 pub mod update;
 pub mod recorder;

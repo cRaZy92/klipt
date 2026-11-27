@@ -2,17 +2,20 @@
   import { onMount } from "svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { checkDropped } from "../lib/imports.svelte";
-  import { dropPoint, onWindows } from "../lib/dropPoint";
+  import { dropPoint, isNetworkAddress, onWindows } from "../lib/dropPoint";
   import Icon from "./Icon.svelte";
 
   // Files dragged over the window: two zones, one adds them to the library where they are, the
-  // other copies them into the clips folder first. Dropping anywhere else does nothing.
+  // other copies them into the clips folder first. Dropping anywhere else does nothing. Files from
+  // a network share can only be copied (their mounted path doesn't outlast the session), so a
+  // drop with any of them shows the copy zone alone.
 
   type Zone = "keep" | "copy";
 
   let shown = $state(false);
   let zone = $state<Zone | null>(null);
   let count = $state(0);
+  let network = $state(false);
 
   function zoneAt(pos: { x: number; y: number }): Zone | null {
     const { x, y } = dropPoint(pos, onWindows, window.devicePixelRatio);
@@ -29,6 +32,7 @@
           case "enter":
             shown = true;
             count = payload.paths.length;
+            network = payload.paths.some(isNetworkAddress);
             zone = zoneAt(payload.position);
             break;
           case "over":
@@ -39,7 +43,8 @@
             const target = zoneAt(payload.position);
             shown = false;
             zone = null;
-            if (target && payload.paths.length > 0) void checkDropped(payload.paths, target === "copy");
+            const copy = target === "copy" || payload.paths.some(isNetworkAddress);
+            if (target && payload.paths.length > 0) void checkDropped(payload.paths, copy);
             break;
           }
           case "leave":
@@ -65,16 +70,22 @@
 {#if shown}
   <div class="drop-overlay" aria-hidden="true">
     <p class="heading">Drop to import {what}</p>
-    <div class="zones">
-      <div class="zone" class:active={zone === "keep"} data-drop-zone="keep">
-        <div class="badge"><Icon name="link" size={26} /></div>
-        <strong>Add to library</strong>
-        <span>Keep the files where they are. Klipt just adds them to your clips.</span>
-      </div>
+    <div class="zones" class:single={network}>
+      {#if !network}
+        <div class="zone" class:active={zone === "keep"} data-drop-zone="keep">
+          <div class="badge"><Icon name="link" size={26} /></div>
+          <strong>Add to library</strong>
+          <span>Keep the files where they are. Klipt just adds them to your clips.</span>
+        </div>
+      {/if}
       <div class="zone" class:active={zone === "copy"} data-drop-zone="copy">
         <div class="badge"><Icon name="folder" size={26} /></div>
         <strong>Copy to clips folder</strong>
-        <span>Klipt keeps its own copy, so you can move or delete the originals.</span>
+        {#if network}
+          <span>These are on a network share, so Klipt copies them. Your clips still play when the share is offline.</span>
+        {:else}
+          <span>Klipt keeps its own copy, so you can move or delete the originals.</span>
+        {/if}
       </div>
     </div>
   </div>
@@ -108,6 +119,10 @@
     flex: 1;
     grid-template-columns: 1fr 1fr;
     gap: 1.1rem;
+  }
+
+  .zones.single {
+    grid-template-columns: 1fr;
   }
 
   .zone {

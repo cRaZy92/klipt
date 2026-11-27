@@ -9,3 +9,12 @@ export function dropPoint(pos: { x: number; y: number }, windows: boolean, pixel
 }
 
 export const onWindows = typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
+
+/**
+ * Whether a dropped "path" is a network address (`smb://…`, `sftp://…`), as Linux file managers
+ * hand over files on a share. Klipt mounts those and always copies them (`check_drop`).
+ */
+export function isNetworkAddress(path: string): boolean {
+  const m = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(path);
+  return m !== null && m[1].toLowerCase() !== "file";
+}

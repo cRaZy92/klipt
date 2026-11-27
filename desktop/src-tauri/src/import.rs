@@ -792,10 +792,22 @@ pub async fn check_import(app: AppHandle, folder: String) -> Result<Option<Previ
 }
 
 /// Like [`check_import`], for files and folders dropped on the window. With `copy`, files are
-/// copied into the clips folder instead of being used where they are.
+/// copied into the clips folder instead of being used where they are. Files dropped from a network
+/// share (`smb://…`) are mounted through kio-fuse and always copied: their local path only lasts
+/// until the user logs out.
 #[tauri::command]
 pub async fn check_drop(app: AppHandle, paths: Vec<String>, copy: bool) -> Result<Option<Preview>> {
-    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let mut copy = copy;
+    let mut local = Vec::with_capacity(paths.len());
+    for path in paths {
+        if crate::network_files::is_address(&path) {
+            local.push(crate::network_files::local_path(&path).await?);
+            copy = true;
+        } else {
+            local.push(PathBuf::from(path));
+        }
+    }
+    let paths = local;
     let shown = match paths.as_slice() {
         [one] => one.clone(),
         many => many.first().and_then(|p| p.parent()).map(Path::to_path_buf).unwrap_or_default(),

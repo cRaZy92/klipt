@@ -160,6 +160,10 @@
     try {
       if (action === 'copy') {
         await copy(btn.dataset.url);
+      } else if (action === 'friend-add' || action === 'friend-remove') {
+        if (action === 'friend-remove' && btn.textContent.trim() === 'Unfriend' && !confirm('Unfriend ' + btn.dataset.username + '?')) return;
+        await api(action === 'friend-add' ? 'POST' : 'DELETE', '/api/friends/' + encodeURIComponent(btn.dataset.username));
+        location.reload();
       } else if (action === 'logout') {
         await api('POST', '/api/auth/logout');
         location.assign('/login');
@@ -589,6 +593,18 @@
   // ── Looks: a choice saves at once and the page reloads in the new colours ──
   document.addEventListener('change', async function (ev) {
     var input = ev.target;
+    if (input.matches && input.matches('form[data-form=profile-visibility] input[type=radio]')) {
+      var pvErr = input.form.querySelector('.error');
+      pvErr.hidden = true;
+      try {
+        await api('PATCH', '/api/me', { profileVisibility: input.value });
+        toast(input.value === 'public' ? 'Your profile is public' : 'Only friends see your profile');
+      } catch (e) {
+        pvErr.textContent = friendly(e);
+        pvErr.hidden = false;
+      }
+      return;
+    }
     if (!input.matches || !input.matches('form[data-form=looks] input[type=radio]')) return;
     var body = {};
     body[input.name] = input.value === '' ? null : input.value;

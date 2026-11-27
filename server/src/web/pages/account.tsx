@@ -60,6 +60,22 @@ export function AccountPage(props: { user: AuthUser; sessions: AccountSession[];
         </section>
 
         <section class="panel">
+          <h2>Who sees your profile</h2>
+          <p class="muted">Also the default for new uploads. You can still pick per clip, and older clips stay as they are.</p>
+          <form class="form choice-list" data-form="profile-visibility">
+            <label>
+              <input type="radio" name="profileVisibility" value="friends" checked={user.profileVisibility === 'friends'} />
+              <span><strong>Friends</strong> — others see only your name, picture and public clips</span>
+            </label>
+            <label>
+              <input type="radio" name="profileVisibility" value="public" checked={user.profileVisibility === 'public'} />
+              <span><strong>Public</strong> — anyone with the link sees your profile and public clips</span>
+            </label>
+            <p class="error" role="alert" hidden></p>
+          </form>
+        </section>
+
+        <section class="panel">
           <h2>Picture</h2>
           <p class="muted">Friends see it on your clips, albums and profile. Any JPEG, PNG or WebP picture.</p>
           <form class="form avatar-form" data-form="avatar">

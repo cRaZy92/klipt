@@ -703,3 +703,10 @@ kbd { font-family: var(--font); font-weight: 650; font-size: .82em; padding: 2px
 .crop-zoom { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
 .crop-zoom input { flex: 1; }
 .crop-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Friends: the button on someone's profile, and the profile-visibility choice. */
+.friend-button { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.profile-head > .btn { margin-left: auto; }
+.profile-private { margin: 4px 0 16px; }
+.choice-list label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.choice-list input[type=radio] { margin-top: 3px; accent-color: var(--accent); }

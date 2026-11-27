@@ -49,7 +49,10 @@ export function cleanDisplayName(raw: string | null | undefined): string | null 
   return name;
 }
 
-const updateMeBody = z.object({ displayName: z.string().max(200).nullable().optional() });
+const updateMeBody = z.object({
+  displayName: z.string().max(200).nullable().optional(),
+  profileVisibility: z.enum(['friends', 'public']).optional(),
+});
 const passwordBody = z.object({ currentPassword: z.string().min(1).max(1024), newPassword: z.string().max(1024) });
 const deviceBody = z.object({
   appVersion: z.string().trim().min(1).max(40),
@@ -156,6 +159,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (name === false) return reply.code(400).send({ error: 'invalid_display_name' });
       set.displayName = name;
     }
+    if (parsed.data.profileVisibility) set.profileVisibility = parsed.data.profileVisibility;
     if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, req.user!.id));
     return (await meOf(db, req.user!.id, config.baseUrl))!;
   });

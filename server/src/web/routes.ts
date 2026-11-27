@@ -13,6 +13,7 @@ import { AccountPage } from './pages/account.js';
 import { BANNERS } from '@klipt/shared';
 import { markSeen, myAchievements } from '../achievements/engine.js';
 import { userRefColumns } from '../users/ref.js';
+import { friendState } from '../friends/repo.js';
 import { ResetPage } from './pages/reset.js';
 import { displayNameOf, getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, shareInviter, InvalidCursorError, type Scope } from '../clips/repo.js';
 import { AdminPage, TranscodeSection } from './pages/admin.js';
@@ -97,7 +98,7 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     const { game, search, withMe, kind, cursor } = listQuery(req);
     // Favorites is a feed filter only.
     const favorites = scope === 'feed' && listQuery(req).favorites;
-    const user = req.user!;
+    const user = req.user ?? null;
     const run = (c?: string) => listClips(db, user, { scope, username, game, search, withMe, kind, favorites, cursor: c });
     const [page, games] = await Promise.all([
       run(cursor).catch((err) => (err instanceof InvalidCursorError ? run() : Promise.reject(err))),
@@ -137,23 +138,38 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     return html(reply, FeedPage({ user: req.user!, ...data }) as string);
   });
 
+  // Public: anyone sees a Public profile in full; a Friends profile shows strangers only the
+  // owner's Public clips and a way to add them.
   app.get('/u/:username', async (req, reply) => {
-    if (!guard(req, reply)) return reply;
     const { username } = req.params as { username: string };
     const [owner] = await db
-      .select({ ...userRefColumns, banner: sql<string | null>`${users.looks}->>'banner'` })
+      .select({ ...userRefColumns, banner: sql<string | null>`${users.looks}->>'banner'`, profileVisibility: users.profileVisibility })
       .from(users)
-      .where(eq(users.usernameKey, username.toLowerCase()));
+      .where(and(eq(users.usernameKey, username.toLowerCase()), isNull(users.disabledAt)));
     if (!owner) return notFound(req, reply);
+    const viewer = req.user ?? null;
+    const state = viewer ? await friendState(db, viewer.id, owner.id) : null;
+    const full = owner.profileVisibility === 'public' || state === 'self' || state === 'friends';
     const [data, stats, achievements] = await Promise.all([
       load(req, 'user', owner.username),
-      getProfileStats(db, req.user!, owner.username),
-      myAchievements(db, owner.id),
+      full ? getProfileStats(db, viewer, owner.username) : null,
+      full ? myAchievements(db, owner.id) : null,
     ]);
-    const banner = BANNERS.some((b) => b.id === owner.banner) ? owner.banner : null;
-    const page = UserPage({ user: req.user!, username: owner.username, displayName: owner.displayName, ...data, stats, owner, banner, badges: achievements.earned }) as string;
+    const banner = full && BANNERS.some((b) => b.id === owner.banner) ? owner.banner : null;
+    const page = UserPage({
+      user: viewer,
+      username: owner.username,
+      displayName: owner.displayName,
+      ...data,
+      stats,
+      owner,
+      banner,
+      badges: achievements?.earned ?? [],
+      friendState: state,
+      loginNext: req.url,
+    }) as string;
     // Opening your own profile is seeing your new achievements.
-    if (owner.id === req.user!.id && req.user!.newAchievements > 0) await markSeen(db, owner.id);
+    if (viewer && owner.id === viewer.id && viewer.newAchievements > 0) await markSeen(db, owner.id);
     return html(reply, page);
   });
 

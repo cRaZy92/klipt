@@ -37,14 +37,17 @@ const PILLARS = [
 ] as const;
 
 /**
- * Klipt vs Medal. Only rows that are true and checkable; `medal` stays null until it's checked
- * against Medal's own pages (then the column shows).
+ * Klipt vs Medal: only rows Medal's own pages back up (checked 2026-11-27).
+ * - Ads: https://medal.tv/premium lists "Ad free" for Premium ("Ads help keep Medal free").
+ * - Watermark: https://medal.tv/premium, "Removable watermarks" ("Download your clips without the watermark").
+ * - Upload length: https://medal.tv/premium, "Upload clips of any length instead of maxxing out at 20 minutes."
+ * - Linux: https://medal.tv/ offers downloads for Windows, iOS and Android only.
  */
 export const COMPARISON: { what: string; klipt: string; medal: string | null }[] = [
-  { what: 'Ads', klipt: 'None', medal: null },
-  { what: 'Watermark on your clips', klipt: 'None', medal: null },
-  { what: 'Linux app', klipt: 'Yes', medal: null },
-  { what: 'Open source', klipt: 'Yes', medal: null },
+  { what: 'Ads', klipt: 'None', medal: 'Unless you pay' },
+  { what: 'Watermark on downloads', klipt: 'None', medal: 'Unless you pay' },
+  { what: 'Upload length', klipt: 'No time cap', medal: '20 minutes free' },
+  { what: 'Linux app', klipt: 'Yes', medal: 'No' },
 ];
 
 const VIDEO_POSTER = '/static/showcase/hero.jpg';
@@ -72,7 +75,7 @@ export function HomePage(props: { referrer: string | null; referralInvalid: bool
             <h1>Clips without bullshit.</h1>
             <p class="home-lead">
               Records your games in the background, saves the last 30 seconds on a key, edits and shares with one link.
-              No ads, no watermark, no limits.
+              No ads, no watermark, no paywall.
             </p>
             <div class="home-cta">
               <a class="btn primary big" href="/get-app/windows">Download for Windows</a>
@@ -145,7 +148,7 @@ export function HomePage(props: { referrer: string | null; referralInvalid: bool
         </section>
 
         <footer class="home-footer muted">
-          <a href="https://github.com/cRaZy92/klipt">Source on GitHub</a>
+          <a href="https://github.com/cRaZy92/klipt">Open source on GitHub</a>
           <span aria-hidden="true">·</span>
           <a href="/login">Log in</a>
         </footer>

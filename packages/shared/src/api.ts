@@ -30,6 +30,18 @@ export interface Me {
   profileVisibility: ProfileVisibility;
 }
 
+/** Where you stand with someone (`POST /api/friends/:username`). */
+export type FriendState = 'none' | 'outgoing' | 'incoming' | 'friends' | 'self';
+
+/** `GET /api/friends`: your friends and the requests either way, each sorted by username. */
+export interface FriendList {
+  friends: UserRef[];
+  /** People asking to be your friend. */
+  incoming: UserRef[];
+  /** People you asked. */
+  outgoing: UserRef[];
+}
+
 /** A person as lists show them: name, picture and the frame they wear. */
 export interface UserRef {
   username: string;

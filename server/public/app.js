@@ -31,6 +31,7 @@
   var MESSAGES = {
     unknown_user: "Klipt doesn't know that name, or they aren't your friend yet.",
     self: "You can't add yourself.",
+    invalid_referral: 'That link was already used or expired. Ask for a new one.',
     invalid_credentials: 'Wrong username or password.',
     account_disabled: 'This account is disabled.',
     username_taken: 'That username is taken.',
@@ -172,6 +173,9 @@
         if (action === 'friend-remove' && btn.textContent.trim() === 'Unfriend' && !confirm('Unfriend ' + btn.dataset.username + '?')) return;
         await api(action === 'friend-add' ? 'POST' : 'DELETE', '/api/friends/' + encodeURIComponent(btn.dataset.username));
         location.reload();
+      } else if (action === 'accept-referral') {
+        var accepted = await api('POST', '/api/referrals/' + encodeURIComponent(btn.dataset.code) + '/accept');
+        location.assign('/u/' + encodeURIComponent(accepted.username));
       } else if (action === 'make-referral') {
         var ref = await api('POST', '/api/referrals');
         await copy(ref.url);

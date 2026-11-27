@@ -149,15 +149,24 @@ describe('/r/:code', () => {
     expect(res.cookies.find((x) => x.name === 'klipt_ref')).toBeUndefined();
   });
 
-  it("logged in: befriends and goes to the sender's profile; the code is used", async () => {
+  it('logged in: asks first; only the POST makes friends and uses the code', async () => {
     const link = await makeLink();
     const bob = await createUser(t.db, { username: 'bob' });
     const bobCookie = (await sessionFor(t.db, bob.id)).cookie;
-    const res = await t.app.inject({ url: `/r/${link.code}`, headers: { cookie: bobCookie } });
-    expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/u/alice');
+    const page = await t.app.inject({ url: `/r/${link.code}`, headers: { cookie: bobCookie } });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain('Become friends with <strong>alice</strong>?');
+    expect(page.body).toContain('data-action="accept-referral"');
+    expect(await friendsOf(bobCookie)).toEqual([]);
+
+    const ok = await t.app.inject({ method: 'POST', url: `/api/referrals/${link.code}/accept`, headers: { cookie: bobCookie } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ username: 'alice' });
     expect(await friendsOf(bobCookie)).toEqual(['alice']);
     expect((await register('carol', { ref: link.code })).json().referral).toBe('invalid');
+    const again = await t.app.inject({ method: 'POST', url: `/api/referrals/${link.code}/accept`, headers: { cookie: bobCookie } });
+    expect(again.statusCode).toBe(400);
+    expect(again.json()).toMatchObject({ error: 'invalid_referral' });
   });
 
   it('logged in, own or used code', async () => {

@@ -358,13 +358,8 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
     const body = parsed.data;
     const user = req.user!;
-    // Apps from before Friends/Public send 'feed' or 'link' and can only read those two back.
-    const sent = (req.body as { visibility?: unknown }).visibility;
-    const legacy = sent === 'feed' || sent === 'link';
-    const answer = (item: ClipWithOwner): Clip => {
-      const clip = toClip(item, config.baseUrl);
-      return legacy && clip.visibility !== 'link' ? { ...clip, visibility: 'feed' as Visibility } : clip;
-    };
+    // (Older apps get 'feed' back for Friends/Public: see compat/legacyVisibility.ts.)
+    const answer = (item: ClipWithOwner): Clip => toClip(item, config.baseUrl);
     const highQuality = body.quality === 'high';
     if (highQuality && !user.isAdmin) {
       return reply.code(403).send({ error: 'forbidden', message: 'Only admins can upload in high quality.' });

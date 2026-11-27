@@ -8,6 +8,7 @@ import type { Db } from '../db/client.js';
 import { invites, users } from '../db/schema.js';
 import { makeFriends } from '../friends/repo.js';
 import { displayNameOf } from '../users/ref.js';
+import { ReferralPage } from '../web/pages/referral.js';
 
 /** How long a referral link works. */
 export const REFERRAL_DAYS = 14;
@@ -106,11 +107,19 @@ export async function referralRoutes(app: FastifyInstance): Promise<void> {
       });
       return reply.redirect('/?ref=1');
     }
+    // Logged in: ask first, so another site can't make you someone's friend just by sending you here.
     const sender = await referrerOf(db, code);
-    if (sender?.id === user.id) return reply.redirect('/friends?ref=own');
-    const claimed = sender ? await db.transaction((tx) => claimReferral(tx, code, user.id)) : null;
-    if (!claimed) return reply.redirect('/friends?ref=invalid');
-    return reply.redirect(`/u/${encodeURIComponent(sender!.username)}`);
+    if (!sender) return reply.redirect('/friends?ref=invalid');
+    if (sender.id === user.id) return reply.redirect('/friends?ref=own');
+    return reply.type('text/html; charset=utf-8').header('cache-control', 'private, no-cache').send(ReferralPage({ user, code, sender }) as string);
+  });
+
+  app.post('/api/referrals/:code/accept', { preHandler: requireUser }, async (req, reply) => {
+    const { code } = req.params as { code: string };
+    const sender = await referrerOf(db, code);
+    const claimed = sender && sender.id !== req.user!.id ? await db.transaction((tx) => claimReferral(tx, code, req.user!.id)) : null;
+    if (!claimed) return reply.code(400).send({ error: 'invalid_referral', message: 'That link was already used or expired.' });
+    return { username: sender!.username };
   });
 
   // Links made before referrals (admin invites) work the same way.

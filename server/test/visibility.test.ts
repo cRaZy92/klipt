@@ -115,14 +115,30 @@ describe('who sees what', () => {
   });
 });
 
+describe('older desktop apps', () => {
+  it("see 'feed' for Friends and Public clips; new apps and the website see the real values", async () => {
+    const desk = await sessionFor(t.db, id.me!, 'desktop');
+    const vis = async (headers: Record<string, string>) =>
+      ((await t.app.inject({ url: '/api/clips?scope=mine', headers })).json() as { items: { id: string; visibility: string }[] }).items
+        .map((c) => c.visibility)
+        .sort();
+    expect(await vis(desk.headers)).toEqual(['feed', 'feed', 'link']);
+    expect(await vis({ ...desk.headers, 'x-klipt-api': '2' })).toEqual(['friends', 'link', 'public']);
+    expect(await vis(h.me!)).toEqual(['friends', 'link', 'public']);
+    const one = await t.app.inject({ url: `/api/clips/${clipId('me', 'public')}`, headers: desk.headers });
+    expect(one.json().visibility).toBe('feed');
+  });
+});
+
 describe('upload visibility', () => {
   it('finalize: feed means friends, and no visibility follows the profile', async () => {
     const s = await sessionFor(t.db, id.pub!, 'desktop');
     const dir = await mkdtemp(join(tmpdir(), 'klipt-fx-'));
     const fixture = await readFile(await makeFixtureVideo(dir));
-    const finalize = async (extra: Record<string, unknown>) => {
+    const finalize = async (extra: Record<string, unknown>, old = false) => {
       const { uploadId } = await tusUpload(t.app, s.token, fixture);
-      const res = await t.app.inject({ method: 'POST', url: '/api/clips', headers: s.headers, payload: { uploadId, title: 'x', ...extra } });
+      const headers = old ? s.headers : { ...s.headers, 'x-klipt-api': '2' };
+      const res = await t.app.inject({ method: 'POST', url: '/api/clips', headers, payload: { uploadId, title: 'x', ...extra } });
       expect(res.statusCode).toBe(201);
       return res.json().visibility as string;
     };
@@ -130,7 +146,7 @@ describe('upload visibility', () => {
     expect(await finalize({ visibility: 'link' })).toBe('link');
     expect(await finalize({ visibility: 'friends' })).toBe('friends');
     // Older apps only understand feed/link in this answer: they get 'feed' back, the clip is Friends.
-    expect(await finalize({ visibility: 'feed' })).toBe('feed');
+    expect(await finalize({ visibility: 'feed' }, true)).toBe('feed');
     const rows = await t.db.select({ v: clips.visibility }).from(clips).where(eq(clips.userId, id.pub!));
     expect(rows.map((r) => r.v)).not.toContain('feed');
     expect(rows.filter((r) => r.v === 'friends')).toHaveLength(3);

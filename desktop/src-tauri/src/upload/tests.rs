@@ -513,3 +513,17 @@ fn visibility_reads_old_feed_as_friends() {
     assert_eq!(serde_json::from_str::<Visibility>("\"public\"").unwrap(), Visibility::Public);
     assert_eq!(Visibility::Friends.as_str(), "friends");
 }
+
+#[tokio::test]
+async fn every_request_says_it_knows_three_visibilities() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/me"))
+        .and(header("x-klipt-api", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })))
+        .mount(&server)
+        .await;
+    let client = ApiClient::new(&server.uri()).unwrap();
+    let got = client.get_json("tok", "/api/me", &[]).await.unwrap();
+    assert_eq!(got["ok"], true);
+}

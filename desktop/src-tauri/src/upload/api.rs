@@ -207,7 +207,12 @@ impl ApiClient {
             Ok(u) if matches!(u.scheme(), "http" | "https") => {}
             _ => return Err(ApiError::Network("invalid server address".into())),
         }
+        // Tells the server this app knows the visibilities link/friends/public (older apps get
+        // 'feed' instead, see the server's compat/legacyVisibility.ts).
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-klipt-api", reqwest::header::HeaderValue::from_static("2"));
         let http = reqwest::Client::builder()
+            .default_headers(headers)
             .connect_timeout(Duration::from_secs(15).min(timeout))
             .timeout(timeout)
             .build()

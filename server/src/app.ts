@@ -11,6 +11,7 @@ import { clipRoutes } from './clips/routes.js';
 import { albumRoutes } from './albums/routes.js';
 import { userRoutes } from './users/routes.js';
 import { friendRoutes } from './friends/routes.js';
+import { registerLegacyVisibility } from './compat/legacyVisibility.js';
 import { referralRoutes } from './referrals/routes.js';
 import { achievementRoutes } from './achievements/routes.js';
 import { webRoutes } from './web/routes.js';
@@ -91,6 +92,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       .send(ServerErrorPage({ user: req.user ?? null }) as string);
   });
   await registerAuth(app);
+  registerLegacyVisibility(app);
 
   app.get('/api/health', async (): Promise<HealthResponse> => ({ ok: true }));
 

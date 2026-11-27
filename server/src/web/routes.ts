@@ -15,6 +15,7 @@ import { markSeen, myAchievements } from '../achievements/engine.js';
 import { toUserRef, userRefColumns } from '../users/ref.js';
 import { friendState, listFriendRows } from '../friends/repo.js';
 import { FriendsPage } from './pages/friends.js';
+import { HomePage } from './pages/home.js';
 import { listReferrals, referrerOf, REF_COOKIE } from '../referrals/routes.js';
 import { ResetPage } from './pages/reset.js';
 import { displayNameOf, getClip, getProfileStats, getUserStorage, listClips, listGames, listViewers, InvalidCursorError, type Scope } from '../clips/repo.js';
@@ -136,8 +137,13 @@ export async function webRoutes(app: FastifyInstance): Promise<void> {
     return reply.header('cache-control', 'no-store').redirect(await latestInstaller(), 302);
   });
 
+  // Logged out: what Klipt is (and who invited you, from a referral link). Logged in: the feed.
   app.get('/', async (req, reply) => {
-    if (!guard(req, reply)) return reply;
+    if (!req.user) {
+      const referrer = await referrerOf(db, req.cookies[REF_COOKIE]);
+      const referralInvalid = (req.query as { ref?: unknown }).ref === 'invalid';
+      return html(reply, HomePage({ referrer: referrer?.displayName ?? null, referralInvalid }) as string);
+    }
     const data = await load(req, 'feed');
     return html(reply, FeedPage({ user: req.user!, ...data }) as string);
   });

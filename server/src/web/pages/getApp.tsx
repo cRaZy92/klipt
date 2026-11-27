@@ -3,7 +3,7 @@ import { esc as e } from '../escape.js';
 import { Layout } from '../layout.js';
 
 /** The Linux package's install command (the same script installs and updates). */
-const LINUX_INSTALL = 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/cRaZy92/klipt/main/packaging/aur/update.sh)"';
+export const LINUX_INSTALL = 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/cRaZy92/klipt/main/packaging/aur/update.sh)"';
 
 /**
  * How to install the desktop app. New accounts land here; it's also

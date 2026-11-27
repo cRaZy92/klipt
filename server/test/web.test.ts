@@ -42,10 +42,8 @@ async function mk(name: string, isAdmin = false) {
 }
 
 describe('web pages', () => {
-  it('redirects logged-out visitors to login with next', async () => {
-    const res = await get('/');
-    expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/login?next=%2F');
+  it('redirects logged-out visitors to login with next (the home page is the showcase)', async () => {
+    expect((await get('/')).statusCode).toBe(200);
     expect((await get('/me')).headers.location).toBe('/login?next=%2Fme');
   });
 

@@ -137,7 +137,7 @@
           {#each Array.from({ length: hiddenLeft }) as _, i (i)}
             <li class="badge secret">
               <span class="medal" aria-hidden="true">🔒</span>
-              <span class="text"><strong>???</strong><small>A secret. Keep playing.</small></span>
+              <span class="text"><strong>???</strong><small>A secret. Keep clipping.</small></span>
             </li>
           {/each}
         {/if}

@@ -87,7 +87,7 @@ export function HomePage(props: { referrer: string | null; referralInvalid: bool
           </div>
           <div class="home-hero-video">
             <span class="bracket left" aria-hidden="true"></span>
-            <video src={VIDEO} poster={VIDEO_POSTER} autoplay muted loop {...{ playsinline: true, preload: 'auto' }} aria-label="A clip being saved, trimmed and shared"></video>
+            <video src={VIDEO} poster={VIDEO_POSTER} autoplay muted loop {...{ playsinline: true, preload: 'auto' }} aria-label="An AWP clip from Counter-Strike 2"></video>
             <span class="bracket right" aria-hidden="true"></span>
           </div>
         </section>

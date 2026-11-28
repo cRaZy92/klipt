@@ -1,8 +1,9 @@
 //! Automatic cleanup of old clips on this PC (Settings → Clips folder), and the folder's size.
 //!
 //! When it's on, clips saved more than `cleanup_days` days ago are deleted (file, library row
-//! and thumbnail) at startup, every few hours, and right after the setting is saved. Favorites,
-//! uploaded clips and clips with an upload in progress or paused are always kept.
+//! and thumbnail) at startup, every few hours, and right after the setting is saved. Only the kinds
+//! checked in Settings are deleted (see [`CleanupKinds`]). Imported clips and clips with an upload
+//! in progress or paused are always kept.
 
 use std::fs;
 use std::path::Path;
@@ -13,7 +14,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::Uploads;
-use crate::library::Library;
+use crate::library::{Clip, Library};
 use crate::settings::Settings;
 use crate::state::AppState;
 
@@ -31,6 +32,32 @@ pub struct Report {
     pub freed_bytes: u64,
 }
 
+/// Which kinds of clips the cleanup may delete (Settings → Cleanup).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CleanupKinds {
+    /// Never uploaded.
+    pub local: bool,
+    pub uploaded: bool,
+    pub favorites: bool,
+}
+
+impl CleanupKinds {
+    pub fn from_settings(settings: &Settings) -> Self {
+        CleanupKinds {
+            local: settings.cleanup_local,
+            uploaded: settings.cleanup_uploaded,
+            favorites: settings.cleanup_favorites,
+        }
+    }
+
+    /// Whether the cleanup may delete `clip` (once it's old enough): every kind it has is checked,
+    /// and no upload of it is in progress or paused.
+    pub fn allows(&self, clip: &Clip) -> bool {
+        let kind_checked = if clip.server_clip_id.is_some() { self.uploaded } else { self.local };
+        clip.upload_id.is_none() && (!clip.favorite || self.favorites) && kind_checked
+    }
+}
+
 /// Deletes the clips `settings` say are too old. `busy` reports clips being uploaded or exported
 /// right now (they're kept). The library lock is held per clip, never across the whole run.
 pub fn clean(library: &Mutex<Library>, settings: &Settings, now_ms: i64, busy: impl Fn(&str) -> bool) -> Report {
@@ -39,6 +66,7 @@ pub fn clean(library: &Mutex<Library>, settings: &Settings, now_ms: i64, busy: i
         return report;
     }
     let before = now_ms - i64::from(settings.cleanup_days) * DAY_MS;
+    let kinds = CleanupKinds::from_settings(settings);
     let candidates = match lock(library).cleanup_candidates(before) {
         Ok(clips) => clips,
         Err(e) => {
@@ -46,12 +74,12 @@ pub fn clean(library: &Mutex<Library>, settings: &Settings, now_ms: i64, busy: i
             return report;
         }
     };
-    for clip in candidates.into_iter().filter(|c| !busy(&c.id)) {
+    for clip in candidates.into_iter().filter(|c| kinds.allows(c) && !busy(&c.id)) {
         let size = fs::metadata(&clip.path).map(|m| m.len()).unwrap_or(0);
         let library = lock(library);
-        // Starred or uploaded since the list was made: keep it.
+        // Starred or uploaded since the list was made: check it again.
         match library.get(&clip.id) {
-            Ok(now) if !now.favorite && now.server_clip_id.is_none() && now.upload_id.is_none() => {}
+            Ok(now) if kinds.allows(&now) => {}
             _ => continue,
         }
         match library.remove(&clip.id, true) {
@@ -156,7 +184,7 @@ mod tests {
         let off = Settings { cleanup_enabled: false, cleanup_days: 30, ..Settings::default() };
         assert_eq!(clean(&library, &off, now, |_| false), Report::default());
 
-        let on = Settings { cleanup_enabled: true, cleanup_days: 30, ..Settings::default() };
+        let on = Settings { cleanup_enabled: true, cleanup_days: 30, cleanup_local: true, ..Settings::default() };
         let report = clean(&library, &on, now, |id| id == busy);
         assert_eq!(report, Report { deleted: 1, freed_bytes: 100 });
         assert!(!dir.path().join("old.mp4").exists());
@@ -164,6 +192,84 @@ mod tests {
         assert!(library.get(&old).is_err());
         assert!(library.get(&busy).is_ok());
         assert!(library.get(&recent).is_ok());
+    }
+
+    fn get(library: &Mutex<Library>, id: &str) -> Clip {
+        lock(library).get(id).unwrap()
+    }
+
+    #[test]
+    fn allows_a_clip_only_when_every_kind_it_has_is_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Mutex::new(Library::open(&dir.path().join("library.db")).unwrap());
+        let local = add(&library, dir.path(), "local.mp4", 0);
+        let uploaded = add(&library, dir.path(), "up.mp4", 0);
+        let uploaded_fav = add(&library, dir.path(), "upfav.mp4", 0);
+        let local_fav = add(&library, dir.path(), "fav.mp4", 0);
+        let paused = add(&library, dir.path(), "paused.mp4", 0);
+        {
+            let lib = lock(&library);
+            lib.mark_uploaded(&uploaded, "s1", "https://k/c/s1", "friends").unwrap();
+            lib.mark_uploaded(&uploaded_fav, "s2", "https://k/c/s2", "friends").unwrap();
+            lib.set_favorite(&uploaded_fav, true).unwrap();
+            lib.set_favorite(&local_fav, true).unwrap();
+            lib.set_upload_progress(&paused, Some(("tus-1", 10))).unwrap();
+        }
+        let k = |local, uploaded, favorites| CleanupKinds { local, uploaded, favorites };
+        let (local, uploaded, uploaded_fav, local_fav, paused) = (
+            get(&library, &local),
+            get(&library, &uploaded),
+            get(&library, &uploaded_fav),
+            get(&library, &local_fav),
+            get(&library, &paused),
+        );
+        assert!(k(true, false, false).allows(&local));
+        assert!(!k(false, true, true).allows(&local));
+        assert!(k(false, true, false).allows(&uploaded));
+        assert!(!k(true, false, true).allows(&uploaded));
+        assert!(!k(false, true, false).allows(&uploaded_fav));
+        assert!(k(false, true, true).allows(&uploaded_fav));
+        assert!(!k(true, false, false).allows(&local_fav));
+        assert!(k(true, false, true).allows(&local_fav));
+        assert!(!k(true, true, true).allows(&paused));
+    }
+
+    #[test]
+    fn deletes_only_the_checked_kinds() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Mutex::new(Library::open(&dir.path().join("library.db")).unwrap());
+        let now = 100 * DAY_MS;
+        let local = add(&library, dir.path(), "local.mp4", now - 40 * DAY_MS);
+        let uploaded = add(&library, dir.path(), "up.mp4", now - 40 * DAY_MS);
+        let fav = add(&library, dir.path(), "fav.mp4", now - 40 * DAY_MS);
+        {
+            let lib = lock(&library);
+            lib.mark_uploaded(&uploaded, "s1", "https://k/c/s1", "friends").unwrap();
+            lib.set_favorite(&fav, true).unwrap();
+        }
+        // The defaults: uploaded clips only.
+        let on = Settings { cleanup_enabled: true, cleanup_days: 30, ..Settings::default() };
+        assert_eq!(clean(&library, &on, now, |_| false).deleted, 1);
+        let lib = lock(&library);
+        assert!(lib.get(&uploaded).is_err());
+        assert!(lib.get(&local).is_ok());
+        assert!(lib.get(&fav).is_ok());
+    }
+
+    #[test]
+    fn rechecks_each_clip_with_the_same_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Mutex::new(Library::open(&dir.path().join("library.db")).unwrap());
+        let now = 100 * DAY_MS;
+        let local = add(&library, dir.path(), "local.mp4", now - 40 * DAY_MS);
+        let on = Settings { cleanup_enabled: true, cleanup_days: 30, cleanup_local: true, ..Settings::default() };
+        // Starred after the list was made, just before it's deleted.
+        let report = clean(&library, &on, now, |id| {
+            lock(&library).set_favorite(id, true).unwrap();
+            false
+        });
+        assert_eq!(report.deleted, 0);
+        assert!(lock(&library).get(&local).is_ok());
     }
 
     #[test]

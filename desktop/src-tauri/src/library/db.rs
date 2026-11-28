@@ -381,8 +381,8 @@ impl Library {
     /// the user's own files, or copies of them). Oldest first.
     pub fn cleanup_candidates(&self, before: i64) -> Result<Vec<Clip>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT {COLUMNS} FROM clips WHERE created_at < ?1 AND favorite = 0 AND server_clip_id IS NULL
-             AND upload_id IS NULL AND source_path IS NULL ORDER BY created_at ASC"
+            "SELECT {COLUMNS} FROM clips WHERE created_at < ?1 AND upload_id IS NULL AND source_path IS NULL
+             ORDER BY created_at ASC"
         ))?;
         let clips = stmt.query_map([before], row_to_clip)?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(clips)
@@ -1376,21 +1376,21 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_keeps_new_favorite_uploaded_and_uploading_clips() {
+    fn cleanup_candidates_are_old_owned_clips_not_uploading() {
         let f = Fixture::new();
         let old = f.add("old.mp4", 100, None);
         let older = f.add("older.mp4", 50, None);
         f.add("new.mp4", 1_000, None);
-        let fav = f.add("fav.mp4", 100, None);
+        let fav = f.add("fav.mp4", 60, None);
         f.lib.set_favorite(&fav.id, true).unwrap();
-        let up = f.add("up.mp4", 100, None);
+        let up = f.add("up.mp4", 70, None);
         f.lib.mark_uploaded(&up.id, "srv", "https://k/c/srv", "friends").unwrap();
         let paused = f.add("paused.mp4", 100, None);
         f.lib.set_upload_progress(&paused.id, Some(("tus-1", 10))).unwrap();
         let imported = f.add("imported.mp4", 100, None);
         f.lib.set_source(&imported.id, &imported.path).unwrap();
         let ids: Vec<String> = f.lib.cleanup_candidates(500).unwrap().into_iter().map(|c| c.id).collect();
-        assert_eq!(ids, vec![older.id, old.id]);
+        assert_eq!(ids, vec![older.id, fav.id, up.id, old.id]);
     }
 
     #[test]

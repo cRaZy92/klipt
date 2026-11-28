@@ -66,7 +66,9 @@
             <div class="progress" style:--value={job.progress}><div></div></div>
             <div class="bottom">
               <span class="step">
-                {#if job.state === "running"}<span class="spinner" aria-hidden="true"></span>{/if}
+                <!-- Mounted only while the screen shows: WebKit never starts the animation of a
+                     spinner added while the kept screen was hidden (content-visibility: hidden). -->
+                {#if job.state === "running" && active}<span class="spinner" aria-hidden="true"></span>{/if}
                 {#if job.state === "failed"}<Icon name="alert" size={14} />{/if}
                 {#if job.state === "done"}<Icon name="check" size={14} />{/if}
                 {job.step}{#if more}<span class="muted"> · {more}</span>{/if}

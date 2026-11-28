@@ -5,6 +5,7 @@
 //! checked in Settings are deleted (see [`CleanupKinds`]). Imported clips and clips with an upload
 //! in progress or paused are always kept.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
@@ -51,16 +52,28 @@ impl CleanupKinds {
     }
 
     /// Whether the cleanup may delete `clip` (once it's old enough): every kind it has is checked,
-    /// and no upload of it is in progress or paused.
-    pub fn allows(&self, clip: &Clip) -> bool {
-        let kind_checked = if clip.server_clip_id.is_some() { self.uploaded } else { self.local };
+    /// and no upload of it is in progress or paused. An uploaded clip also needs its server copy
+    /// in `on_server` (confirmed since Klipt started): the link can outlive a copy deleted on the
+    /// website while Klipt couldn't reach the server, and then this file is the only one left.
+    pub fn allows(&self, on_server: &HashSet<String>, clip: &Clip) -> bool {
+        let kind_checked = match &clip.server_clip_id {
+            Some(id) => self.uploaded && on_server.contains(id),
+            None => self.local,
+        };
         clip.upload_id.is_none() && (!clip.favorite || self.favorites) && kind_checked
     }
 }
 
-/// Deletes the clips `settings` say are too old. `busy` reports clips being uploaded or exported
-/// right now (they're kept). The library lock is held per clip, never across the whole run.
-pub fn clean(library: &Mutex<Library>, settings: &Settings, now_ms: i64, busy: impl Fn(&str) -> bool) -> Report {
+/// Deletes the clips `settings` say are too old. `on_server` holds the uploads the server
+/// confirmed since Klipt started (see [`CleanupKinds::allows`]). `busy` reports clips being
+/// uploaded or exported right now (they're kept). The library lock is held per clip, never across the whole run.
+pub fn clean(
+    library: &Mutex<Library>,
+    settings: &Settings,
+    now_ms: i64,
+    on_server: &HashSet<String>,
+    busy: impl Fn(&str) -> bool,
+) -> Report {
     let mut report = Report::default();
     if !settings.cleanup_enabled {
         return report;
@@ -74,12 +87,12 @@ pub fn clean(library: &Mutex<Library>, settings: &Settings, now_ms: i64, busy: i
             return report;
         }
     };
-    for clip in candidates.into_iter().filter(|c| kinds.allows(c) && !busy(&c.id)) {
+    for clip in candidates.into_iter().filter(|c| kinds.allows(on_server, c) && !busy(&c.id)) {
         let size = fs::metadata(&clip.path).map(|m| m.len()).unwrap_or(0);
         let library = lock(library);
         // Starred or uploaded since the list was made: check it again.
         match library.get(&clip.id) {
-            Ok(now) if kinds.allows(&now) => {}
+            Ok(now) if kinds.allows(on_server, &now) => {}
             _ => continue,
         }
         match library.remove(&clip.id, true) {
@@ -101,12 +114,13 @@ pub fn clean(library: &Mutex<Library>, settings: &Settings, now_ms: i64, busy: i
 pub fn run_now(app: &AppHandle) -> Report {
     let state = app.state::<AppState>();
     let settings = lock(&state.settings).clone();
+    let on_server = lock(&state.confirmed_uploads).clone();
     let uploads = app.state::<Uploads>();
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    let report = clean(&state.library, &settings, now_ms, |id| uploads.is_active(id));
+    let report = clean(&state.library, &settings, now_ms, &on_server, |id| uploads.is_active(id));
     if report.deleted > 0 {
         let _ = app.emit(CLIPS_CLEANED, report);
     }
@@ -150,6 +164,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 mod tests {
     use super::*;
     use crate::library::NewClip;
+    use std::collections::HashSet;
 
     fn add(library: &Mutex<Library>, dir: &Path, name: &str, created_at: i64) -> String {
         let path = dir.join(name);
@@ -182,10 +197,10 @@ mod tests {
         let recent = add(&library, dir.path(), "recent.mp4", now - 29 * DAY_MS);
 
         let off = Settings { cleanup_enabled: false, cleanup_days: 30, ..Settings::default() };
-        assert_eq!(clean(&library, &off, now, |_| false), Report::default());
+        assert_eq!(clean(&library, &off, now, &HashSet::new(), |_| false), Report::default());
 
         let on = Settings { cleanup_enabled: true, cleanup_days: 30, cleanup_local: true, ..Settings::default() };
-        let report = clean(&library, &on, now, |id| id == busy);
+        let report = clean(&library, &on, now, &HashSet::new(), |id| id == busy);
         assert_eq!(report, Report { deleted: 1, freed_bytes: 100 });
         assert!(!dir.path().join("old.mp4").exists());
         let library = lock(&library);
@@ -216,6 +231,7 @@ mod tests {
             lib.set_upload_progress(&paused, Some(("tus-1", 10))).unwrap();
         }
         let k = |local, uploaded, favorites| CleanupKinds { local, uploaded, favorites };
+        let on_server: HashSet<String> = ["s1".into(), "s2".into()].into();
         let (local, uploaded, uploaded_fav, local_fav, paused) = (
             get(&library, &local),
             get(&library, &uploaded),
@@ -223,15 +239,17 @@ mod tests {
             get(&library, &local_fav),
             get(&library, &paused),
         );
-        assert!(k(true, false, false).allows(&local));
-        assert!(!k(false, true, true).allows(&local));
-        assert!(k(false, true, false).allows(&uploaded));
-        assert!(!k(true, false, true).allows(&uploaded));
-        assert!(!k(false, true, false).allows(&uploaded_fav));
-        assert!(k(false, true, true).allows(&uploaded_fav));
-        assert!(!k(true, false, false).allows(&local_fav));
-        assert!(k(true, false, true).allows(&local_fav));
-        assert!(!k(true, true, true).allows(&paused));
+        assert!(k(true, false, false).allows(&on_server, &local));
+        assert!(!k(false, true, true).allows(&on_server, &local));
+        assert!(k(false, true, false).allows(&on_server, &uploaded));
+        assert!(!k(true, false, true).allows(&on_server, &uploaded));
+        assert!(!k(false, true, false).allows(&on_server, &uploaded_fav));
+        assert!(k(false, true, true).allows(&on_server, &uploaded_fav));
+        assert!(!k(true, false, false).allows(&on_server, &local_fav));
+        assert!(k(true, false, true).allows(&on_server, &local_fav));
+        assert!(!k(true, true, true).allows(&on_server, &paused));
+        // The server hasn't confirmed the upload since Klipt started: its copy may be gone.
+        assert!(!k(false, true, false).allows(&HashSet::new(), &uploaded));
     }
 
     #[test]
@@ -247,9 +265,12 @@ mod tests {
             lib.mark_uploaded(&uploaded, "s1", "https://k/c/s1", "friends").unwrap();
             lib.set_favorite(&fav, true).unwrap();
         }
-        // The defaults: uploaded clips only.
+        // The defaults: uploaded clips only, once the server confirmed them.
         let on = Settings { cleanup_enabled: true, cleanup_days: 30, ..Settings::default() };
-        assert_eq!(clean(&library, &on, now, |_| false).deleted, 1);
+        assert_eq!(clean(&library, &on, now, &HashSet::new(), |_| false).deleted, 0);
+        assert!(lock(&library).get(&uploaded).is_ok());
+        let on_server: HashSet<String> = ["s1".into()].into();
+        assert_eq!(clean(&library, &on, now, &on_server, |_| false).deleted, 1);
         let lib = lock(&library);
         assert!(lib.get(&uploaded).is_err());
         assert!(lib.get(&local).is_ok());
@@ -264,7 +285,7 @@ mod tests {
         let local = add(&library, dir.path(), "local.mp4", now - 40 * DAY_MS);
         let on = Settings { cleanup_enabled: true, cleanup_days: 30, cleanup_local: true, ..Settings::default() };
         // Starred after the list was made, just before it's deleted.
-        let report = clean(&library, &on, now, |id| {
+        let report = clean(&library, &on, now, &HashSet::new(), |id| {
             lock(&library).set_favorite(id, true).unwrap();
             false
         });

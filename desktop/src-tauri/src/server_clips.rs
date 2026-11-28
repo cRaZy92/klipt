@@ -77,7 +77,8 @@ pub async fn my_uploads(app: AppHandle) -> Result<Option<Vec<Value>>> {
     }
     apply_uploads(&app, &items);
     if complete {
-        forget_deleted_uploads(&app, &client, &saved, &items).await;
+        let confirmed = forget_deleted_uploads(&app, &client, &saved, &items).await;
+        *crate::commands::lock(&app.state::<AppState>().confirmed_uploads) = confirmed;
     }
     Ok(Some(items))
 }
@@ -86,12 +87,23 @@ pub async fn my_uploads(app: AppHandle) -> Result<Option<Vec<Value>>> {
 /// uploaded again. `uploads` is the full list; a linked id missing from it is checked on its own,
 /// so a clip whose upload finished after the list was fetched keeps its link, and only a 404
 /// unlinks. Best effort: errors only mean the link is checked again next time.
-async fn forget_deleted_uploads(app: &AppHandle, client: &ApiClient, saved: &Auth, uploads: &[Value]) {
+///
+/// Returns the ids the server confirmed exist: the listed ones plus the linked ones it found.
+async fn forget_deleted_uploads(
+    app: &AppHandle,
+    client: &ApiClient,
+    saved: &Auth,
+    uploads: &[Value],
+) -> std::collections::HashSet<String> {
     let listed: std::collections::HashSet<&str> =
         uploads.iter().filter_map(|u| u.get("id").and_then(Value::as_str)).collect();
+    let mut confirmed: std::collections::HashSet<String> = listed.iter().map(|id| id.to_string()).collect();
     let linked = match crate::commands::lock(&app.state::<AppState>().library).server_clip_ids() {
         Ok(ids) => ids,
-        Err(e) => return crate::elog!("klipt: can't read uploaded clips: {e}"),
+        Err(e) => {
+            crate::elog!("klipt: can't read uploaded clips: {e}");
+            return confirmed;
+        }
     };
     for id in linked.iter().filter(|id| !listed.contains(id.as_str())) {
         let Ok(id) = checked_id(id) else { continue };
@@ -101,10 +113,13 @@ async fn forget_deleted_uploads(app: &AppHandle, client: &ApiClient, saved: &Aut
                     crate::elog!("klipt: can't unlink deleted upload {id}: {e}");
                 }
             }
-            Ok(_) => {}
+            Ok(_) => {
+                confirmed.insert(id.to_string());
+            }
             Err(e) => crate::elog!("klipt: can't check upload {id}: {e}"),
         }
     }
+    confirmed
 }
 
 /// Renames the server copy and/or changes who can see it. Returns the updated clip.

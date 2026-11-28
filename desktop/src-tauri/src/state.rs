@@ -1,5 +1,6 @@
 //! App-wide state, created once at startup and shared with commands through Tauri.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,6 +23,9 @@ pub struct AppState {
     pub tools: Option<Tools>,
     /// Something the user must hear about at startup (the library was damaged and replaced).
     pub startup_notice: Option<String>,
+    /// Server ids of the uploads the server confirmed exist since Klipt started (replaced after
+    /// each full listing). The cleanup deletes an uploaded clip only when its upload is in here.
+    pub confirmed_uploads: Mutex<HashSet<String>>,
 }
 
 impl AppState {
@@ -50,7 +54,14 @@ impl AppState {
                 None
             }
         };
-        Ok(AppState { data_dir, settings: Mutex::new(settings), library: Mutex::new(library), tools, startup_notice })
+        Ok(AppState {
+            data_dir,
+            settings: Mutex::new(settings),
+            library: Mutex::new(library),
+            tools,
+            startup_notice,
+            confirmed_uploads: Mutex::new(HashSet::new()),
+        })
     }
 }
 

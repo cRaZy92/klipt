@@ -173,11 +173,13 @@ Ideas the spec left out of v1 on purpose, or that came up while building. Nothin
 | Speech-to-text subtitles              | Subtitles are typed by hand for now; the owner deferred automatic ones          |
 | Likes, comments, notifications        | A non-goal for v1; the Feed is enough for a small group                      |
 | Several qualities per clip on the server | The server compresses every clip to H.264 and makes a small Discord copy; picking a quality in the player is still out |
+| Stable and Beta update channels       | Raised by the owner 2026-11-28, then put off ("not sure anymore"). Idea: Settings lets each user pick Stable or Beta. Beta = every push to `main` touching `desktop/` (owner picked this over hand-cut betas), versions like `1.0.1-beta.12`, one rolling `beta` GitHub release, Linux beta builds `main`. Stable = a `stable` branch: after the owner's Windows test, the release script moves `stable` to the tested commit, bumps, tags and merges back into `main`. Switching Beta → Stable waits for the next stable release (no downgrade) |
+| Friends can see your favorites        | Raised by the owner 2026-11-28. Idea: each user's favorites show up as a built-in "Favorites" album (made by the system, can't be renamed or deleted) on their profile `/u/<name>` and in the app, so friends can watch what you starred. Only uploaded clips the viewer may already see would appear; local-only favorites stay private. Open: visible to everyone by default, or a Settings switch to hide it |
 
 ## Open questions
 
 - **When is it 1.0?** Releases are `0.1.<run number>`. Going to 1.0 means changing `version` in
   `desktop/src-tauri/tauri.conf.json` to `1.0.0`.
-- **Should every push to `main` reach friends?** Today any desktop change on `main` becomes a release
-  within ~40 minutes. Batching changes would need a manual trigger or tags.
+- **Should friends get untested builds?** Since 2026-11-27 only `pnpm release` tags reach anyone;
+  a Beta channel (see "Later") would let some users opt into every push to `main`.
 - **Is the AUR package enough for Linux,** or does a friend on another distro need an AppImage?

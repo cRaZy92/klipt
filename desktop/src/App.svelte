@@ -761,9 +761,10 @@
   /* A running import's progress on the Clips tab, so it's visible from every page. */
   .import-pct {
     position: absolute;
-    top: -0.3rem;
-    right: -0.9rem;
+    top: -0.25rem;
+    left: calc(50% + 0.15rem);
     padding: 0 0.3rem;
+    white-space: nowrap;
     border: 2px solid var(--bg, #0b0a10);
     border-radius: 999px;
     background: var(--surface-3);
@@ -774,20 +775,22 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Sits on the glyph's top-right corner (the glyph is 20px, centred), overlapping it only
+     slightly; anchored by `left` so a wider "9+" grows outward rather than over the icon. */
   .new-count {
     position: absolute;
-    top: -0.2rem;
-    right: 0.1rem;
-    min-width: 1.1rem;
-    height: 1.1rem;
-    padding: 0 0.3rem;
+    top: -0.25rem;
+    left: calc(50% + 0.15rem);
+    min-width: 0.6rem;
+    height: 0.95rem;
+    padding: 0 0.2rem;
     border: 2px solid var(--bg, #0b0a10);
     border-radius: 999px;
     background: var(--accent);
     color: #fff;
-    font-size: 0.66rem;
+    font-size: 0.6rem;
     font-weight: 750;
-    line-height: 0.75rem;
+    line-height: 0.95rem;
     text-align: center;
     font-variant-numeric: tabular-nums;
     box-sizing: content-box;

@@ -32,6 +32,7 @@
     selected = false,
     selecting = false,
     onselect,
+    cleanupDeletesFavorites = false,
   }: {
     clip: ClipView;
     /** The time relative dates are counted from (ticks once a minute). */
@@ -66,6 +67,8 @@
     selecting?: boolean;
     /** Toggles the selection (the event says whether Shift was held). */
     onselect?: (e: MouseEvent) => void;
+    /** The automatic cleanup is on and may delete favorites: the star stops promising they're kept. */
+    cleanupDeletesFavorites?: boolean;
   } = $props();
 
   let menuOpen = $state(false);
@@ -265,7 +268,11 @@
         onclick={onfavorite}
         aria-pressed={clip.favorite}
         aria-label={clip.favorite ? "Remove from favorites" : "Add to favorites"}
-        title={clip.favorite ? "Favorite: kept by the automatic cleanup" : "Add to favorites"}
+        title={clip.favorite
+          ? cleanupDeletesFavorites
+            ? "Favorite"
+            : "Favorite: kept by the automatic cleanup"
+          : "Add to favorites"}
       >
         <Icon name={clip.favorite ? "starFilled" : "star"} size={16} />
       </button>

@@ -499,6 +499,7 @@
             active={view.name === "library"}
             {hotkey}
             bufferSeconds={settings?.bufferSeconds ?? 30}
+            cleanupDeletesFavorites={!!settings?.cleanupEnabled && !!settings?.cleanupFavorites}
             onedit={(clip) => go({ name: "editor", clip })}
           />
         </main>

@@ -35,6 +35,7 @@
     hotkey,
     bufferSeconds,
     onedit,
+    cleanupDeletesFavorites = false,
   }: {
     /** This is the screen shown (it's kept alive, hidden, while another one is). */
     active?: boolean;
@@ -43,6 +44,8 @@
     bufferSeconds: number;
     /** Opens the editor (Task 11); without it cards don't offer Edit. */
     onedit?: (clip: ClipView) => void;
+    /** The automatic cleanup is on and may delete favorites (the star's tooltip says so). */
+    cleanupDeletesFavorites?: boolean;
   } = $props();
 
   // My clips = the clips on this PC plus your uploads on the server (myClips.ts merges them).
@@ -708,6 +711,7 @@
                   selecting={selected.size > 0}
                   onselect={(e) => toggleSelect(item.key, e)}
                   onfavorite={() => toggleFavorite(clip)}
+                  {cleanupDeletesFavorites}
                   thumbVersion={thumbVersion[clip.id] ?? clip.thumbnailMs ?? 0}
                   onshowfolder={() => act(() => api.showInFolder(clip.id))}
                   oncopy={() => copyLink(clip)}

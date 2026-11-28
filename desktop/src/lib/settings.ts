@@ -57,6 +57,9 @@ export function validateSettings(s: Settings): FieldError[] {
   const badApp = (a: string) => !a.trim() || a.length > 64 || /[|:]/.test(a) || a.trim() !== a;
   if (s.voiceApps.length > 10 || s.voiceApps.some(badApp)) fail("voiceApps", "List up to 10 app names, without | or : characters.");
   if (!inRange(s.cleanupDays, CLEANUP_DAYS_MIN, CLEANUP_DAYS_MAX)) fail("cleanupDays", "Keep clips for 1 to 365 days.");
+  if (s.cleanupEnabled && !(s.cleanupLocal || s.cleanupUploaded || s.cleanupFavorites)) {
+    fail("cleanupKinds", "Pick at least one kind of clip to delete.");
+  }
   if (!(s.editorCacheGb >= EDITOR_CACHE_GB_MIN && s.editorCacheGb <= EDITOR_CACHE_GB_MAX)) {
     fail("editorCacheGb", "Keep 0.5 to 100 GB of editor previews.");
   }

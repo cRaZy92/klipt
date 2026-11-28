@@ -181,9 +181,16 @@ export interface Settings {
   saveSound: boolean;
   saveNotification: boolean;
   serverUrl: string | null;
-  /** Delete clips older than `cleanupDays` from this PC; uploaded and favorite clips are kept. */
+  /** Delete clips older than `cleanupDays` from this PC, of the kinds checked below. A clip is
+   * deleted only if every kind it has is checked (an uploaded favorite needs both). */
   cleanupEnabled: boolean;
   cleanupDays: number;
+  /** The cleanup may delete clips that were never uploaded. */
+  cleanupLocal: boolean;
+  /** The cleanup may delete uploaded clips (the server keeps its copy). */
+  cleanupUploaded: boolean;
+  /** The cleanup may delete favorites. */
+  cleanupFavorites: boolean;
   /** Disk the editor's scrubbing pictures may take, in GB; the least recently opened are deleted first. */
   editorCacheGb: number;
   /** A system notification when a friend shares a clip. */

@@ -23,6 +23,9 @@ const defaults: Settings = {
   serverUrl: null,
   cleanupEnabled: false,
   cleanupDays: 30,
+  cleanupLocal: false,
+  cleanupUploaded: true,
+  cleanupFavorites: false,
   editorCacheGb: 2,
   friendNotifications: true,
   copyLinkOnUpload: false,
@@ -108,6 +111,15 @@ describe("sameSettings", () => {
     expect(sameSettings(defaults, { ...defaults })).toBe(true);
     expect(sameSettings(defaults, { ...defaults, fps: 30 })).toBe(false);
     expect(sameSettings(defaults, { ...defaults, displayId: "DP-1" })).toBe(false);
+  });
+});
+
+describe("cleanup kinds", () => {
+  it("needs at least one kind while cleanup is on", () => {
+    const none = { cleanupLocal: false, cleanupUploaded: false, cleanupFavorites: false };
+    expect(fields({ cleanupEnabled: true, ...none })).toEqual(["cleanupKinds"]);
+    expect(fields({ cleanupEnabled: false, ...none })).toEqual([]);
+    expect(fields({ cleanupEnabled: true })).toEqual([]);
   });
 });
 

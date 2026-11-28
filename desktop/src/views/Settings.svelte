@@ -458,6 +458,7 @@
     recordHotkey: "hotkey",
     outputDir: "clips",
     cleanupDays: "clips",
+    cleanupKinds: "clips",
     editorCacheGb: "clips",
     startWithOs: "general",
     saveSound: "general",
@@ -900,7 +901,7 @@
         <span class="switch" aria-hidden="true"></span>
         <span>
           <strong>Delete old clips from this PC</strong>
-          <small>Uploaded and favorite clips are always kept. Deleted clips can't be recovered.</small>
+          <small>Deleted clips can't be recovered.</small>
         </span>
       </label>
       <div class="row">
@@ -919,6 +920,24 @@
         </div>
         {#if fieldErrors.cleanupDays}<small class="error">{fieldErrors.cleanupDays}</small>{/if}
       </div>
+      <fieldset class="row">
+        <legend>Delete these kinds of clips</legend>
+        <div class="choices">
+          <label class="choice">
+            <input type="checkbox" bind:checked={draft.cleanupLocal} />
+            <span><strong>Local only</strong><small>Clips you never uploaded.</small></span>
+          </label>
+          <label class="choice">
+            <input type="checkbox" bind:checked={draft.cleanupUploaded} />
+            <span><strong>Uploaded</strong><small>The server keeps its copy, which may be compressed.</small></span>
+          </label>
+          <label class="choice">
+            <input type="checkbox" bind:checked={draft.cleanupFavorites} />
+            <span><strong>Favorites</strong><small>Starred clips.</small></span>
+          </label>
+        </div>
+        {#if fieldErrors.cleanupKinds}<small class="error">{fieldErrors.cleanupKinds}</small>{/if}
+      </fieldset>
     </section>
 
     <section>

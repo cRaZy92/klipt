@@ -112,6 +112,10 @@ pub async fn resume_all(app: AppHandle) {
     loop {
         let state = app.state::<AppState>();
         logged_in = auth::load(&state.data_dir).is_some();
+        // A clip mid-move looks missing (and would be dropped): wait for the next pass.
+        if crate::move_clips::is_moving() {
+            break;
+        }
         let rows = match lock(&state.library).pending_uploads() {
             Ok(rows) => rows,
             Err(e) => {

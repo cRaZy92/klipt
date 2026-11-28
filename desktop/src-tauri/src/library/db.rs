@@ -416,6 +416,23 @@ impl Library {
     }
 
     /// Remembers (or with `None`, forgets) how far a tus upload got, so a restart can resume it.
+    /// Every clip's id and file, for moving the clips folder.
+    pub fn paths(&self) -> Result<Vec<(String, PathBuf)>> {
+        let mut stmt = self.conn.prepare("SELECT id, path FROM clips ORDER BY created_at")?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, PathBuf::from(row.get::<_, String>(1)?))))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Points clip `id` at its file's new place (it was moved). A clip imported in place keeps
+    /// its `source_path` pointing at the file too.
+    pub fn set_path(&self, id: &str, from: &Path, to: &Path) -> Result<()> {
+        self.update(
+            id,
+            "UPDATE clips SET path = ?2, source_path = CASE WHEN source_path = ?3 THEN ?2 ELSE source_path END WHERE id = ?1",
+            params![id, to.to_string_lossy(), from.to_string_lossy()],
+        )
+    }
+
     pub fn set_upload_progress(&self, id: &str, progress: Option<(&str, u64)>) -> Result<()> {
         let (upload_id, offset) = progress.unzip();
         self.update(

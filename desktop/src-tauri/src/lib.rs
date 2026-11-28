@@ -26,6 +26,7 @@ pub mod library;
 pub mod logging;
 pub mod media_server;
 pub mod player_cache;
+pub mod move_clips;
 pub mod mp4_mute;
 pub mod network_files;
 pub mod parts;
@@ -198,6 +199,9 @@ pub fn run() {
             server_clips::download_upload,
             jobs::list_jobs,
             jobs::clear_finished_jobs,
+            move_clips::clips_to_move,
+            move_clips::move_clips,
+            move_clips::cancel_move_clips,
             server_clips::record_view,
             server_clips::set_server_favorite,
             server_clips::list_albums,

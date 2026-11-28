@@ -249,6 +249,7 @@
         local = [clip, ...local.filter((c) => c.id !== clip.id)];
       }),
       on("upload-done", load),
+      on("clips-moved", load),
       on("thumbnail-changed", ({ id }) => (thumbVersion = { ...thumbVersion, [id]: Date.now() })),
       on("clips-cleaned", ({ deleted }) => {
         void loadLocal();

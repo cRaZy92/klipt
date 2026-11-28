@@ -881,6 +881,7 @@ pub async fn import_drop(app: AppHandle) -> Result<bool> {
 }
 
 fn start_import(app: AppHandle, source: Source) -> Result<bool> {
+    crate::move_clips::check_not_moving()?;
     let tools = app.state::<AppState>().tools.clone().ok_or(AppError::ToolsMissing)?;
     let Some(checked) = crate::commands::lock(&CHECKED).take().filter(|c| c.source == source) else {
         return Ok(false);
@@ -914,6 +915,11 @@ fn start_import(app: AppHandle, source: Source) -> Result<bool> {
         return Err(AppError::Internal(format!("can't start the import: {e}")));
     }
     Ok(true)
+}
+
+/// An import runs.
+pub fn is_running() -> bool {
+    RUNNING.load(Ordering::SeqCst)
 }
 
 /// Stops checking, or stops the import (the file being converted is dropped).

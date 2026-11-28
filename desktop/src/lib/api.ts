@@ -821,6 +821,12 @@ export const api = {
   releaseWindow: () => invoke<void>("release_window"),
   /** The update announced last (`update-available`), for a window that opened after it. */
   pendingUpdate: () => invoke<{ version: string; command: string | null } | null>("pending_update"),
+  /** How many library clips (and bytes) sit in `from`, the old clips folder, to move to the current one. */
+  clipsToMove: (from: string) => invoke<{ count: number; bytes: number }>("clips_to_move", { from }),
+  /** Starts moving them; returns the move's job id (progress in the Jobs list, `clips-moved` at the end). */
+  moveClips: (from: string) => invoke<number>("move_clips", { from }),
+  /** Stops the move after the file it's on. */
+  cancelMoveClips: () => invoke<void>("cancel_move_clips"),
   /** Background work since Klipt started (the Jobs screen); changes arrive as `jobs-changed`. */
   listJobs: () => invoke<Job[]>("list_jobs"),
   /** Drops the finished jobs; returns what's left. */
@@ -857,6 +863,8 @@ export interface Events {
   "export-progress": ExportProgress;
   /** How far a "Combine" is, 0..1. */
   "combine-progress": number;
+  /** Moving the clips folder ended: clips have new paths. */
+  "clips-moved": null;
   /** The whole Jobs list, after any change. */
   "jobs-changed": Job[];
   /** The number of friends' clips you haven't seen changed. */

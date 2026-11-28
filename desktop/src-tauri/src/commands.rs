@@ -823,6 +823,7 @@ pub(crate) fn prepare_upload(
     options: UploadOptions,
 ) -> Result<(Job, UploadGuard)> {
     let UploadOptions { tagged, replace, high_quality, albums } = options;
+    crate::move_clips::check_not_moving()?;
     let state = app.state::<AppState>();
     let uploads = app.state::<Uploads>();
     let title = clean_title(title)?;
@@ -1622,6 +1623,7 @@ pub async fn export_copy(
     if editor::same_file(&dest_path, &clip.path) {
         return Err(AppError::OverwriteOriginal);
     }
+    crate::move_clips::check_not_moving()?;
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
     let dest_name = dest_path.file_name().map_or_else(|| dest_path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
@@ -1684,6 +1686,7 @@ pub async fn make_part_clip(
     thumbnail_ms: Option<u64>,
 ) -> Result<ClipView> {
     let title = clean_title(&title)?;
+    crate::move_clips::check_not_moving()?;
     let (clip, tools, dir) = {
         let state = app.state::<AppState>();
         let clip = lock(&state.library).get(&id)?;
@@ -1715,6 +1718,7 @@ pub async fn make_part_clip(
 #[tauri::command]
 pub async fn combine_clips(app: AppHandle, ids: Vec<String>, title: String) -> Result<ClipView> {
     let title = clean_title(&title)?;
+    crate::move_clips::check_not_moving()?;
     let (clips, tools, dir) = {
         let state = app.state::<AppState>();
         let library = lock(&state.library);

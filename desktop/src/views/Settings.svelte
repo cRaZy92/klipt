@@ -44,6 +44,7 @@
   import Keys from "../components/Keys.svelte";
   import ResourcesPanel from "../components/ResourcesPanel.svelte";
   import FeedbackDialog from "../components/FeedbackDialog.svelte";
+  import MoveClipsDialog from "../components/MoveClipsDialog.svelte";
   import Avatar from "../components/Avatar.svelte";
   import AvatarCropDialog from "../components/AvatarCropDialog.svelte";
   import { pickProfilePicture } from "../lib/thumbnailImage";
@@ -317,12 +318,14 @@
     if (errors.length > 0) return;
     saving = true;
     hotkeyProblem = null;
+    const oldFolder = settings.outputDir;
     try {
       const result = await api.setSettings($state.snapshot(draft));
       onsaved(result.settings, result);
       draft = { ...result.settings };
       setErrors({});
       toast(result.recorderRestarted ? RESTARTED : "Settings saved", "success");
+      if (result.settings.outputDir !== oldFolder) void offerMove(oldFolder);
     } catch (e) {
       const code = errorCode(e);
       if (code === "invalid_settings") {
@@ -378,6 +381,18 @@
         break;
       case "modifiersOnly":
         break;
+    }
+  }
+
+  /** The clips left in the old folder after it changed, offered to move (null: nothing to ask). */
+  let moveOffer = $state<{ from: string; count: number; bytes: number } | null>(null);
+
+  async function offerMove(from: string) {
+    try {
+      const { count, bytes } = await api.clipsToMove(from);
+      if (count > 0) moveOffer = { from, count, bytes };
+    } catch (e) {
+      toast(`Can't look at the old clips folder: ${errorMessage(e)}`, "error");
     }
   }
 
@@ -1158,6 +1173,18 @@
 
 {#if feedbackKind}
   <FeedbackDialog kind={feedbackKind} onclose={() => (feedbackKind = null)} />
+{/if}
+
+{#if moveOffer}
+  <MoveClipsDialog
+    from={moveOffer.from}
+    count={moveOffer.count}
+    bytes={moveOffer.bytes}
+    onclose={() => {
+      moveOffer = null;
+      void refreshFolderSize();
+    }}
+  />
 {/if}
 
 {#if cropping}

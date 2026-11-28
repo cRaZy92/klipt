@@ -112,6 +112,10 @@ pub fn clean(
 
 /// Runs [`clean`] with the app's current settings and tells the UI when clips went away.
 pub fn run_now(app: &AppHandle) -> Report {
+    // Clips are changing place: the next run deletes what's due.
+    if crate::move_clips::is_moving() {
+        return Report::default();
+    }
     let state = app.state::<AppState>();
     let settings = lock(&state.settings).clone();
     let on_server = lock(&state.confirmed_uploads).clone();

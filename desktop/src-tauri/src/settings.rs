@@ -76,9 +76,16 @@ pub struct Settings {
     pub save_sound: bool,
     pub save_notification: bool,
     pub server_url: Option<String>,
-    /// Delete clips older than `cleanup_days` from this PC (uploaded and favorite clips are kept).
+    /// Delete clips older than `cleanup_days` from this PC, of the kinds checked below. A clip is
+    /// deleted only if every kind it has is checked (an uploaded favorite needs both).
     pub cleanup_enabled: bool,
     pub cleanup_days: u32,
+    /// The cleanup may delete clips that were never uploaded.
+    pub cleanup_local: bool,
+    /// The cleanup may delete uploaded clips (the server keeps its copy).
+    pub cleanup_uploaded: bool,
+    /// The cleanup may delete favorites.
+    pub cleanup_favorites: bool,
     /// Disk the editor's scrubbing pictures (filmstrips) may take; the least recently opened go first.
     pub editor_cache_gb: f32,
     /// A system notification when a friend uploads a clip.
@@ -96,6 +103,20 @@ pub struct Settings {
 
 fn onboarded_when_missing() -> bool {
     true
+}
+
+/// Reads a settings file. Files from before the cleanup had kinds to choose from (no
+/// `cleanupLocal`) and with the cleanup on keep deleting what it did then: clips never uploaded.
+fn parse(bytes: &[u8]) -> serde_json::Result<Settings> {
+    let json: serde_json::Value = serde_json::from_slice(bytes)?;
+    let before_kinds = json.get("cleanupLocal").is_none();
+    let mut settings: Settings = serde_json::from_value(json)?;
+    if before_kinds && settings.cleanup_enabled {
+        settings.cleanup_local = true;
+        settings.cleanup_uploaded = false;
+        settings.cleanup_favorites = false;
+    }
+    Ok(settings)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -149,6 +170,9 @@ impl Default for Settings {
             server_url: None,
             cleanup_enabled: false,
             cleanup_days: 30,
+            cleanup_local: false,
+            cleanup_uploaded: true,
+            cleanup_favorites: false,
             editor_cache_gb: 2.0,
             friend_notifications: true,
             copy_link_on_upload: false,
@@ -196,7 +220,7 @@ impl Settings {
                 return Settings::default();
             }
         };
-        match serde_json::from_slice::<Settings>(&bytes) {
+        match parse(&bytes) {
             Ok(settings) => settings.with_invalid_fields_reset(),
             Err(e) => {
                 crate::elog!("klipt: {} is corrupt ({e}); moved to {BACKUP_NAME}, using default settings", path.display());
@@ -273,6 +297,9 @@ impl Settings {
         if !CLEANUP_DAYS_RANGE.contains(&self.cleanup_days) {
             fail("cleanupDays", "Keep clips for 1 to 365 days.");
         }
+        if self.cleanup_enabled && !(self.cleanup_local || self.cleanup_uploaded || self.cleanup_favorites) {
+            fail("cleanupKinds", "Pick at least one kind of clip to delete.");
+        }
         if !EDITOR_CACHE_GB_RANGE.contains(&self.editor_cache_gb) {
             fail("editorCacheGb", "Keep 0.5 to 100 GB of editor previews.");
         }
@@ -303,6 +330,11 @@ impl Settings {
                 "recordHotkey" => self.record_hotkey = defaults.record_hotkey.clone(),
                 "outputDir" => self.output_dir = defaults.output_dir.clone(),
                 "cleanupDays" => self.cleanup_days = defaults.cleanup_days,
+                "cleanupKinds" => {
+                    self.cleanup_local = defaults.cleanup_local;
+                    self.cleanup_uploaded = defaults.cleanup_uploaded;
+                    self.cleanup_favorites = defaults.cleanup_favorites;
+                }
                 "editorCacheGb" => self.editor_cache_gb = defaults.editor_cache_gb,
                 "voiceApps" => self.voice_apps = defaults.voice_apps.clone(),
                 other => debug_assert!(false, "validate() returned a field this function doesn't reset: {other}"),
@@ -536,6 +568,52 @@ mod tests {
         assert_eq!(fields(Settings { output_dir: PathBuf::new(), ..Settings::default() }), ["outputDir"]);
         let messages = Settings { fps: 45, ..Settings::default() }.validate();
         assert!(messages[0].message.contains("30 or 60"), "{}", messages[0].message);
+    }
+
+    #[test]
+    fn cleanup_kinds_default_to_uploaded_only() {
+        let d = Settings::default();
+        assert!(!d.cleanup_enabled);
+        assert_eq!((d.cleanup_local, d.cleanup_uploaded, d.cleanup_favorites), (false, true, false));
+    }
+
+    #[test]
+    fn old_files_with_cleanup_on_keep_deleting_local_clips_only() {
+        let on = parse(br#"{"cleanupEnabled":true,"cleanupDays":10}"#).unwrap();
+        assert_eq!((on.cleanup_local, on.cleanup_uploaded, on.cleanup_favorites), (true, false, false));
+        assert_eq!(on.cleanup_days, 10);
+        let off = parse(br#"{"cleanupEnabled":false}"#).unwrap();
+        assert_eq!((off.cleanup_local, off.cleanup_uploaded, off.cleanup_favorites), (false, true, false));
+        // Saved by this version: taken as is.
+        let new = parse(
+            br#"{"cleanupEnabled":true,"cleanupLocal":false,"cleanupUploaded":true,"cleanupFavorites":true}"#,
+        )
+        .unwrap();
+        assert_eq!((new.cleanup_local, new.cleanup_uploaded, new.cleanup_favorites), (false, true, true));
+        // Through load too (the path the app uses).
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(FILE_NAME), r#"{"cleanupEnabled": true}"#).unwrap();
+        assert!(Settings::load(dir.path()).cleanup_local);
+    }
+
+    #[test]
+    fn cleanup_on_needs_at_least_one_kind() {
+        let none = Settings {
+            cleanup_enabled: true,
+            cleanup_local: false,
+            cleanup_uploaded: false,
+            cleanup_favorites: false,
+            ..Settings::default()
+        };
+        let errors = none.validate();
+        assert!(errors
+            .iter()
+            .any(|e| e.field == "cleanupKinds" && e.message == "Pick at least one kind of clip to delete."));
+        let off = Settings { cleanup_enabled: false, ..none.clone() };
+        assert!(off.validate().iter().all(|e| e.field != "cleanupKinds"));
+        let reset = none.with_invalid_fields_reset();
+        assert_eq!((reset.cleanup_local, reset.cleanup_uploaded, reset.cleanup_favorites), (false, true, false));
+        assert!(reset.cleanup_enabled);
     }
 
     #[test]

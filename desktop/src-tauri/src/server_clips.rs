@@ -365,12 +365,25 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
     std::fs::create_dir_all(&output_dir)?;
     let ext = if info.screenshot { "png" } else { "mp4" };
     let dest = free_path(&output_dir, &file_name(&info.title, &id, ext));
-    let mut resp = client.get_media(&info.video_url).await.map_err(|e| failed(&data_dir, &saved, e))?;
+    let job = crate::jobs::Job::start(&app, crate::jobs::JobKind::Download, &info.title, None);
+    job.step("Downloading", 0.0, 1.0, true);
+    let mut resp = match client.get_media(&info.video_url).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            let e = failed(&data_dir, &saved, e);
+            job.failed(e.user_message());
+            return Err(e);
+        }
+    };
+    let total = resp.content_length().unwrap_or(0);
     let part = dest.with_extension(format!("{ext}.part"));
     let written = async {
         let mut file = std::fs::File::create(&part)?;
+        let mut done = 0u64;
         while let Some(chunk) = resp.chunk().await.map_err(|e| AppError::Network(e.without_url().to_string()))? {
             file.write_all(&chunk)?;
+            done += chunk.len() as u64;
+            job.bytes(done, total.max(done));
         }
         file.sync_all()?;
         std::fs::rename(&part, &dest)?;
@@ -379,8 +392,10 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
     .await;
     if let Err(e) = written {
         let _ = std::fs::remove_file(&part);
+        job.failed(e.user_message());
         return Err(e);
     }
+    job.step("Adding to your library", 1.0, 1.0, false);
 
     let new = NewClip {
         path: dest.clone(),
@@ -419,6 +434,7 @@ pub async fn download_upload(app: AppHandle, id: String) -> Result<ClipView> {
             crate::elog!("klipt: can't make a thumbnail for {}: {e}", clip.path.display());
         }
     }
+    job.done(None);
     Ok(ClipView { file_missing: !clip.path.is_file(), thumb_path: thumb.is_file().then_some(thumb), clip })
 }
 

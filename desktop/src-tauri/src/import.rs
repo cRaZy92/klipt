@@ -890,9 +890,22 @@ fn start_import(app: AppHandle, source: Source) -> Result<bool> {
     }
     CANCEL.store(false, Ordering::SeqCst);
     let copies = copies_dir(&app);
+    let title = match &source {
+        Source::Folder(root) => root.file_name().map_or_else(|| root.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned()),
+        Source::Drop => "Dropped files".to_string(),
+    };
     let spawned = std::thread::Builder::new().name("klipt-import".into()).spawn(move || {
         let _running = RunningGuard;
-        let summary = run(&app, &tools, &checked, &copies);
+        let job = crate::jobs::Job::start(&app, crate::jobs::JobKind::Import, &title, None);
+        job.step("Importing", 0.0, 1.0, true);
+        job.items(0, checked.files.len() as u64);
+        let summary = run(&app, &tools, &checked, &copies, &job);
+        let result = Some(import_result(&summary));
+        if summary.cancelled {
+            job.cancelled(result);
+        } else {
+            job.done(result);
+        }
         let _ = app.emit(events::FINISHED, summary);
         crate::activity::changed(&app);
     });
@@ -916,7 +929,20 @@ pub fn eta_secs(files: &[Planned], current: usize, current_fraction: f64, rates:
     file_secs(now, rates) * (1.0 - current_fraction.clamp(0.0, 1.0)) + rest
 }
 
-fn run(app: &AppHandle, tools: &Tools, checked: &Checked, copies_dir: &Path) -> Summary {
+/// "Imported 12 clips, 2 skipped" for the Jobs list.
+fn import_result(summary: &Summary) -> String {
+    let clips = |n: usize| if n == 1 { "1 clip".to_string() } else { format!("{n} clips") };
+    let mut text = format!("Imported {}", clips(summary.imported));
+    if summary.already_there > 0 {
+        text.push_str(&format!(", {} already in the library", summary.already_there));
+    }
+    if !summary.skipped.is_empty() {
+        text.push_str(&format!(", {} skipped", summary.skipped.len()));
+    }
+    text
+}
+
+fn run(app: &AppHandle, tools: &Tools, checked: &Checked, copies_dir: &Path, job: &crate::jobs::Job) -> Summary {
     let state = app.state::<AppState>();
     let started = std::time::Instant::now();
     let files = &checked.files;
@@ -953,6 +979,8 @@ fn run(app: &AppHandle, tools: &Tools, checked: &Checked, copies_dir: &Path) -> 
             p.elapsed_secs = started.elapsed().as_secs_f64();
             p.eta_secs = eta_secs(files, i, fraction, &meter.rates());
             p.fraction = (p.elapsed_secs / (p.elapsed_secs + p.eta_secs)).clamp(0.0, 1.0);
+            job.progress_eta(p.fraction, Some(p.eta_secs));
+            job.items(p.done as u64, p.total as u64);
             let _ = app.emit(events::PROGRESS, p.clone());
         };
         emit(&mut p, 0.0, work != Work::Instant && work != Work::None);

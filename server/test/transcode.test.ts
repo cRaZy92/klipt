@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clips, users } from '../src/db/schema.js';
 import { probeVideo, transcodeH264 } from '../src/clips/media.js';
-import { createUser, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
+import { befriendAll, createUser, makeTestApp, sessionFor, tusUpload, type TestApp } from './helpers.js';
 
 /** A 2 s 640x360 H.264 clip: `quality` 'high' is a big near-lossless file (compresses well), 'low' a small one (doesn't). */
 async function makeVideo(dir: string, quality: 'high' | 'low'): Promise<string> {
@@ -186,6 +186,22 @@ describe('compression queue', () => {
     expect(feed.body).toContain('class="proc queued"');
     const me = await t.app.inject({ url: '/me', headers: aliceWeb });
     expect(me.body).toContain('class="proc queued"');
+  });
+
+  it("tells the owner how far their clip's compression is", async () => {
+    await t.app.transcoder.stop();
+    const created = await upload(await makeVideo(dir, 'low'));
+    expect((await getClip(created.id)).processingProgress).toBeNull();
+    // Picked up by a worker that hasn't reported yet: 0.
+    await t.db.update(clips).set({ transcodeState: 'running' }).where(eq(clips.id, created.id));
+    expect((await getClip(created.id)).processingProgress).toBe(0);
+
+    const bob = await createUser(t.db, { username: 'bob' });
+    await befriendAll(t.db);
+    const bobWeb = (await sessionFor(t.db, bob.id)).headers;
+    const seen = (await t.app.inject({ url: `/api/clips/${created.id}`, headers: bobWeb })).json();
+    expect(seen.processing).toBe('running');
+    expect(seen).not.toHaveProperty('processingProgress');
   });
 
   it('the live admin fragment is admin only', async () => {

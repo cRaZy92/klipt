@@ -19,6 +19,7 @@ pub mod ffmpeg;
 pub mod games;
 pub mod hotkey;
 pub mod import;
+pub mod jobs;
 #[cfg(target_os = "linux")]
 mod autostart_linux;
 pub mod library;
@@ -104,6 +105,7 @@ pub fn run() {
             app.manage(media_server::MediaServer::start(player_cache)?);
             app.manage(state);
             app.manage(commands::Uploads::default());
+            app.manage(jobs::JobList::default());
             app.manage(upload_notice::UploadBatch::default());
             app.manage(activity::Reporter::default());
             app.manage(filmstrip::Jobs::default());
@@ -194,6 +196,8 @@ pub fn run() {
             thumb_image::set_upload_thumbnail,
             server_clips::delete_upload,
             server_clips::download_upload,
+            jobs::list_jobs,
+            jobs::clear_finished_jobs,
             server_clips::record_view,
             server_clips::set_server_favorite,
             server_clips::list_albums,

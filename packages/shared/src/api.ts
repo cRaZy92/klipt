@@ -305,6 +305,11 @@ export interface Clip {
    */
   processing: 'queued' | 'running' | null;
   /**
+   * How far the compression is (0..1) while `processing` is `running`; null otherwise. Only in
+   * `GET /api/clips/:id` for the clip's owner (the app's Jobs list).
+   */
+  processingProgress?: number | null;
+  /**
    * The share link is ready to hand out: its Discord embed works. False for a few minutes after a
    * long clip is uploaded (its embed copy is being made), so the app waits before copying it.
    */

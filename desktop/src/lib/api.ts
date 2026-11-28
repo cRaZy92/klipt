@@ -452,6 +452,33 @@ export function fileUrl(path: string): string {
   return convertFileSrc(path);
 }
 
+export type JobKind = "upload" | "import" | "combine" | "export" | "download" | "move";
+export type JobState = "running" | "done" | "failed" | "cancelled";
+
+/** How much of a job's current step is done. */
+export type JobAmount =
+  | { unit: "bytes"; done: number; total: number; rate: number | null }
+  | { unit: "items"; done: number; total: number };
+
+/** Background work, as the core's Jobs list keeps it (`jobs::JobView`). */
+export interface Job {
+  id: number;
+  kind: JobKind;
+  title: string;
+  clipId: string | null;
+  state: JobState;
+  /** What it's doing now ("Uploading"), or how it ended. */
+  step: string;
+  /** The whole job, 0..1. */
+  progress: number;
+  etaSecs: number | null;
+  amount: JobAmount | null;
+  /** A failed job's error, or a short result. */
+  message: string | null;
+  startedAtMs: number;
+  finishedAtMs: number | null;
+}
+
 /** A clip on the server's shared feed (the server's `Clip`). */
 export interface FeedClip {
   id: string;
@@ -794,6 +821,10 @@ export const api = {
   releaseWindow: () => invoke<void>("release_window"),
   /** The update announced last (`update-available`), for a window that opened after it. */
   pendingUpdate: () => invoke<{ version: string; command: string | null } | null>("pending_update"),
+  /** Background work since Klipt started (the Jobs screen); changes arrive as `jobs-changed`. */
+  listJobs: () => invoke<Job[]>("list_jobs"),
+  /** Drops the finished jobs; returns what's left. */
+  clearFinishedJobs: () => invoke<Job[]>("clear_finished_jobs"),
 };
 
 export interface Events {
@@ -826,6 +857,8 @@ export interface Events {
   "export-progress": ExportProgress;
   /** How far a "Combine" is, 0..1. */
   "combine-progress": number;
+  /** The whole Jobs list, after any change. */
+  "jobs-changed": Job[];
   /** The number of friends' clips you haven't seen changed. */
   "feed-new": { count: number };
   /** A clip's thumbnail was made again (the editor picked a new frame). */

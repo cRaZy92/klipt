@@ -912,17 +912,26 @@ pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> Upl
     let more = job.more;
     let cache_dir = job.cache_dir.clone();
     let (data_dir, token) = (job.data_dir.clone(), job.auth.token.clone());
+    let auth = job.auth.clone();
+    let tracked = crate::jobs::Job::start(&app, crate::jobs::JobKind::Upload, &title, Some(&id));
+    let steps = UploadSteps::new(&job);
+    let reporter = tracked.reporter();
     // The work runs in its own task so a panic anywhere in it still ends in `upload-failed`
     // instead of a card stuck on "Uploading…".
     let worker_app = app.clone();
-    let result = match tauri::async_runtime::spawn(async move { run_upload(&worker_app, &job).await }).await {
+    let result = match tauri::async_runtime::spawn(async move { run_upload(&worker_app, &job, &steps, &reporter).await }).await {
         Ok(result) => result,
         Err(e) => Err(AppError::Internal(format!("upload task failed: {e}"))),
     };
     // Free the clip before telling the UI, so a "Try again" right away isn't refused.
     drop(guard);
     match result {
-        Ok((share_url, replaced)) => {
+        Ok(Uploaded { share_url, replaced, server_id, compressing }) => {
+            if compressing {
+                tauri::async_runtime::spawn(follow_compression(tracked, steps, auth, server_id));
+            } else {
+                tracked.done(None);
+            }
             forget_pending_upload(&app, &id);
             let auto_copy = lock(&app.state::<AppState>().settings).copy_link_on_upload;
             let copied = auto_copy
@@ -973,6 +982,7 @@ pub(crate) async fn run_job(app: AppHandle, job: Job, guard: UploadGuard) -> Upl
                     Err(e) => crate::elog!("klipt: can't forget the expired login: {e}"),
                 }
             }
+            tracked.failed(e.user_message());
             emit_failed(&app, &id, &e, stale);
             // The last of several failed: the ones before it still get their summary.
             if let Some(toast) = announce_finished(&app, more, false) {
@@ -1014,8 +1024,98 @@ pub(crate) fn upload_thumbnail_ms(clip: &Clip) -> Option<u64> {
     Some(export::joined_time(at, &kept))
 }
 
+/// What a finished upload left on the server.
+struct Uploaded {
+    share_url: String,
+    /// The video at an existing link was replaced.
+    replaced: bool,
+    server_id: String,
+    /// The server compresses it next (the job follows that).
+    compressing: bool,
+}
+
+/// The slices of the Jobs bar an upload's steps fill. The server's compression, when it will run,
+/// gets the last quarter.
+#[derive(Clone, Copy)]
+pub(crate) struct UploadSteps {
+    /// Room left for the compression after the upload itself.
+    scale: f64,
+}
+
+impl UploadSteps {
+    fn new(job: &Job) -> UploadSteps {
+        let compresses = job.clip.kind == crate::library::ClipKind::Clip && !job.high_quality;
+        UploadSteps { scale: if compresses { 0.75 } else { 1.0 } }
+    }
+
+    /// Label, slice and whether it's measured, for an upload phase. `exported`: the video was
+    /// prepared first (not a screenshot or a resumed upload), so the upload starts later.
+    fn of(self, phase: &str, exported: bool) -> (&'static str, f64, f64, bool) {
+        let s = self.scale;
+        let upload_from = if exported { 0.4 } else { 0.0 };
+        match phase {
+            "exporting" => ("Preparing video", 0.0, 0.4 * s, true),
+            "uploading" => ("Uploading", upload_from * s, 0.9 * s, true),
+            "finalizing" => ("Finishing up", 0.9 * s, 0.95 * s, false),
+            "preparing" => ("Getting the link ready", 0.95 * s, s, false),
+            "queued" => ("Waiting for the server to compress it", s, s, false),
+            _ => ("Compressing on the server", s, 1.0, true),
+        }
+    }
+}
+
+/// Moves the upload's job to `phase` (and tells the window's upload cards, as before).
+fn upload_step(app: &AppHandle, id: &str, reporter: &crate::jobs::Reporter, steps: UploadSteps, phase: &'static str, exported: bool) {
+    let (label, from, to, measured) = steps.of(phase, exported);
+    reporter.step(label, from, to, measured);
+    progress(app, id, phase, 0, if phase == "exporting" { 1000 } else { 0 });
+}
+
+/// Follows the server's compression of a finished upload until it's done, so its job ends then.
+/// The clip already plays and its link works meanwhile; this only fills the Jobs bar.
+async fn follow_compression(job: crate::jobs::Job, steps: UploadSteps, auth: Auth, server_id: String) {
+    const EVERY: Duration = Duration::from_secs(4);
+    const AT_MOST: Duration = Duration::from_secs(3 * 60 * 60);
+    let Ok(client) = ApiClient::new(&auth.server_url) else {
+        return job.done(None);
+    };
+    let path = format!("/api/clips/{server_id}");
+    let start = Instant::now();
+    let mut phase = "";
+    while start.elapsed() < AT_MOST {
+        match client.get_json(&auth.token, &path, &[]).await {
+            Ok(now) => {
+                let progress = now.get("processingProgress").and_then(|v| v.as_f64());
+                let next = match now.get("processing").and_then(|v| v.as_str()) {
+                    Some("queued") => "queued",
+                    Some("running") => "running",
+                    _ => return job.done(None),
+                };
+                if next != phase {
+                    phase = next;
+                    let (label, from, to, measured) = steps.of(phase, false);
+                    job.step(label, from, to, measured);
+                }
+                if let Some(p) = progress {
+                    job.progress(p);
+                }
+            }
+            Err(ApiError::Unauthorized) => {
+                return job.done(Some("Uploaded. Klipt stopped following the compression: you logged out.".into()));
+            }
+            Err(ApiError::Server { status: 404, .. }) => {
+                return job.done(Some("Uploaded. The clip was deleted on the server since.".into()));
+            }
+            Err(e) => crate::elog!("klipt: can't check the compression of clip {server_id}: {e}"),
+        }
+        tokio::time::sleep(EVERY).await;
+    }
+    job.done(Some("Uploaded. The server is still compressing it.".into()))
+}
+
 /// The share link, and whether the upload replaced the video at an existing one.
-async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
+async fn run_upload(app: &AppHandle, job: &Job, steps: &UploadSteps, reporter: &crate::jobs::Reporter) -> Result<Uploaded> {
+    let steps = *steps;
     let clip = &job.clip;
     let id = clip.id.as_str();
     let server = job.auth.server_url.as_str();
@@ -1029,14 +1129,17 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
     if resume.is_none() && clip.upload_id.is_some() {
         set_upload_progress(app, id, None);
     }
-    if resume.is_none() && !screenshot {
-        progress(app, id, "exporting", 0, 1000);
+    let exported_now = resume.is_none() && !screenshot;
+    if exported_now {
+        upload_step(app, id, reporter, steps, "exporting", true);
         let (tools, input, cache_dir) = (job.tools.clone(), clip.path.clone(), job.cache_dir.clone());
         let (clip_id, tracks, export_app) = (clip.id.clone(), export::Tracks::of(clip), app.clone());
         let edit = editor::current_edit(clip);
         let quality = if job.high_quality { export::Quality::High } else { export::Quality::Standard };
+        let export_reporter = reporter.clone();
         tauri::async_runtime::spawn_blocking(move || {
             export::export(&tools, &input, &cache_dir, &clip_id, &edit, tracks, quality, |p| {
+                export_reporter.progress(f64::from(p));
                 progress(&export_app, &clip_id, "exporting", (p * 1000.0) as u64, 1000);
             })
         })
@@ -1045,17 +1148,22 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
     }
 
     let token = job.auth.token.as_str();
+    let (label, from, to, _) = steps.of("uploading", exported_now);
+    reporter.step(label, from, to, true);
     let outcome = tus::upload(
         &client,
         token,
         &exported,
         resume,
-        |sent, total| progress(app, id, "uploading", sent, total),
+        |sent, total| {
+            reporter.bytes(sent, total);
+            progress(app, id, "uploading", sent, total)
+        },
         |url, offset| set_upload_progress(app, id, Some((url, offset))),
     )
     .await?;
 
-    progress(app, id, "finalizing", 0, 0);
+    upload_step(app, id, reporter, steps, "finalizing", exported_now);
     let request = FinalizeRequest {
         upload_id: outcome.upload_id,
         title: job.title.clone(),
@@ -1072,7 +1180,7 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
     if !server_clip.share_ready {
         // A long clip's embed copy is still being made: a link posted now would show no embed in
         // Discord (which remembers that), so it's handed out only once it's ready.
-        progress(app, id, "preparing", 0, 0);
+        upload_step(app, id, reporter, steps, "preparing", exported_now);
         server_clip.share_url = wait_for_share_link(&client, token, &server_clip).await;
     }
     let replaced = job.replaces.as_deref() == Some(server_clip.id.as_str());
@@ -1104,7 +1212,8 @@ async fn run_upload(app: &AppHandle, job: &Job) -> Result<(String, bool)> {
             crate::elog!("klipt: can't delete the uploaded export {}: {e}", exported.display());
         }
     }
-    Ok((server_clip.share_url, replaced))
+    let compressing = steps.scale < 1.0 && server_clip.processing.is_some();
+    Ok(Uploaded { share_url: server_clip.share_url, replaced, server_id: server_clip.id, compressing })
 }
 
 /// Asks the server every few seconds until the clip's share link is ready, then returns it. Gives
@@ -1515,6 +1624,7 @@ pub async fn export_copy(
     }
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
+    let dest_name = dest_path.file_name().map_or_else(|| dest_path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
     let guard = app.state::<Uploads>().try_begin(&id).map_err(|_| AppError::ClipBusy)?;
     let edit = edit_from(trim_start_ms, trim_end_ms, game_volume, mic_volume, voice_volume, master_volume, extra_volumes, blur_video, removed_ranges, zoom_ranges, blur_ranges, subtitles, audio_ranges);
     let trim = crate::library::Trim { start_ms: edit.trim_start_ms, end_ms: edit.trim_end_ms };
@@ -1524,8 +1634,12 @@ pub async fn export_copy(
     crate::library::validate_subtitles(&edit.subtitles, clip.duration_ms)?;
     crate::library::validate_audio_ranges(&edit.audio, clip.duration_ms)?;
     let worker_app = app.clone();
+    let job = crate::jobs::Job::start(&app, crate::jobs::JobKind::Export, &clip.title, Some(&id));
+    job.step("Exporting", 0.0, 1.0, true);
+    let reporter = job.reporter();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, export::Tracks::of(&clip), export::Quality::Standard, |p| {
+            reporter.progress(f64::from(p));
             emit(&worker_app, events::EXPORT_PROGRESS, ExportProgressEvent { id: &id, progress: p });
         })?;
         editor::move_file(&staged, &dest_path)
@@ -1534,8 +1648,12 @@ pub async fn export_copy(
     .map_err(|e| AppError::Internal(format!("export task failed: {e}")))
     .and_then(|r| r);
     drop(guard);
-    if let Err(e) = &result {
-        crate::elog!("klipt: export copy failed: {e}");
+    match &result {
+        Ok(()) => job.done(Some(format!("Saved as {}", dest_name))),
+        Err(e) => {
+            crate::elog!("klipt: export copy failed: {e}");
+            job.failed(e.user_message());
+        }
     }
     result
 }
@@ -1607,16 +1725,30 @@ pub async fn combine_clips(app: AppHandle, ids: Vec<String>, title: String) -> R
     let tools = tools.ok_or(AppError::ToolsMissing)?;
     let cache_dir = cache_dir(&app)?;
     let worker_app = app.clone();
-    let view = tauri::async_runtime::spawn_blocking(move || {
+    let job = crate::jobs::Job::start(&app, crate::jobs::JobKind::Combine, &title, None);
+    job.step("Combining", 0.0, 1.0, true);
+    let reporter = job.reporter();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let state = worker_app.state::<AppState>();
         crate::combine::combine(&tools, &state.library, &clips, &title, &dir, &cache_dir, |p| {
+            reporter.progress(f64::from(p));
             emit(&worker_app, events::COMBINE_PROGRESS, p);
         })
     })
     .await
     .map_err(|e| AppError::Internal(format!("combine task failed: {e}")))
-    .and_then(|r| r)
-    .inspect_err(|e| crate::elog!("klipt: combining clips failed: {e}"))?;
+    .and_then(|r| r);
+    let view = match result {
+        Ok(view) => {
+            job.done(None);
+            view
+        }
+        Err(e) => {
+            crate::elog!("klipt: combining clips failed: {e}");
+            job.failed(e.user_message());
+            return Err(e);
+        }
+    };
     emit(&app, crate::import::events::CLIP_IMPORTED, &view);
     crate::activity::changed(&app);
     Ok(view)

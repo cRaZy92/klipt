@@ -214,7 +214,11 @@ export async function clipRoutes(app: FastifyInstance): Promise<void> {
     const p = idParam.safeParse(req.params);
     const found = p.success ? await getClip(db, p.data.id, req.user?.id) : null;
     if (!found) return reply.code(404).send({ error: 'not_found' });
-    return toClip(found, config.baseUrl);
+    const clip = toClip(found, config.baseUrl);
+    if (found.clip.userId !== req.user?.id) return clip;
+    const current = app.transcoder.status();
+    const progress = clip.processing === 'running' ? (current?.clipId === clip.id ? current.progress : 0) : null;
+    return { ...clip, processingProgress: progress };
   });
 
   // Starring: any clip you can open (the id is the secret, as for the share page).

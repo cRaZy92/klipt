@@ -6,6 +6,7 @@
   import { toast } from "./lib/toasts.svelte";
   import { isBusy, loadPendingUploads, resumeAfterLogin, stopUploadsForLogout, uploads, watchUploads } from "./lib/uploads.svelte";
   import { importing, watchImports } from "./lib/imports.svelte";
+  import { jobs, runningCount, watchJobs } from "./lib/jobs.svelte";
   import { forgetCache } from "./lib/cache";
   import { keepScroll } from "./lib/keepScroll";
   import Avatar from "./components/Avatar.svelte";
@@ -18,6 +19,7 @@
   import Editor from "./views/Editor.svelte";
   import Feed from "./views/Feed.svelte";
   import Albums from "./views/Albums.svelte";
+  import Jobs from "./views/Jobs.svelte";
   import Friends from "./views/Friends.svelte";
   import Library from "./views/Library.svelte";
   import Login from "./views/Login.svelte";
@@ -31,12 +33,13 @@
   import { applyLooks } from "./lib/looks";
 
   // The screens. Library is home.
-  type Screen = "library" | "feed" | "albums" | "friends" | "settings" | "achievements" | "appearance";
+  type Screen = "library" | "feed" | "albums" | "friends" | "jobs" | "settings" | "achievements" | "appearance";
   type View =
     | { name: "library" }
     | { name: "feed" }
     | { name: "albums" }
     | { name: "friends" }
+    | { name: "jobs" }
     | { name: "editor"; clip: ClipView }
     | { name: "settings" }
     | { name: "achievements" }
@@ -145,6 +148,7 @@
         if (!busy) api.releaseWindow().catch(() => {});
       }),
       watchImports(),
+      watchJobs(),
       watchUploads({
         // The login expired mid-upload: log in again, then the upload carries on.
         unauthorized: () => {
@@ -325,6 +329,7 @@
   }
 
   const inClips = $derived(view.name === "library" || view.name === "editor");
+  const runningJobs = $derived(runningCount(jobs.list));
 </script>
 
 <svelte:window
@@ -408,6 +413,19 @@
             {#if friendRequests > 0}<span class="new-count" aria-hidden="true">{friendRequests > 9 ? "9+" : friendRequests}</span>{/if}
           </span>
           Friends
+        </button>
+        <button
+          class="item"
+          class:active={view.name === "jobs"}
+          aria-current={view.name === "jobs" ? "page" : undefined}
+          onclick={() => go({ name: "jobs" })}
+          aria-label={runningJobs > 0 ? `Jobs, ${runningJobs} running` : undefined}
+        >
+          <span class="item-icon">
+            <Icon name="pulse" size={20} />
+            {#if runningJobs > 0}<span class="new-count" aria-hidden="true">{runningJobs > 9 ? "9+" : runningJobs}</span>{/if}
+          </span>
+          Jobs
         </button>
       </div>
 
@@ -538,6 +556,11 @@
               loginNotice = "Your session has expired. Log in again to see your friends.";
             }}
           />
+        </main>
+      {/if}
+      {#if visited.has("jobs")}
+        <main class="screen" class:here={view.name === "jobs"} use:keepScroll={view.name === "jobs"} inert={view.name !== "jobs"}>
+          <Jobs active={view.name === "jobs"} />
         </main>
       {/if}
       {#if view.name === "editor"}

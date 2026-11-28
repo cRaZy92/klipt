@@ -140,6 +140,9 @@ pub struct ServerClip {
     /// first; servers from before this answer without it, and their links are always ready.
     #[serde(default = "ready")]
     pub share_ready: bool,
+    /// The server is still compressing it: `queued` or `running` (null when done or never).
+    #[serde(default)]
+    pub processing: Option<String>,
 }
 
 fn ready() -> bool {

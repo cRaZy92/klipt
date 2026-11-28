@@ -37,6 +37,7 @@
     estimateRamMb,
     sameSettings,
     validateSettings,
+    errorStillShowing,
   } from "../lib/settings";
   import { toast } from "../lib/toasts.svelte";
   import Icon from "../components/Icon.svelte";
@@ -104,9 +105,7 @@
   /** The problems still showing: one disappears as soon as its field is edited. */
   const fieldErrors = $derived(
     Object.fromEntries(
-      Object.entries(saveErrors.errors).filter(
-        ([field]) => draft[field as keyof Settings] === saveErrors.draft[field as keyof Settings],
-      ),
+      Object.entries(saveErrors.errors).filter(([field]) => errorStillShowing(field, draft, saveErrors.draft)),
     ) as Record<string, string>,
   );
   function setErrors(errors: Record<string, string>) {

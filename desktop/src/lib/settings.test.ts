@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Settings } from "./api";
-import { bitrateKbps, estimateRamMb, parseAppList, sameSettings, validateSettings } from "./settings";
+import { bitrateKbps, errorStillShowing, estimateRamMb, parseAppList, sameSettings, validateSettings } from "./settings";
 
 const defaults: Settings = {
   recordingMode: "always",
@@ -120,6 +120,19 @@ describe("cleanup kinds", () => {
     expect(fields({ cleanupEnabled: true, ...none })).toEqual(["cleanupKinds"]);
     expect(fields({ cleanupEnabled: false, ...none })).toEqual([]);
     expect(fields({ cleanupEnabled: true })).toEqual([]);
+  });
+});
+
+describe("errorStillShowing", () => {
+  it("hides a field's error once that field is edited", () => {
+    expect(errorStillShowing("cleanupDays", defaults, defaults)).toBe(true);
+    expect(errorStillShowing("cleanupDays", { ...defaults, cleanupDays: 7 }, defaults)).toBe(false);
+  });
+  it("hides the cleanup kinds error once any of its boxes or the switch changes", () => {
+    const then = { ...defaults, cleanupEnabled: true, cleanupUploaded: false };
+    expect(errorStillShowing("cleanupKinds", then, then)).toBe(true);
+    expect(errorStillShowing("cleanupKinds", { ...then, cleanupLocal: true }, then)).toBe(false);
+    expect(errorStillShowing("cleanupKinds", { ...then, cleanupEnabled: false }, then)).toBe(false);
   });
 });
 

@@ -66,6 +66,17 @@ export function validateSettings(s: Settings): FieldError[] {
   return errors;
 }
 
+/** Errors about several settings at once, by the settings they're about. */
+const ERROR_SOURCES: Record<string, (keyof Settings)[]> = {
+  cleanupKinds: ["cleanupEnabled", "cleanupLocal", "cleanupUploaded", "cleanupFavorites"],
+};
+
+/** Whether the error on `field`, found in `then`, still shows in `draft`: it hides once its setting is edited. */
+export function errorStillShowing(field: string, draft: Settings, then: Settings): boolean {
+  const sources = ERROR_SOURCES[field] ?? [field as keyof Settings];
+  return sources.every((key) => draft[key] === then[key]);
+}
+
 /** "discord, Vesktop," → ["discord", "Vesktop"]. */
 export function parseAppList(text: string): string[] {
   return text

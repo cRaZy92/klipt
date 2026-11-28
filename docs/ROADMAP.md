@@ -81,6 +81,21 @@ CORS, a dead login cleared on a feed 401, "still starting" during the gsr encode
 listings with a deadline, no restart toast while paused, login saving under the settings lock, feed
 media kept on the server, and an unwritable clips folder refused in Settings.
 
+Open bug, put off by the owner on 2026-11-28 ("hope it's just a Linux bug"):
+
+- [ ] **Editor sound is unrecognizable on Bluetooth headphones (Linux).** Owner's BT headphones
+      (A2DP SBC-XQ); the wired HyperX is fine; Windows not checked. The sound is fine for about the
+      first second of playback, then turns bad; clicking elsewhere on the timeline makes it fine
+      again (for a moment). Recorded from Klipt's own Web Audio stream (`pw-record --target <its
+      serial>`): ~73% exact silence, short bursts every ~10 ms, so it is broken before PipeWire
+      mixes it; PipeWire shows no xruns. Ruled out: BT headset profile, sample rate (the context runs
+      at 44.1 kHz, resampled fine elsewhere), `PULSE_LATENCY_MSEC` (WebKit's pulsesink ignores it),
+      decoding (WebKit decodes the tracks like ffmpeg). A standalone WebKitGTK page with the same
+      tracks + a muted playing video plays clean, except after its context idled ~2 min, but
+      suspending the context while idle did not fix the real editor. Next suspect: something the
+      editor does about a second into playback, e.g. the video `playbackRate` nudges that follow
+      the audio clock (the muted video still opens its own audio stream).
+
 ## Planned features (chosen 2026-11-11)
 
 The owner picked these from two lists of suggestions. None has a spec yet.

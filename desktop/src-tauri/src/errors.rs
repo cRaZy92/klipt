@@ -51,6 +51,10 @@ pub enum AppError {
     AlreadyUploading,
     #[error("the clip's video file is missing")]
     FileMissing,
+    /// Bigger than the server takes. `size` is the clip's size (or an estimate) and `limit` the
+    /// server's, each when known.
+    #[error("too big to upload ({size:?} bytes, the server takes {limit:?})")]
+    TooBig { size: Option<u64>, limit: Option<u64> },
     #[error("the clip is busy uploading or exporting")]
     ClipBusy,
     #[error("the export would overwrite the original clip")]
@@ -79,6 +83,7 @@ impl From<ApiError> for AppError {
         match e {
             ApiError::Unauthorized => AppError::Unauthorized,
             ApiError::Network(d) => AppError::Network(d),
+            ApiError::Server { status: 413, .. } => AppError::TooBig { size: None, limit: None },
             ApiError::Server { status, code } => AppError::ServerError(format!("{status} {code}")),
             ApiError::InvalidVideo(d) => AppError::InvalidVideo(d),
         }
@@ -128,6 +133,7 @@ impl AppError {
             AppError::InvalidTitle => "invalid_title",
             AppError::AlreadyUploading => "already_uploading",
             AppError::FileMissing => "file_missing",
+            AppError::TooBig { .. } => "too_big",
             AppError::ClipBusy => "clip_busy",
             AppError::OverwriteOriginal => "overwrite_original",
             AppError::Internal(_) => "internal",
@@ -176,6 +182,17 @@ impl AppError {
             AppError::InvalidTitle => "Give the clip a title (up to 100 characters).".into(),
             AppError::AlreadyUploading => "This clip is already uploading.".into(),
             AppError::FileMissing => "This clip's video file is missing. It may have been moved or deleted.".into(),
+            AppError::TooBig { size, limit } => {
+                let what = match (size, limit) {
+                    (Some(size), Some(limit)) => {
+                        format!("this clip is about {} and the server takes up to {}", gigabytes(*size), gigabytes(*limit))
+                    }
+                    (None, Some(limit)) => format!("the server takes clips up to {}", gigabytes(*limit)),
+                    (Some(size), None) => format!("the server refused this {} clip", gigabytes(*size)),
+                    (None, None) => "the server refused a clip this big".into(),
+                };
+                format!("Too big to upload: {what}. Make it shorter and try again.")
+            }
             AppError::ClipBusy => {
                 "This clip is uploading or exporting right now. Try again when that's done.".into()
             }
@@ -196,6 +213,13 @@ impl AppError {
             }
         }
     }
+}
+
+/// A size for the user, in GB as file managers count them (1 GB = 1024³ bytes): "2 GB", "4.4 GB".
+fn gigabytes(bytes: u64) -> String {
+    let gb = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+    let shown = if gb >= 10.0 { format!("{gb:.0}") } else { format!("{gb:.1}") };
+    format!("{} GB", shown.strip_suffix(".0").unwrap_or(&shown))
 }
 
 impl Serialize for AppError {
@@ -238,6 +262,22 @@ mod tests {
     }
 
     #[test]
+    fn too_big_says_the_sizes_it_knows() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        let message = |size, limit| AppError::TooBig { size, limit }.user_message();
+        assert_eq!(
+            message(Some(4_757_298_198), Some(2 * GB)),
+            "Too big to upload: this clip is about 4.4 GB and the server takes up to 2 GB. Make it shorter and try again."
+        );
+        assert_eq!(message(None, Some(24 * GB)), "Too big to upload: the server takes clips up to 24 GB. Make it shorter and try again.");
+        assert_eq!(message(Some(GB / 2), None), "Too big to upload: the server refused this 0.5 GB clip. Make it shorter and try again.");
+        assert_eq!(
+            AppError::from(ApiError::Server { status: 413, code: "unknown".into() }).code(),
+            "too_big"
+        );
+    }
+
+    #[test]
     fn upload_failures_that_wait_for_next_launch() {
         for e in [
             AppError::Network("x".into()),
@@ -252,6 +292,7 @@ mod tests {
         }
         for e in [
             AppError::ServerError("413 too_big".into()),
+            AppError::TooBig { size: None, limit: None },
             AppError::InvalidVideo("x".into()),
             AppError::FileMissing,
             AppError::ToolFailed { tool: "ffmpeg", detail: "x".into() },

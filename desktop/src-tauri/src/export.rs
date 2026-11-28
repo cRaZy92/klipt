@@ -181,7 +181,7 @@ fn visible_zooms(edit: &Edit) -> Vec<crate::library::ZoomRange> {
 }
 
 /// Whether an export has to encode the picture (instead of copying it).
-fn reencodes(edit: &Edit) -> bool {
+pub(crate) fn reencodes(edit: &Edit) -> bool {
     edit.blur_video
         || !edit.removed.is_empty()
         || !visible_zooms(edit).is_empty()
@@ -382,6 +382,7 @@ pub fn export(
     edit: &Edit,
     tracks: Tracks,
     quality: Quality,
+    max_bytes: Option<u64>,
     mut progress: impl FnMut(f32),
 ) -> Result<PathBuf> {
     let info = probe(tools, input)?;
@@ -419,7 +420,12 @@ pub fn export(
         // code page on Windows, which can't spell a profile like C:\Users\Šromovský.
         Some(crate::subtitles::filter(Path::new("exports").join(format!("{clip_id}.ass")).as_path(), Path::new("fonts")))
     };
-    let result = export_args(input, &temp, edit, &tracks, size, subtitles.as_deref(), &encoder).and_then(|args| {
+    let result = export_args(input, &temp, edit, &tracks, size, subtitles.as_deref(), &encoder).and_then(|mut args| {
+        // An encoded export that outgrows `max_bytes` stops there (ffmpeg ends it cleanly), so a
+        // clip too big to upload doesn't take the whole encode to find out. The caller checks the size.
+        if let (Some(max), false) = (max_bytes, encoder.is_empty()) {
+            args.splice(args.len() - 1..args.len() - 1, ["-fs".to_string(), max.to_string()]);
+        }
         run(tools, &args, cache_dir, expected_us, &mut progress).and_then(|_| match fs::metadata(&temp) {
             Ok(meta) if meta.len() > 0 => Ok(fs::rename(&temp, &out)?),
             _ => Err(AppError::ToolFailed { tool: "ffmpeg", detail: "export produced no output".into() }),
@@ -548,7 +554,7 @@ mod tests {
     fn exporting_a_blurred_clip_makes_a_playable_h264_file() {
         let cache = tempfile::tempdir().unwrap();
         let e = Edit { blur_video: true, ..edit(Some(500), Some(2500)) };
-        let out = export(&tools(), fixture(), cache.path(), "blur", &e, MIC, Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), fixture(), cache.path(), "blur", &e, MIC, Quality::Standard, None, |_| {}).unwrap();
         let info = crate::ffmpeg::inspect(&tools(), &out).unwrap();
         assert_eq!(info.video_codec.as_deref(), Some("h264"));
         assert!(info.height <= 720 && info.height > 0, "{info:?}");
@@ -570,7 +576,7 @@ mod tests {
             .unwrap();
         assert!(status.success());
         let e = Edit { extra_volumes: BTreeMap::from([(1, 0.0)]), ..edit(None, None) };
-        let out = export(&tools(), &three, cache.path(), "imp", &e, Tracks::default(), Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), &three, cache.path(), "imp", &e, Tracks::default(), Quality::Standard, None, |_| {}).unwrap();
         assert_eq!(probe(&tools(), &out).unwrap().audio_tracks, 1);
     }
 
@@ -777,7 +783,7 @@ mod tests {
         let src = pattern_clip(dir.path(), "src.mp4", (640, 360), 4);
         // Top-right quarter, 2×, from 2.0 s to 3.5 s; the trim starts at 1 s.
         let e = Edit { zooms: vec![zoom(2000, 3500, 2.0, 1.0, 0.0)], ..edit(Some(1000), None) };
-        let out = export(&tools(), &src, dir.path(), "zoom", &e, Tracks::default(), Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), &src, dir.path(), "zoom", &e, Tracks::default(), Quality::Standard, None, |_| {}).unwrap();
         assert_eq!((probe(&tools(), &out).unwrap().width, probe(&tools(), &out).unwrap().height), (640, 360));
 
         let before = mean_diff(&frame(&out, 0.3, ""), &frame(&src, 1.3, ""));
@@ -832,7 +838,7 @@ mod tests {
         let src = pattern_clip(dir.path(), "src.mp4", (640, 360), 4);
         // Blurred from 2.0 s to 3.0 s of the file; the trim starts at 1 s.
         let e = Edit { blurs: vec![blur(2000, 3000)], ..edit(Some(1000), None) };
-        let out = export(&tools(), &src, dir.path(), "blur", &e, Tracks::default(), Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), &src, dir.path(), "blur", &e, Tracks::default(), Quality::Standard, None, |_| {}).unwrap();
         assert_eq!((probe(&tools(), &out).unwrap().width, probe(&tools(), &out).unwrap().height), (640, 360));
         let sharp = |at: f32| mean_diff(&frame(&out, at - 1.0, ""), &frame(&src, at, ""));
         let blurred = |at: f32| mean_diff(&frame(&out, at - 1.0, ""), &frame(&src, at, "gblur=sigma=8"));
@@ -877,7 +883,7 @@ mod tests {
             .unwrap();
         assert!(status.success());
         let e = Edit { subtitles: vec![sub(2000, 3000, "{\\b0}čo to bolo ľudia 💀 a\\Nb")], ..edit(Some(1000), None) };
-        let out = export(&tools(), &src, &cache, "subs", &e, Tracks::default(), Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), &src, &cache, "subs", &e, Tracks::default(), Quality::Standard, None, |_| {}).unwrap();
         let bright = |f: &[u8]| f[60 * 160..].iter().filter(|p| **p > 128).count();
         assert!(bright(&frame(&out, 1.5, "")) > 20, "the subtitle shows at 2.5 s of the file");
         assert_eq!(bright(&frame(&out, 0.3, "")), 0, "nothing before it");
@@ -891,7 +897,7 @@ mod tests {
         let src = pattern_clip(dir.path(), "src.mp4", (640, 360), 4);
         // Bottom-left quarter, 2×, 0.5–3.0 s; 1.0–2.0 s is removed.
         let e = Edit { removed: vec![cut(1000, 2000)], zooms: vec![zoom(500, 3000, 2.0, 0.0, 1.0)], ..edit(None, None) };
-        let out = export(&tools(), &src, dir.path(), "zoomcut", &e, Tracks::default(), Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), &src, dir.path(), "zoomcut", &e, Tracks::default(), Quality::Standard, None, |_| {}).unwrap();
         let corner = "crop=320:180:0:180";
         let before_cut = mean_diff(&frame(&out, 0.95, ""), &frame(&src, 0.95, corner));
         let after_cut = mean_diff(&frame(&out, 1.5, ""), &frame(&src, 2.5, corner));
@@ -906,9 +912,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = pattern_clip(dir.path(), "src.mp4", (1366, 768), 2);
         let e = Edit { zooms: vec![zoom(200, 1800, 3.3, 0.7, 0.9)], ..edit(None, None) };
-        let out = export(&tools(), &src, dir.path(), "odd", &e, Tracks::default(), Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), &src, dir.path(), "odd", &e, Tracks::default(), Quality::Standard, None, |_| {}).unwrap();
         let p = probe(&tools(), &out).unwrap();
         assert_eq!((p.width, p.height), (1366, 768));
+    }
+
+    #[test]
+    fn an_encoded_export_stops_once_it_outgrows_the_limit() {
+        let cache = tempfile::tempdir().unwrap();
+        let e = Edit { removed: vec![cut(1500, 3500)], ..edit(None, None) };
+        let full = export(&tools(), fixture(), cache.path(), "full", &e, MIC, Quality::Standard, None, |_| {}).unwrap();
+        let full_len = fs::metadata(&full).unwrap().len();
+        let max = full_len / 3;
+        let out = export(&tools(), fixture(), cache.path(), "capped", &e, MIC, Quality::Standard, Some(max), |_| {}).unwrap();
+        let len = fs::metadata(&out).unwrap().len();
+        // Past the limit (that's how the caller tells), and well short of the whole encode.
+        assert!(len > max && len < full_len, "{len} of {full_len}, limit {max}");
+    }
+
+    #[test]
+    fn a_copied_export_ignores_the_limit() {
+        let cache = tempfile::tempdir().unwrap();
+        let out = export(&tools(), fixture(), cache.path(), "copy", &edit(Some(500), None), MIC, Quality::Standard, Some(1), |_| {}).unwrap();
+        assert!(probe(&tools(), &out).unwrap().duration_ms > 1_000);
     }
 
     #[test]
@@ -916,7 +942,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let e = Edit { removed: vec![cut(1500, 3500)], ..edit(Some(500), Some(5500)) };
         let mut reports = vec![];
-        let out = export(&tools(), fixture(), cache.path(), "cuts", &e, MIC, Quality::Standard, |p| reports.push(p)).unwrap();
+        let out = export(&tools(), fixture(), cache.path(), "cuts", &e, MIC, Quality::Standard, None, |p| reports.push(p)).unwrap();
         let p = probe(&tools(), &out).unwrap();
         assert!((2_800..=3_200).contains(&p.duration_ms), "{}", p.duration_ms);
         assert_eq!(p.audio_tracks, 1);
@@ -929,7 +955,7 @@ mod tests {
     fn exports_a_trimmed_mixed_faststart_clip() {
         let cache = tempfile::tempdir().unwrap();
         let mut reports = vec![];
-        let out = export(&tools(), fixture(), cache.path(), "clip-1", &edit(Some(2000), Some(4000)), MIC, Quality::Standard, |p| {
+        let out = export(&tools(), fixture(), cache.path(), "clip-1", &edit(Some(2000), Some(4000)), MIC, Quality::Standard, None, |p| {
             reports.push(p)
         })
         .unwrap();
@@ -960,7 +986,7 @@ mod tests {
             .unwrap();
         assert!(status.success());
         // has_mic claims a mic that isn't there; no trim at all.
-        let out = export(&tools(), &one, cache.path(), "c", &edit(None, None), MIC, Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), &one, cache.path(), "c", &edit(None, None), MIC, Quality::Standard, None, |_| {}).unwrap();
         let p = probe(&tools(), &out).unwrap();
         assert_eq!(p.audio_tracks, 1);
         assert!((5_900..=6_200).contains(&p.duration_ms), "{}", p.duration_ms);
@@ -981,7 +1007,7 @@ mod tests {
         assert!(status.success());
         assert_eq!(probe(&tools(), &three).unwrap().audio_tracks, 3);
         let tracks = Tracks { mic: Some(1), voice: Some(2), extra: vec![] };
-        let out = export(&tools(), &three, cache.path(), "v", &edit(Some(1000), Some(3000)), tracks, Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), &three, cache.path(), "v", &edit(Some(1000), Some(3000)), tracks, Quality::Standard, None, |_| {}).unwrap();
         assert_eq!(probe(&tools(), &out).unwrap().audio_tracks, 1);
     }
 
@@ -1030,7 +1056,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         // Both tracks muted from 2 s to 3.5 s of the file; the export starts at 1 s.
         let e = Edit { audio: vec![part(0, 2000, 3500, 0.0), part(1, 2000, 3500, 0.0)], ..edit(Some(1000), Some(5000)) };
-        let out = export(&tools(), fixture(), cache.path(), "m", &e, MIC, Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), fixture(), cache.path(), "m", &e, MIC, Quality::Standard, None, |_| {}).unwrap();
         let loud = mean_volume(&out, 200, 600);
         let muted = mean_volume(&out, 1200, 1000);
         assert!(loud > -40.0, "before the part: {loud} dB");
@@ -1047,7 +1073,7 @@ mod tests {
             audio: vec![part(0, 3000, 5000, 0.25), part(1, 3000, 5000, 0.25)],
             ..edit(None, None)
         };
-        let out = export(&tools(), fixture(), cache.path(), "d", &e, Tracks::default(), Quality::Standard, |_| {}).unwrap();
+        let out = export(&tools(), fixture(), cache.path(), "d", &e, Tracks::default(), Quality::Standard, None, |_| {}).unwrap();
         // Export time = file time − 1 s after the cut.
         let normal = mean_volume(&out, 1100, 700);
         let down = mean_volume(&out, 2200, 1500);
@@ -1059,7 +1085,7 @@ mod tests {
     #[test]
     fn missing_input_is_an_error() {
         let cache = tempfile::tempdir().unwrap();
-        let r = export(&tools(), &cache.path().join("nope.mp4"), cache.path(), "x", &edit(None, None), MIC, Quality::Standard, |_| {});
+        let r = export(&tools(), &cache.path().join("nope.mp4"), cache.path(), "x", &edit(None, None), MIC, Quality::Standard, None, |_| {});
         assert!(matches!(r, Err(AppError::ToolFailed { .. })));
         assert!(!cache.path().join("exports").join("x.mp4").exists());
     }

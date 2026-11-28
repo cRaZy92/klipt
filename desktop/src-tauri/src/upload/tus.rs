@@ -67,6 +67,20 @@ pub async fn upload(
     upload_with(client, token, file, resume, progress, persist, &TusOptions::default()).await
 }
 
+/// The largest upload the server takes (its `Tus-Max-Size`), or None when it doesn't say or can't
+/// be asked (the upload then finds out from the server's 413).
+pub async fn max_size(client: &ApiClient) -> Option<u64> {
+    let resp = client.http.request(reqwest::Method::OPTIONS, client.url("/api/uploads")).header("Tus-Resumable", TUS_VERSION).send().await;
+    let resp = match resp {
+        Ok(resp) => resp,
+        Err(e) => {
+            crate::elog!("klipt: can't ask the server for its upload limit: {}", network(e));
+            return None;
+        }
+    };
+    resp.headers().get("tus-max-size")?.to_str().ok()?.parse().ok().filter(|&n: &u64| n > 0)
+}
+
 /// What went wrong in one step, as far as the retry loop cares.
 enum Fail {
     /// Network trouble or a 5xx: ask the server where we are and carry on, after a backoff.

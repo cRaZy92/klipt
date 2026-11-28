@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -1114,6 +1115,26 @@ async fn follow_compression(job: crate::jobs::Job, steps: UploadSteps, auth: Aut
     job.done(Some("Uploaded. The server is still compressing it.".into()))
 }
 
+/// About how big a stream-copied export of `kept_ms` of a `duration_ms` file of `source_bytes` is.
+fn copy_estimate(source_bytes: u64, kept_ms: u64, duration_ms: u64) -> u64 {
+    (source_bytes as f64 * kept_ms.min(duration_ms) as f64 / duration_ms.max(1) as f64) as u64
+}
+
+/// The error for an export of `size` bytes over the server's `limit`. `done` is how far the export
+/// got: one stopped at the limit (ffmpeg `-fs`) is reported at the size it was on course for.
+fn too_big(size: u64, limit: Option<u64>, done: f32) -> Option<AppError> {
+    let limit = limit.filter(|&limit| size > limit)?;
+    let size = if done > 0.0 && done < 0.99 { (size as f64 / f64::from(done)) as u64 } else { size };
+    Some(AppError::TooBig { size: Some(size), limit: Some(limit) })
+}
+
+/// Deletes an upload's export that won't go up (it can be gigabytes).
+fn remove_export(path: &Path) {
+    if let Err(e) = std::fs::remove_file(path) {
+        crate::elog!("klipt: can't delete the export {}: {e}", path.display());
+    }
+}
+
 /// The share link, and whether the upload replaced the video at an existing one.
 async fn run_upload(app: &AppHandle, job: &Job, steps: &UploadSteps, reporter: &crate::jobs::Reporter) -> Result<Uploaded> {
     let steps = *steps;
@@ -1131,21 +1152,41 @@ async fn run_upload(app: &AppHandle, job: &Job, steps: &UploadSteps, reporter: &
         set_upload_progress(app, id, None);
     }
     let exported_now = resume.is_none() && !screenshot;
+    // The server's limit, so a clip too big for it is turned down before (or while) it's prepared.
+    let limit = if exported_now { tus::max_size(&client).await } else { None };
     if exported_now {
+        let edit = editor::current_edit(clip);
+        // A stream copy comes out about as big as the part of the file it keeps.
+        if let (Some(limit), false) = (limit, export::reencodes(&edit)) {
+            let kept_ms = export::kept_ranges(&edit, clip.duration_ms).iter().map(|(s, e)| e.saturating_sub(*s)).sum();
+            let source = std::fs::metadata(&clip.path)?.len();
+            let estimate = copy_estimate(source, kept_ms, clip.duration_ms);
+            if estimate > limit + limit / 20 {
+                return Err(AppError::TooBig { size: Some(estimate), limit: Some(limit) });
+            }
+        }
         upload_step(app, id, reporter, steps, "exporting", true);
         let (tools, input, cache_dir) = (job.tools.clone(), clip.path.clone(), job.cache_dir.clone());
         let (clip_id, tracks, export_app) = (clip.id.clone(), export::Tracks::of(clip), app.clone());
-        let edit = editor::current_edit(clip);
         let quality = if job.high_quality { export::Quality::High } else { export::Quality::Standard };
         let export_reporter = reporter.clone();
+        // How far the export got (as f32 bits): an encode stopped at the limit says how big it'd be.
+        let done = Arc::new(AtomicU32::new(0));
+        let done_in = done.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            export::export(&tools, &input, &cache_dir, &clip_id, &edit, tracks, quality, |p| {
+            export::export(&tools, &input, &cache_dir, &clip_id, &edit, tracks, quality, limit, |p| {
+                done_in.store(p.to_bits(), Ordering::Relaxed);
                 export_reporter.progress(f64::from(p));
                 progress(&export_app, &clip_id, "exporting", (p * 1000.0) as u64, 1000);
             })
         })
         .await
         .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))??;
+        let size = std::fs::metadata(&exported)?.len();
+        if let Some(e) = too_big(size, limit, f32::from_bits(done.load(Ordering::Relaxed))) {
+            remove_export(&exported);
+            return Err(e);
+        }
     }
 
     let token = job.auth.token.as_str();
@@ -1162,7 +1203,18 @@ async fn run_upload(app: &AppHandle, job: &Job, steps: &UploadSteps, reporter: &
         },
         |url, offset| set_upload_progress(app, id, Some((url, offset))),
     )
-    .await?;
+    .await
+    .map_err(|e| match AppError::from(e) {
+        // The server's 413: say how big the clip is (and the limit, when it told us).
+        AppError::TooBig { .. } => {
+            let size = std::fs::metadata(&exported).ok().map(|m| m.len());
+            if !screenshot {
+                remove_export(&exported);
+            }
+            AppError::TooBig { size, limit }
+        }
+        e => e,
+    })?;
 
     upload_step(app, id, reporter, steps, "finalizing", exported_now);
     let request = FinalizeRequest {
@@ -1640,7 +1692,7 @@ pub async fn export_copy(
     job.step("Exporting", 0.0, 1.0, true);
     let reporter = job.reporter();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, export::Tracks::of(&clip), export::Quality::Standard, |p| {
+        let staged = export::export(&tools, &clip.path, &cache_dir, &editor::copy_export_id(&id), &edit, export::Tracks::of(&clip), export::Quality::Standard, None, |p| {
             reporter.progress(f64::from(p));
             emit(&worker_app, events::EXPORT_PROGRESS, ExportProgressEvent { id: &id, progress: p });
         })?;
@@ -1773,6 +1825,26 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_copied_export_is_estimated_from_the_kept_share_of_the_file() {
+        assert_eq!(copy_estimate(6_000, 30_000, 60_000), 3_000);
+        assert_eq!(copy_estimate(6_000, 90_000, 60_000), 6_000);
+        assert_eq!(copy_estimate(6_000, 0, 0), 0);
+    }
+
+    #[test]
+    fn an_export_over_the_limit_is_too_big() {
+        assert!(too_big(100, Some(100), 1.0).is_none());
+        assert!(too_big(100, None, 1.0).is_none());
+        let size = |e: Option<AppError>| match e {
+            Some(AppError::TooBig { size, limit }) => (size, limit),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(size(too_big(101, Some(100), 1.0)), (Some(101), Some(100)));
+        // Stopped a quarter of the way: on course for four times that.
+        assert_eq!(size(too_big(101, Some(100), 0.25)), (Some(404), Some(100)));
+    }
     use std::path::PathBuf;
 
     #[test]

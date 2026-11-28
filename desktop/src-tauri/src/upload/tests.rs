@@ -527,3 +527,31 @@ async fn every_request_says_it_knows_three_visibilities() {
     let got = client.get_json("tok", "/api/me", &[]).await.unwrap();
     assert_eq!(got["ok"], true);
 }
+
+#[tokio::test]
+async fn reads_the_servers_upload_limit() {
+    let server = MockServer::start().await;
+    Mock::given(method("OPTIONS"))
+        .and(path("/api/uploads"))
+        .respond_with(ResponseTemplate::new(204).insert_header("Tus-Max-Size", "2147483648"))
+        .mount(&server)
+        .await;
+    let client = ApiClient::new(&server.uri()).unwrap();
+    assert_eq!(tus::max_size(&client).await, Some(2_147_483_648));
+    // No header (or no server): unknown, and the upload learns from a 413 instead.
+    let bare = MockServer::start().await;
+    assert_eq!(tus::max_size(&ApiClient::new(&bare.uri()).unwrap()).await, None);
+    assert_eq!(tus::max_size(&ApiClient::new("http://127.0.0.1:1").unwrap()).await, None);
+}
+
+#[tokio::test]
+async fn a_413_on_create_is_too_big() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/api/uploads")).respond_with(ResponseTemplate::new(413).set_body_string("Maximum size exceeded\n")).mount(&server).await;
+    let client = ApiClient::new(&server.uri()).unwrap();
+    let (_dir, p) = file();
+    let err = tus::upload_with(&client, "tok", &p, None, |_, _| {}, |_, _| {}, &fast(8)).await.unwrap_err();
+    let err = AppError::from(err);
+    assert_eq!(err.code(), "too_big");
+    assert!(!err.keeps_upload_queued());
+}
